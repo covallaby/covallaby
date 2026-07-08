@@ -278,6 +278,7 @@ export function Repo() {
               </thead>
               <tbody>
                 {data.history.map((u, i) => (
+                  // biome-ignore lint/a11y/useKeyWithClickEvents: the commit Link in the row is the keyboard path; row onClick is a mouse convenience
                   <tr
                     key={u.id}
                     onClick={() => navigate(`/r/${repo}/u/${u.id}`)}
