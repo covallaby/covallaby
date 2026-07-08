@@ -107,7 +107,7 @@ export function Treemap({
   const H = 480;
   const PAD = 4;
   const LABEL = 20;
-  const [hover, setHover] = useState<TreeNode | null>(null);
+  const [hover, setHover] = useState<{ node: TreeNode; region: TreeNode } | null>(null);
 
   const current = useMemo(() => findNode(root, path), [root, path]);
   const regions = useMemo(() => squarify(current.children, { x: 0, y: 0, w: W, h: H }), [current]);
@@ -137,7 +137,7 @@ export function Treemap({
             <g
               key={region.node.path}
               onClick={() => isDir && onNavigate(region.node.path)}
-              onMouseEnter={() => setHover(region.node)}
+              onMouseEnter={() => setHover({ node: region.node, region: region.node })}
               onMouseLeave={() => setHover(null)}
               style={{ cursor: isDir ? "pointer" : "default" }}
             >
@@ -148,9 +148,12 @@ export function Treemap({
                 height={Math.max(0, region.h - 3)}
                 rx={6}
                 fill={FILL[severity(percent)]}
-                opacity={hover?.path === region.node.path ? 0.34 : 0.16}
-                stroke={FILL[severity(percent)]}
-                strokeOpacity={0.5}
+                opacity={hover?.region.path === region.node.path ? 0.3 : 0.16}
+                stroke={
+                  hover?.region.path === region.node.path ? "var(--ink)" : FILL[severity(percent)]
+                }
+                strokeOpacity={hover?.region.path === region.node.path ? 0.35 : 0.5}
+                strokeWidth={hover?.region.path === region.node.path ? 1.5 : 1}
               />
               {region.w > 70 && region.h > 26 && (
                 <text
@@ -176,9 +179,9 @@ export function Treemap({
                     key={cell.node.path}
                     onMouseEnter={(e) => {
                       e.stopPropagation();
-                      setHover(cell.node);
+                      setHover({ node: cell.node, region: region.node });
                     }}
-                    onMouseLeave={() => setHover(region.node)}
+                    onMouseLeave={() => setHover({ node: region.node, region: region.node })}
                   >
                     <rect
                       x={cell.x + 1}
@@ -187,7 +190,7 @@ export function Treemap({
                       height={Math.max(0, cell.h - 2)}
                       rx={4}
                       fill={FILL[severity(cellPct)]}
-                      opacity={hover?.path === cell.node.path ? 0.55 : 0.32}
+                      opacity={hover?.node.path === cell.node.path ? 0.55 : 0.32}
                     />
                     {cell.w > 66 && cell.h > 20 && (
                       <text
@@ -212,18 +215,25 @@ export function Treemap({
       </svg>
       {hover && (
         <div className="pointer-events-none absolute top-3 left-1/2 z-10 -translate-x-1/2 rounded-lg border border-(--border) bg-(--surface) px-3 py-1.5 text-xs shadow-lg">
-          <span className="font-mono">
-            {hover.path}
-            {hover.file === null ? "/" : ""}
-          </span>
-          <span className="mx-2 text-(--muted)">·</span>
-          <span className="font-semibold tabular-nums">
-            {formatPercent(hover.total === 0 ? null : (hover.covered / hover.total) * 100)}
-          </span>
-          <span className="ml-1.5 text-(--muted)">
-            ({(hover.total - hover.covered).toLocaleString()} missed
-            {hover.file === null ? ` · ${hover.fileCount.toLocaleString()} files` : ""})
-          </span>
+          <div>
+            <span className="font-mono">
+              {hover.node.path}
+              {hover.node.file === null ? "/" : ""}
+            </span>
+            <span className="mx-2 text-(--muted)">·</span>
+            <span className="font-semibold tabular-nums">
+              {formatPercent(
+                hover.node.total === 0 ? null : (hover.node.covered / hover.node.total) * 100,
+              )}
+            </span>
+            <span className="ml-1.5 text-(--muted)">
+              ({(hover.node.total - hover.node.covered).toLocaleString()} missed
+              {hover.node.file === null ? ` · ${hover.node.fileCount.toLocaleString()} files` : ""})
+            </span>
+          </div>
+          <div className="mt-0.5 text-(--muted)">
+            Click to zoom into <span className="font-mono">{hover.region.name}/</span>
+          </div>
         </div>
       )}
       <p className="mt-2 px-2 text-[11.5px] text-(--muted)">
