@@ -18,7 +18,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "verify": "pnpm lint && pnpm typecheck && pnpm build && pnpm test",
     "dev:web": "vite",
-    "test:coverage": "vitest run --coverage --coverage.reporter=lcov --coverage.reporter=text-summary --coverage.include='src/**' --coverage.exclude='src/vendor/**'"
+    "test:coverage": "vitest run --coverage --coverage.reporter=lcov --coverage.reporter=text-summary --coverage.include='src/**' --coverage.exclude='src/vendor/**'",
+    "build:demo": "vite build -c vite.demo.config.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.8",

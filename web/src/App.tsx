@@ -1,7 +1,7 @@
 import { Github, LayoutDashboard, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, Route, Routes, useLocation } from "react-router-dom";
-import { type RepoOverview, api, formatPercent, severity } from "./api.js";
+import { IS_DEMO, type RepoOverview, api, formatPercent, severity } from "./api.js";
 import { inkFor } from "./components/ui.js";
 import { CompareBranches, PullRequest } from "./pages/Compare.js";
 import { Home } from "./pages/Home.js";
@@ -166,6 +166,14 @@ export function App() {
 
   return (
     <div className="min-h-screen">
+      {IS_DEMO && (
+        <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 bg-(--accent) px-4 py-1.5 text-center text-[12.5px] font-medium text-white">
+          <span>🦘 Live demo — a snapshot of real data, fully clickable.</span>
+          <a href="https://github.com/covallaby/covallaby" className="underline">
+            Self-host it in one command →
+          </a>
+        </div>
+      )}
       <Sidebar repos={repos} />
       <div className="md:pl-60">
         <header className="sticky top-0 z-10 border-b border-(--hairline) bg-(--page)/80 backdrop-blur-md">

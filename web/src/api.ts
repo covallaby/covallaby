@@ -77,7 +77,7 @@ async function get<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-export const api = {
+const liveApi = {
   repos: () => get<{ repos: RepoOverview[] }>("/api/v1/repos"),
   activity: () => get<{ uploads: UploadRow[] }>("/api/v1/activity"),
   history: (repo: string, branch?: string) =>
@@ -94,6 +94,27 @@ export const api = {
     return get<CompareResult>(`/api/v1/repos/${repo}/compare?${params}`);
   },
 };
+
+/** In the static demo build the same UI runs on captured fixtures. */
+export const IS_DEMO = import.meta.env.VITE_DEMO === "1";
+
+// Lazy so the ~900KB fixture bundle never loads in the real server build.
+let demo: typeof liveApi | null = null;
+export const api: typeof liveApi = IS_DEMO
+  ? {
+      repos: (...a) => load().then((d) => d.repos(...a)),
+      activity: (...a) => load().then((d) => d.activity(...a)),
+      history: (...a) => load().then((d) => d.history(...a)),
+      upload: (...a) => load().then((d) => d.upload(...a)),
+      prs: (...a) => load().then((d) => d.prs(...a)),
+      compare: (...a) => load().then((d) => d.compare(...a)),
+    }
+  : liveApi;
+
+async function load(): Promise<typeof liveApi> {
+  if (!demo) demo = (await import("./demo/mockApi.js")).demoApi as unknown as typeof liveApi;
+  return demo;
+}
 
 export function formatPercent(value: number | null): string {
   if (value === null) return "—";
