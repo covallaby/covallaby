@@ -69,7 +69,10 @@ export class PostgresStore implements Store {
   private constructor(private readonly sql: postgres.Sql) {}
 
   static async connect(url: string): Promise<PostgresStore> {
-    const sql = postgres(url, { max: 5, onnotice: () => {} });
+    // prepare:false keeps us compatible with transaction-pooling front-ends
+    // (PgBouncer, Fly Managed Postgres, Supabase's pooler); the workload is
+    // low-QPS, so losing server-side prepared statements costs nothing.
+    const sql = postgres(url, { max: 5, prepare: false, onnotice: () => {} });
     await sql.unsafe(SCHEMA);
     return new PostgresStore(sql);
   }
