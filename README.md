@@ -1,12 +1,12 @@
-# 🦘 Covallaby Server
+# 🦘 Covallaby
 
-[![CI](https://github.com/covallaby/server/actions/workflows/ci.yml/badge.svg)](https://github.com/covallaby/server/actions/workflows/ci.yml)
+[![CI](https://github.com/covallaby/covallaby/actions/workflows/ci.yml/badge.svg)](https://github.com/covallaby/covallaby/actions/workflows/ci.yml)
 
 **Self-hosted coverage history, dashboards, and live badges — one tiny
-process.** The optional companion to the
-[Covallaby GitHub Action](https://github.com/covallaby/covallaby), which never
-requires it. Run this when you want coverage *over time* and a badge URL for
-your README.
+process.** The home of Covallaby's platform. Pull requests are covered by the
+[Covallaby GitHub Action](https://github.com/covallaby/action) — which never
+requires this server; run this when you want coverage *over time*, PR
+comparisons, and a badge URL for your README.
 
 - **One process, one file.** Node 22 + built-in SQLite. No Postgres required,
   no Redis, no object storage, no client build. ~50 MB RAM.
@@ -18,8 +18,8 @@ your README.
 ## Quick start
 
 ```bash
-git clone https://github.com/covallaby/server covallaby-server
-cd covallaby-server
+git clone https://github.com/covallaby/covallaby covallaby
+cd covallaby
 docker compose up -d
 docker compose logs | grep "upload token"   # note the generated token
 ```

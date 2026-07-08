@@ -1,7 +1,7 @@
 # Vendored code
 
 Everything in this directory is copied from
-[covallaby/covallaby](https://github.com/covallaby/covallaby)
+[covallaby/action](https://github.com/covallaby/action)
 (`packages/core` and `packages/parsers`) with import specifiers rewritten,
 because those packages are not on npm yet.
 

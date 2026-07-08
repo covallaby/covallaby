@@ -132,10 +132,10 @@ function Sidebar({ repos }: { repos: RepoOverview[] | null }) {
       </nav>
       <div className="border-t border-(--hairline) px-3 py-3">
         <a
-          href="https://github.com/covallaby/covallaby"
+          href="https://github.com/covallaby/action"
           className="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] text-(--ink-2) transition-colors hover:bg-(--surface-2) hover:text-(--ink)"
         >
-          <Github size={15} strokeWidth={1.75} /> covallaby/covallaby
+          <Github size={15} strokeWidth={1.75} /> covallaby/action
         </a>
       </div>
     </aside>
