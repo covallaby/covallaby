@@ -99,6 +99,13 @@ export class PostgresStore implements Store {
     return rows.map(toRow);
   }
 
+  async recentUploads(limit: number): Promise<UploadRow[]> {
+    const rows = await this.sql<RawRow[]>`
+      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at
+      FROM uploads ORDER BY id DESC LIMIT ${limit}`;
+    return rows.map(toRow);
+  }
+
   async branches(repo: string): Promise<string[]> {
     const rows = await this.sql<Array<{ branch: string }>>`
       SELECT branch, MAX(id) AS last FROM uploads WHERE repo = ${repo}

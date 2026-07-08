@@ -126,6 +126,13 @@ export class SqliteStore implements Store {
     return rows.map(toRow);
   }
 
+  async recentUploads(limit: number): Promise<UploadRow[]> {
+    const rows = this.db
+      .prepare(`SELECT ${ROW_COLUMNS} FROM uploads ORDER BY id DESC LIMIT ?`)
+      .all(limit) as unknown as RawRow[];
+    return rows.map(toRow);
+  }
+
   async branches(repo: string): Promise<string[]> {
     const rows = this.db
       .prepare(

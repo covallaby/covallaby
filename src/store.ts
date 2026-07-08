@@ -42,6 +42,8 @@ export interface Store {
   recordUpload(input: RecordUploadInput): Promise<UploadRow>;
   listRepos(trendPoints: number): Promise<RepoOverview[]>;
   history(repo: string, branch: string, limit: number): Promise<UploadRow[]>;
+  /** Latest uploads across every repo, newest first. */
+  recentUploads(limit: number): Promise<UploadRow[]>;
   branches(repo: string): Promise<string[]>;
   getUpload(id: number): Promise<{ row: UploadRow; report: CoverageReport } | null>;
   latest(repo: string, branch?: string): Promise<UploadRow | null>;

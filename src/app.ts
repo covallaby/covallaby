@@ -132,6 +132,8 @@ export function createApp({ store, uploadToken, viewToken, webDist }: AppOptions
 
   app.get("/api/v1/repos", async (c) => c.json({ repos: await store.listRepos(12) }));
 
+  app.get("/api/v1/activity", async (c) => c.json({ uploads: await store.recentUploads(15) }));
+
   app.get("/api/v1/repos/:owner/:name/history", async (c) => {
     const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
     const branches = await store.branches(repo);

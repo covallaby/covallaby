@@ -1,18 +1,44 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { type RepoOverview, formatPercent, severity } from "../api.js";
+import { type RepoOverview, type UploadRow, api, formatPercent, severity } from "../api.js";
 import { Sparkline } from "../components/charts.js";
 import { Skeleton } from "../components/skeleton.js";
-import { Card, DeltaChip, Meter, inkFor } from "../components/ui.js";
+import { Card, DeltaChip, Meter, Pct, Td, Th, inkFor } from "../components/ui.js";
+
+function ago(iso: string): string {
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+
+function Tile({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
+  return (
+    <Card className="p-4">
+      <div className="text-xs text-(--muted)">{label}</div>
+      <div className="mt-1 text-2xl font-semibold tracking-tight">{value}</div>
+      {sub && <div className="mt-0.5 text-[11.5px] text-(--muted)">{sub}</div>}
+    </Card>
+  );
+}
 
 export function Home({ repos }: { repos: RepoOverview[] | null }) {
+  const [activity, setActivity] = useState<UploadRow[] | null>(null);
+  useEffect(() => {
+    api
+      .activity()
+      .then((d) => setActivity(d.uploads))
+      .catch(() => setActivity([]));
+  }, []);
+
   if (!repos) {
     return (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {[0, 1, 2].map((i) => (
-          <Card key={i} className="p-5">
-            <Skeleton className="h-3.5 w-2/3" />
-            <Skeleton className="mt-5 h-9 w-24" />
-            <Skeleton className="mt-4 h-1.5 w-full rounded-full" />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <Card key={i} className="p-4">
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="mt-3 h-7 w-16" />
           </Card>
         ))}
       </div>
@@ -39,10 +65,45 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
     );
   }
 
+  const totalCovered = repos.reduce((n, r) => n + r.latest.linesCovered, 0);
+  const totalLines = repos.reduce((n, r) => n + r.latest.linesTotal, 0);
+  const overall = totalLines === 0 ? null : (totalCovered / totalLines) * 100;
+  const worst = [...repos].sort(
+    (a, b) => (a.latest.percent ?? 101) - (b.latest.percent ?? 101),
+  )[0]!;
+  const lastUpload = activity?.[0];
+
   return (
     <div>
-      <h1 className="mb-5 text-lg font-semibold tracking-tight">Repositories</h1>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Tile
+          label="Overall coverage"
+          value={<span className={inkFor[severity(overall)]}>{formatPercent(overall)}</span>}
+          sub={`${totalCovered.toLocaleString()} of ${totalLines.toLocaleString()} lines`}
+        />
+        <Tile label="Repositories" value={repos.length} />
+        <Tile
+          label="Needs attention"
+          value={
+            <Link to={`/r/${worst.repo}`} className="hover:underline">
+              <span className={`font-mono text-[17px] ${inkFor[severity(worst.latest.percent)]}`}>
+                {worst.repo.split("/")[1]}
+              </span>
+            </Link>
+          }
+          sub={`lowest at ${formatPercent(worst.latest.percent)}`}
+        />
+        <Tile
+          label="Last upload"
+          value={lastUpload ? ago(lastUpload.createdAt) : "—"}
+          sub={lastUpload ? lastUpload.repo : undefined}
+        />
+      </div>
+
+      <h2 className="mt-8 mb-3 text-xs font-semibold tracking-wide text-(--muted) uppercase">
+        Repositories
+      </h2>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {repos.map((r) => {
           const prev = r.trend.length > 1 ? r.trend[r.trend.length - 2] : null;
           return (
@@ -59,7 +120,7 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
                     >
                       {formatPercent(r.latest.percent)}
                     </div>
-                    <div className="mt-2 flex items-center gap-2 text-xs text-(--muted)">
+                    <div className="mt-2 flex items-center gap-2 text-xs whitespace-nowrap text-(--muted)">
                       {r.latest.linesCovered.toLocaleString()} of{" "}
                       {r.latest.linesTotal.toLocaleString()} lines{" "}
                       <DeltaChip current={r.latest.percent} previous={prev} />
@@ -73,6 +134,57 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
           );
         })}
       </div>
+
+      <h2 className="mt-8 mb-3 text-xs font-semibold tracking-wide text-(--muted) uppercase">
+        Recent activity
+      </h2>
+      <Card className="px-1 pt-3 pb-1">
+        <table className="w-full text-[13.5px]">
+          <thead>
+            <tr>
+              <Th>Repository</Th>
+              <Th>Commit</Th>
+              <Th>Branch</Th>
+              <Th>When</Th>
+              <Th right>Coverage</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {(activity ?? []).map((u) => (
+              <tr key={u.id} className="transition-colors hover:bg-(--surface-2)">
+                <Td>
+                  <Link to={`/r/${u.repo}`} className="font-mono text-[12.5px] hover:underline">
+                    {u.repo}
+                  </Link>
+                </Td>
+                <Td>
+                  <Link
+                    to={`/r/${u.repo}/u/${u.id}`}
+                    className="font-mono text-[12.5px] hover:underline"
+                  >
+                    {u.commit.slice(0, 10)}
+                  </Link>
+                  {u.pr ? <span className="ml-1.5 text-(--muted)">#{u.pr}</span> : null}
+                </Td>
+                <Td className="text-(--muted)">{u.branch}</Td>
+                <Td className="text-(--muted)">{ago(u.createdAt)}</Td>
+                <Td className="text-right">
+                  <Pct percent={u.percent} />
+                </Td>
+              </tr>
+            ))}
+            {activity?.length === 0 && (
+              <tr>
+                <Td className="text-(--muted)">No uploads yet.</Td>
+                <Td />
+                <Td />
+                <Td />
+                <Td />
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </Card>
     </div>
   );
 }

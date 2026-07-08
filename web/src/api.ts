@@ -51,6 +51,7 @@ async function get<T>(url: string): Promise<T> {
 
 export const api = {
   repos: () => get<{ repos: RepoOverview[] }>("/api/v1/repos"),
+  activity: () => get<{ uploads: UploadRow[] }>("/api/v1/activity"),
   history: (repo: string, branch?: string) =>
     get<RepoHistory>(
       `/api/v1/repos/${repo}/history${branch ? `?branch=${encodeURIComponent(branch)}` : ""}`,

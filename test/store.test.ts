@@ -80,6 +80,23 @@ describe.each(stores)("store contract (%s)", (_name, store) => {
     expect(await store.latest("acme/nope")).toBeNull();
   });
 
+  it("serves recent uploads across repos, newest first", async () => {
+    await store.recordUpload({
+      repo: "acme/other",
+      branch: "main",
+      commit: "zzz",
+      pr: 7,
+      report,
+      linesCovered: 2,
+      linesTotal: 2,
+      files: 1,
+    });
+    const recent = await store.recentUploads(3);
+    expect(recent[0]!.repo).toBe("acme/other");
+    expect(recent[0]!.pr).toBe(7);
+    expect(recent.length).toBe(3);
+  });
+
   it("stores meta key-values with upsert", async () => {
     await store.setMeta("k", "v1");
     await store.setMeta("k", "v2");
