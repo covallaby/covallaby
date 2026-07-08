@@ -102,6 +102,17 @@ describe("view token gate", () => {
     expect((await gated.request("/?token=peek")).status).toBe(200);
     expect((await gated.request("/healthz")).status).toBe(200);
   });
+
+  it("does NOT leak upload detail past the gate (startsWith bug)", async () => {
+    // /api/v1/uploads/:id must not be treated as the /api/v1/upload write route.
+    expect((await gated.request("/api/v1/uploads/1")).status).toBe(401);
+    expect((await gated.request("/api/v1/repos")).status).toBe(401);
+  });
+
+  it("survives a malformed view cookie without a 500", async () => {
+    const res = await gated.request("/", { headers: { cookie: "covallaby_view=%" } });
+    expect(res.status).toBe(401);
+  });
 });
 
 describe("ensureUploadToken", () => {

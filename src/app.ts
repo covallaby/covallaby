@@ -110,7 +110,8 @@ export function createApp({
   app.use("*", async (c, next) => {
     if (!viewToken) return next();
     const path = c.req.path;
-    if (path === "/healthz" || path.startsWith("/api/v1/upload")) return next();
+    // Exact match — startsWith would leak /api/v1/uploads/:id past the gate.
+    if (path === "/healthz" || path === "/api/v1/upload") return next();
     const provided =
       bearer(c.req.header("authorization")) ??
       c.req.query("token") ??
@@ -385,5 +386,10 @@ export function createApp({
 
 function getTokenCookie(cookie: string | undefined): string | null {
   const match = /(?:^|;\s*)covallaby_view=([^;]+)/.exec(cookie ?? "");
-  return match ? decodeURIComponent(match[1]!) : null;
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]!);
+  } catch {
+    return null; // malformed percent-encoding shouldn't 500 the request
+  }
 }

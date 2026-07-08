@@ -97,7 +97,7 @@ export const api = {
 
 export function formatPercent(value: number | null): string {
   if (value === null) return "—";
-  return `${(Math.floor(value * 10) / 10).toFixed(1)}%`;
+  return `${(Math.floor(value * 10 + 1e-9) / 10).toFixed(1)}%`;
 }
 
 export type Severity = "good" | "ok" | "warn" | "bad" | "muted";

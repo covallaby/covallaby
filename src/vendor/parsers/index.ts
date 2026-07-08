@@ -1,4 +1,4 @@
-// Vendored from covallaby/covallaby (parsers/src/index.ts) until packages publish to npm. Do not edit here.
+// Vendored from covallaby/action (parsers/src/index.ts) until packages publish to npm. Do not edit here.
 import type { CoverageReport } from "../model.js";
 import { parseCobertura } from "./cobertura.js";
 import { parseJacoco } from "./jacoco.js";
@@ -22,7 +22,8 @@ export interface ParseOptions {
 }
 
 /** Best-effort format detection from content (never from the file name). */
-export function detectFormat(content: string): CoverageFormat | null {
+export function detectFormat(raw: string): CoverageFormat | null {
+  const content = raw.replace(/^\uFEFF/, ""); // a BOM would defeat the anchored LCOV match
   if (/^(TN:|SF:)/m.test(content)) return "lcov";
   if (
     /<report[\s>]/.test(content) &&
@@ -53,6 +54,12 @@ export function parseCoverage(content: string, options: ParseOptions = {}): Cove
       `Couldn't detect the coverage format. Covallaby understands ${COVERAGE_FORMATS.join(", ")} — pass --format to force one.`,
     );
   }
+  const parser = parsers[format];
+  if (!parser) {
+    throw new ParseError(
+      `Unknown format "${format}". Covallaby understands ${COVERAGE_FORMATS.join(", ")}.`,
+    );
+  }
   const stripPrefix = options.stripPrefix;
-  return parsers[format](content, stripPrefix === undefined ? {} : { stripPrefix });
+  return parser(content, stripPrefix === undefined ? {} : { stripPrefix });
 }

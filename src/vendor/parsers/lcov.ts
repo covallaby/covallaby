@@ -1,4 +1,4 @@
-// Vendored from covallaby/covallaby (parsers/src/lcov.ts) until packages publish to npm. Do not edit here.
+// Vendored from covallaby/action (parsers/src/lcov.ts) until packages publish to npm. Do not edit here.
 import type {
   BranchCoverage,
   CoverageReport,
@@ -48,9 +48,41 @@ export function parseLcov(content: string, options: { stripPrefix?: string } = {
     const branches: BranchCoverage[] = [...current.branches.entries()]
       .map(([line, b]) => ({ line, ...b }))
       .sort((a, b) => a.line - b.line);
-    files.push({ path: current.path, lines, functions, branches });
+    // Concatenated tracefiles (cat shard1.info shard2.info) repeat SF: sections;
+    // sum hits into the existing entry instead of emitting a duplicate file.
+    const existing = byPath.get(current.path);
+    if (existing) {
+      const lineHits = new Map(existing.lines.map((l) => [l.line, l]));
+      for (const l of lines) {
+        const prev = lineHits.get(l.line);
+        if (prev) prev.hits += l.hits;
+        else existing.lines.push(l);
+      }
+      existing.lines.sort((a, b) => a.line - b.line);
+      const fnKey = (f: FunctionCoverage) => `${f.name}@${f.line}`;
+      const fns = new Map(existing.functions.map((f) => [fnKey(f), f]));
+      for (const f of functions) {
+        const prev = fns.get(fnKey(f));
+        if (prev) prev.hits += f.hits;
+        else existing.functions.push(f);
+      }
+      const brs = new Map(existing.branches.map((b) => [b.line, b]));
+      for (const b of branches) {
+        const prev = brs.get(b.line);
+        if (prev) {
+          prev.taken = Math.max(prev.taken, b.taken);
+          prev.total = Math.max(prev.total, b.total);
+        } else existing.branches.push(b);
+      }
+      existing.branches.sort((a, b) => a.line - b.line);
+    } else {
+      const file: FileCoverage = { path: current.path, lines, functions, branches };
+      files.push(file);
+      byPath.set(current.path, file);
+    }
     current = null;
   };
+  const byPath = new Map<string, FileCoverage>();
 
   const rows = content.split(/\r?\n/);
   for (let i = 0; i < rows.length; i++) {

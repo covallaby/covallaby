@@ -20,7 +20,10 @@ console.log(
   `   storage: ${process.env.DATABASE_URL ? "postgres" : `sqlite (${process.env.COVALLABY_DB ?? "data/covallaby.db"})`}`,
 );
 if (!process.env.COVALLABY_TOKEN) {
-  console.log(`   upload token (set COVALLABY_TOKEN to override): ${uploadToken}`);
+  // A generated admin secret: to stderr with a nudge, not into stdout logs.
+  console.error(
+    `   ⚠ generated upload token (set COVALLABY_TOKEN to a secret of your own): ${uploadToken}`,
+  );
 }
 console.log(
   `   upload:  curl -X POST "http://localhost:${port}/api/v1/upload?repo=you/app&branch=main&commit=abc123" -H "Authorization: Bearer <token>" --data-binary @coverage/lcov.info`,
