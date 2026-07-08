@@ -83,7 +83,7 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
         />
         <Tile label="Repositories" value={repos.length} />
         <Tile
-          label="Needs attention"
+          label="Needs some love"
           value={
             <Link to={`/r/${worst.repo}`} className="hover:underline">
               <span className={`font-mono text-[17px] ${inkFor[severity(worst.latest.percent)]}`}>
@@ -175,7 +175,9 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
             ))}
             {activity?.length === 0 && (
               <tr>
-                <Td className="text-(--muted)">No uploads yet.</Td>
+                <Td className="text-(--muted)">
+                  Quiet in here — uploads from CI will hop in soon. 🦘
+                </Td>
                 <Td />
                 <Td />
                 <Td />

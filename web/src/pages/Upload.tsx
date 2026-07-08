@@ -45,7 +45,16 @@ export function Upload() {
           >
             {formatPercent(row.percent)}
           </div>
-          <Meter percent={row.percent} className="mt-4 w-72" />
+          <p className="mt-3 text-sm text-(--ink-2)">
+            {row.percent === null
+              ? "Nothing coverable in this upload."
+              : row.percent >= 90
+                ? "You’re covered."
+                : row.percent >= 75
+                  ? "Almost covered."
+                  : `${(totals.lines.total - totals.lines.covered).toLocaleString()} lines need some love.`}
+          </p>
+          <Meter percent={row.percent} className="mt-3 w-72" />
         </div>
         <div className="flex flex-wrap gap-8 pb-1.5">
           {totals.functions.total > 0 && (

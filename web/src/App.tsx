@@ -10,16 +10,24 @@ import { Upload } from "./pages/Upload.js";
 export function Mark({ size = 24 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 512 512" aria-hidden="true">
-      <rect width="512" height="512" rx="128" fill="var(--accent)" />
-      <ellipse cx="256" cy="284" rx="130" ry="140" fill="#F4C48A" />
-      <path d="M170 190 C130 96 150 60 205 132 Z" fill="#D9A066" />
-      <path d="M342 190 C382 96 362 60 307 132 Z" fill="#D9A066" />
-      <ellipse cx="216" cy="268" rx="14" ry="18" fill="#111827" />
-      <ellipse cx="296" cy="268" rx="14" ry="18" fill="#111827" />
+      <rect width="512" height="512" rx="120" fill="var(--accent)" />
+      <path d="M158 210 C104 84 136 48 208 148 Z" fill="#D9A066" />
+      <path d="M354 210 C408 84 376 48 304 148 Z" fill="#D9A066" />
+      <path d="M170 190 C136 110 152 88 200 156 Z" fill="#B87E46" />
+      <path d="M342 190 C376 110 360 88 312 156 Z" fill="#B87E46" />
+      <ellipse cx="256" cy="296" rx="138" ry="146" fill="#F4C48A" />
+      <ellipse cx="256" cy="344" rx="86" ry="72" fill="#FBDEB4" />
+      <ellipse cx="212" cy="272" rx="16" ry="20" fill="#2b2620" />
+      <circle cx="218" cy="264" r="5" fill="#fff" />
+      <ellipse cx="300" cy="272" rx="16" ry="20" fill="#2b2620" />
+      <circle cx="306" cy="264" r="5" fill="#fff" />
+      <ellipse cx="176" cy="318" rx="18" ry="10" fill="#F0A87C" opacity=".55" />
+      <ellipse cx="336" cy="318" rx="18" ry="10" fill="#F0A87C" opacity=".55" />
+      <ellipse cx="256" cy="316" rx="13" ry="9" fill="#8a5a34" />
       <path
-        d="M236 330 C248 342 264 342 276 330"
-        stroke="#111827"
-        strokeWidth="12"
+        d="M232 348 C244 360 268 360 280 348"
+        stroke="#8a5a34"
+        strokeWidth="11"
         strokeLinecap="round"
         fill="none"
       />
@@ -64,7 +72,7 @@ function SidebarLink({
       to={to}
       className={`flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] transition-colors ${
         active
-          ? "bg-(--surface-2) font-medium text-(--ink)"
+          ? "bg-(--accent-wash) font-medium text-(--ink)"
           : "text-(--ink-2) hover:bg-(--surface-2) hover:text-(--ink)"
       }`}
     >
@@ -81,7 +89,7 @@ function Sidebar({ repos }: { repos: RepoOverview[] | null }) {
         <Mark />
         <div>
           <div className="text-[14px] leading-tight font-semibold tracking-tight">Covallaby</div>
-          <div className="text-[11px] text-(--muted)">coverage that reads well</div>
+          <div className="text-[11px] text-(--muted)">you’re covered 🌿</div>
         </div>
       </div>
       <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-3">

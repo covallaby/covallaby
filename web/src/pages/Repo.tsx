@@ -16,6 +16,14 @@ import {
   inkFor,
 } from "../components/ui.js";
 
+function mood(percent: number | null, delta: number | null): string {
+  if (percent === null) return "Nothing coverable yet.";
+  if (delta !== null && delta >= 1) return "Nice jump! Coverage improved. 🎉";
+  if (percent >= 90) return "You’re covered.";
+  if (percent >= 75) return "Almost covered.";
+  return "This one needs some love.";
+}
+
 function when(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
     month: "short",
@@ -73,7 +81,7 @@ function NeedsAttention({ latestId }: { latestId: number }) {
   return (
     <Card className="p-4">
       <div className="mb-3 text-xs font-semibold tracking-wide text-(--muted) uppercase">
-        Needs attention
+        Needs some love
       </div>
       <div className="space-y-3">
         {worst.map((d) => (
@@ -142,7 +150,15 @@ export function Repo() {
               {formatPercent(latest.percent)}
               <DeltaChip current={latest.percent} previous={previous?.percent} />
             </div>
-            <Meter percent={latest.percent} className="mt-4 w-72" />
+            <p className="mt-3 text-sm text-(--ink-2)">
+              {mood(
+                latest.percent,
+                previous?.percent != null && latest.percent !== null
+                  ? latest.percent - previous.percent
+                  : null,
+              )}
+            </p>
+            <Meter percent={latest.percent} className="mt-3 w-72" />
           </div>
           <div className="flex flex-wrap gap-8 pb-1.5">
             <Stat
