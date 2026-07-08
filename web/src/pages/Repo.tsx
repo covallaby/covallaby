@@ -2,7 +2,6 @@ import { Check, Copy } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  type DirTrends,
   type PROverview,
   type RepoHistory,
   type UploadDetail,
@@ -23,7 +22,6 @@ import {
   Th,
   inkFor,
 } from "../components/ui.js";
-import { DirectoryStream } from "../components/viz.js";
 
 function when(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
@@ -149,13 +147,11 @@ export function Repo() {
   const branch = params.get("branch") ?? undefined;
   const [data, setData] = useState<RepoHistory | null>(null);
   const [prs, setPrs] = useState<PROverview[]>([]);
-  const [dirs, setDirs] = useState<DirTrends | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<(typeof RANGES)[number]["key"]>("30");
   const navigate = useNavigate();
 
   useEffect(() => {
-    setDirs(null);
     api
       .history(repo, branch)
       .then(setData)
@@ -164,10 +160,6 @@ export function Repo() {
       .prs(repo)
       .then((d) => setPrs(d.prs))
       .catch(() => setPrs([]));
-    api
-      .dirTrends(repo, branch)
-      .then(setDirs)
-      .catch(() => setDirs(null));
   }, [repo, branch]);
 
   if (error) return <p className="text-sm text-(--bad)">{error}</p>;
@@ -376,22 +368,6 @@ export function Repo() {
           <BadgeCard repo={repo} />
         </div>
       </div>
-
-      {data.history.length >= 2 && (
-        <Card>
-          <CardHeader
-            title="By directory"
-            description="Covered lines per top-level folder over time"
-          />
-          <div className="px-4 pb-4">
-            {dirs ? (
-              <DirectoryStream data={dirs} />
-            ) : (
-              <p className="px-1 py-6 text-sm text-(--muted)">Loading the folder breakdown…</p>
-            )}
-          </div>
-        </Card>
-      )}
     </div>
   );
 }
