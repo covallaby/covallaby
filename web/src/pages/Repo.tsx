@@ -1,15 +1,21 @@
 import { Check, Copy } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  type PROverview,
+  Link,
+  Outlet,
+  useNavigate,
+  useOutletContext,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
+import {
   type RepoHistory,
   type UploadDetail,
+  type UploadRow,
   api,
   formatPercent,
   severity,
 } from "../api.js";
-import { HistoryChart } from "../components/charts.js";
 import { PageSkeleton } from "../components/skeleton.js";
 import {
   Card,
@@ -23,7 +29,16 @@ import {
   inkFor,
 } from "../components/ui.js";
 
-function when(iso: string): string {
+/** Shared context for every repo sub-view (Summary, Uploads, Pull requests, Policy). */
+export interface RepoContext {
+  repo: string;
+  data: RepoHistory;
+}
+export function useRepo(): RepoContext {
+  return useOutletContext<RepoContext>();
+}
+
+export function when(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
@@ -32,21 +47,13 @@ function when(iso: string): string {
   });
 }
 
-function mood(percent: number | null, delta: number | null): string {
-  if (percent === null) return "Nothing coverable yet.";
-  if (delta !== null && delta >= 1) return "Nice jump! Coverage improved 🎉";
-  if (percent >= 90) return "You're covered.";
-  if (percent >= 75) return "Almost covered.";
-  return "This one needs some love.";
-}
-
-const RANGES = [
+export const RANGES = [
   { key: "10", label: "Last 10", n: 10 },
   { key: "30", label: "Last 30", n: 30 },
   { key: "all", label: "All", n: Number.POSITIVE_INFINITY },
 ] as const;
 
-function StatCard({
+export function StatCard({
   label,
   value,
   footer,
@@ -66,7 +73,7 @@ function StatCard({
   );
 }
 
-function BadgeCard({ repo }: { repo: string }) {
+export function BadgeCard({ repo }: { repo: string }) {
   const [copied, setCopied] = useState(false);
   const url = `${window.location.origin}/badge/${repo}.svg`;
   const markdown = `![coverage](${url})`;
@@ -100,7 +107,7 @@ function BadgeCard({ repo }: { repo: string }) {
   );
 }
 
-function NeedsLove({ latestId }: { latestId: number }) {
+export function NeedsLove({ latestId }: { latestId: number }) {
   const [detail, setDetail] = useState<UploadDetail | null>(null);
   useEffect(() => {
     api
@@ -140,234 +147,134 @@ function NeedsLove({ latestId }: { latestId: number }) {
   );
 }
 
-export function Repo() {
+/** The uploads table, shared by the Summary preview (limit=5) and the Uploads view. */
+export function UploadsTable({
+  repo,
+  history,
+  limit,
+}: {
+  repo: string;
+  history: UploadRow[];
+  limit?: number;
+}) {
+  const navigate = useNavigate();
+  const rows = limit ? history.slice(0, limit) : history;
+  return (
+    <table className="w-full text-[13.5px]">
+      <thead>
+        <tr>
+          <Th>Commit</Th>
+          <Th>When</Th>
+          <Th right>Lines</Th>
+          <Th right>Δ</Th>
+          <Th right>Coverage</Th>
+          <Th />
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((u, i) => (
+          // biome-ignore lint/a11y/useKeyWithClickEvents: the commit Link is the keyboard path; row onClick is a mouse convenience
+          <tr
+            key={u.id}
+            onClick={() => navigate(`/r/${repo}/u/${u.id}`)}
+            className="cursor-pointer transition-colors hover:bg-(--surface-2)"
+          >
+            <Td>
+              <Link className="font-mono text-[12.5px] hover:underline" to={`/r/${repo}/u/${u.id}`}>
+                {u.commit.slice(0, 10)}
+              </Link>
+              {u.pr ? <span className="ml-1.5 text-(--muted)">#{u.pr}</span> : null}
+            </Td>
+            <Td className="text-(--muted)">{when(u.createdAt)}</Td>
+            <Td className="text-right font-mono text-[12.5px] text-(--muted) tabular-nums">
+              {u.linesCovered.toLocaleString()}/{u.linesTotal.toLocaleString()}
+            </Td>
+            <Td className="text-right">
+              <DeltaChip current={u.percent} previous={history[i + 1]?.percent} />
+            </Td>
+            <Td className="text-right">
+              <Pct percent={u.percent} />
+            </Td>
+            <Td className="w-24">
+              <Meter percent={u.percent} />
+            </Td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function RepoHeader({ repo, data }: { repo: string; data: RepoHistory }) {
+  const [, setParams] = useSearchParams();
+  const latest = data.history[0];
+  const setBranch = (b: string) =>
+    setParams((prev) => {
+      const p = new URLSearchParams(prev);
+      p.set("branch", b);
+      return p;
+    });
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 className="font-mono text-lg font-semibold tracking-tight">{repo}</h1>
+        <p className="text-[13px] text-(--muted)">
+          {latest
+            ? `${formatPercent(latest.percent)} on ${data.branch} · ${latest.files} files`
+            : "No uploads yet."}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Link
+          to={`/r/${repo}/compare?head=${encodeURIComponent(data.branch)}&base=main`}
+          className="rounded-lg border border-(--border) bg-(--surface) px-3 py-1 text-[12.5px] text-(--ink-2) transition-colors hover:border-(--muted)"
+        >
+          Compare…
+        </Link>
+        {data.branches.slice(0, 6).map((b) => (
+          <button
+            key={b}
+            type="button"
+            onClick={() => setBranch(b)}
+            className={`rounded-lg border px-3 py-1 text-[12.5px] transition-colors ${
+              b === data.branch
+                ? "border-(--accent) bg-(--accent-wash) font-medium text-(--ink)"
+                : "border-(--border) bg-(--surface) text-(--ink-2) hover:border-(--muted)"
+            }`}
+          >
+            {b}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The repo section: shared header + the active sub-view via <Outlet>. */
+export function RepoLayout() {
   const { owner, name } = useParams();
   const repo = `${owner}/${name}`;
   const [params] = useSearchParams();
   const branch = params.get("branch") ?? undefined;
   const [data, setData] = useState<RepoHistory | null>(null);
-  const [prs, setPrs] = useState<PROverview[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [range, setRange] = useState<(typeof RANGES)[number]["key"]>("30");
-  const navigate = useNavigate();
 
   useEffect(() => {
+    setData(null);
+    setError(null);
     api
       .history(repo, branch)
       .then(setData)
       .catch((e) => setError(String(e)));
-    api
-      .prs(repo)
-      .then((d) => setPrs(d.prs))
-      .catch(() => setPrs([]));
   }, [repo, branch]);
 
   if (error) return <p className="text-sm text-(--bad)">{error}</p>;
   if (!data) return <PageSkeleton />;
 
-  const latest = data.history[0];
-  const previous = data.history[1];
-  const rangeN = RANGES.find((r) => r.key === range)!.n;
-  const chartPoints = [...data.history]
-    .slice(0, rangeN === Number.POSITIVE_INFINITY ? undefined : rangeN)
-    .reverse()
-    .map((u) => ({
-      percent: u.percent,
-      label: u.commit.slice(0, 7),
-      sublabel: when(u.createdAt),
-      t: new Date(u.createdAt).getTime(),
-    }));
-  const delta =
-    latest?.percent != null && previous?.percent != null ? latest.percent - previous.percent : null;
-
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-mono text-lg font-semibold tracking-tight">{repo}</h1>
-          <p className="text-[13px] text-(--muted)">
-            {latest ? mood(latest.percent, delta) : "No uploads yet."}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Link
-            to={`/r/${repo}/compare?head=${encodeURIComponent(data.branch)}&base=main`}
-            className="rounded-lg border border-(--border) bg-(--surface) px-3 py-1 text-[12.5px] text-(--ink-2) transition-colors hover:border-(--muted)"
-          >
-            Compare…
-          </Link>
-          {data.branches.slice(0, 6).map((b) => (
-            <Link
-              key={b}
-              to={`/r/${repo}?branch=${encodeURIComponent(b)}`}
-              className={`rounded-lg border px-3 py-1 text-[12.5px] transition-colors ${
-                b === data.branch
-                  ? "border-(--accent) bg-(--accent-wash) font-medium text-(--ink)"
-                  : "border-(--border) bg-(--surface) text-(--ink-2) hover:border-(--muted)"
-              }`}
-            >
-              {b}
-            </Link>
-          ))}
-        </div>
-      </div>
-
-      {latest && (
-        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-          <StatCard
-            label="Coverage"
-            value={
-              <span className={inkFor[severity(latest.percent)]}>
-                {formatPercent(latest.percent)}
-              </span>
-            }
-            footer={
-              <span className="flex items-center gap-2">
-                <DeltaChip current={latest.percent} previous={previous?.percent} />
-                vs previous upload
-              </span>
-            }
-          />
-          <StatCard
-            label="Lines covered"
-            value={
-              <>
-                {latest.linesCovered.toLocaleString()}
-                <span className="text-[15px] font-normal text-(--muted)">
-                  /{latest.linesTotal.toLocaleString()}
-                </span>
-              </>
-            }
-            footer={`${(latest.linesTotal - latest.linesCovered).toLocaleString()} lines still uncovered`}
-          />
-          <StatCard label="Files" value={latest.files} footer="tracked in the latest upload" />
-          <StatCard
-            label="Latest commit"
-            value={<span className="font-mono text-[19px]">{latest.commit.slice(0, 7)}</span>}
-            footer={`uploaded ${when(latest.createdAt)}`}
-          />
-        </div>
-      )}
-
-      <Card>
-        <CardHeader
-          title="Coverage history"
-          description={`Uploads on ${data.branch}`}
-          action={
-            <div className="flex rounded-lg border border-(--hairline) p-0.5">
-              {RANGES.map((r) => (
-                <button
-                  key={r.key}
-                  type="button"
-                  onClick={() => setRange(r.key)}
-                  className={`rounded-md px-2.5 py-1 text-[12px] transition-colors ${
-                    range === r.key
-                      ? "bg-(--surface-2) font-medium text-(--ink)"
-                      : "text-(--muted) hover:text-(--ink)"
-                  }`}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-          }
-        />
-        <div className="px-2 pb-2">
-          <HistoryChart points={chartPoints} />
-        </div>
-      </Card>
-
-      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_290px]">
-        <Card>
-          <CardHeader
-            title="Uploads"
-            description={`${data.history.length} on ${data.branch}, newest first`}
-          />
-          <div className="px-1 pb-1">
-            <table className="w-full text-[13.5px]">
-              <thead>
-                <tr>
-                  <Th>Commit</Th>
-                  <Th>When</Th>
-                  <Th right>Lines</Th>
-                  <Th right>Δ</Th>
-                  <Th right>Coverage</Th>
-                  <Th />
-                </tr>
-              </thead>
-              <tbody>
-                {data.history.map((u, i) => (
-                  // biome-ignore lint/a11y/useKeyWithClickEvents: the commit Link in the row is the keyboard path; row onClick is a mouse convenience
-                  <tr
-                    key={u.id}
-                    onClick={() => navigate(`/r/${repo}/u/${u.id}`)}
-                    className="cursor-pointer transition-colors hover:bg-(--surface-2)"
-                  >
-                    <Td>
-                      <Link
-                        className="font-mono text-[12.5px] hover:underline"
-                        to={`/r/${repo}/u/${u.id}`}
-                      >
-                        {u.commit.slice(0, 10)}
-                      </Link>
-                      {u.pr ? <span className="ml-1.5 text-(--muted)">#{u.pr}</span> : null}
-                    </Td>
-                    <Td className="text-(--muted)">{when(u.createdAt)}</Td>
-                    <Td className="text-right font-mono text-[12.5px] text-(--muted) tabular-nums">
-                      {u.linesCovered.toLocaleString()}/{u.linesTotal.toLocaleString()}
-                    </Td>
-                    <Td className="text-right">
-                      <DeltaChip current={u.percent} previous={data.history[i + 1]?.percent} />
-                    </Td>
-                    <Td className="text-right">
-                      <Pct percent={u.percent} />
-                    </Td>
-                    <Td className="w-24">
-                      <Meter percent={u.percent} />
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-
-        <div className="space-y-4">
-          {prs.length > 0 && (
-            <Card>
-              <CardHeader title="Pull requests" description="Latest upload per PR" />
-              <div className="space-y-0.5 px-3 pb-3">
-                {prs.slice(0, 8).map((p) => (
-                  <Link
-                    key={p.pr}
-                    to={`/r/${repo}/pr/${p.pr}`}
-                    className="grid grid-cols-[minmax(0,1fr)_56px] items-center gap-3 rounded-lg px-2 py-[7px] transition-colors hover:bg-(--surface-2)"
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate text-[12.5px] font-medium">
-                        #{p.pr}{" "}
-                        <span className="font-mono font-normal text-(--muted)">
-                          {p.latest.commit.slice(0, 7)}
-                        </span>
-                      </span>
-                      <span className="block text-[11px] text-(--muted)">
-                        {p.uploads} {p.uploads === 1 ? "upload" : "uploads"} · {p.latest.branch}
-                      </span>
-                    </span>
-                    <span
-                      className={`text-right text-[12px] font-semibold tabular-nums ${inkFor[severity(p.latest.percent)]}`}
-                    >
-                      {formatPercent(p.latest.percent)}
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            </Card>
-          )}
-          {latest && <NeedsLove latestId={latest.id} />}
-          <BadgeCard repo={repo} />
-        </div>
-      </div>
+      <RepoHeader repo={repo} data={data} />
+      <Outlet context={{ repo, data } satisfies RepoContext} />
     </div>
   );
 }

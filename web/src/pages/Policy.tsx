@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { type PolicyStatus, type RepoPolicy, api, formatPercent } from "../api.js";
 import { PageSkeleton } from "../components/skeleton.js";
 import { Card, CardFooter, CardHeader } from "../components/ui.js";
+import { useRepo } from "./Repo.js";
 
 function StatusPill({ passed }: { passed: boolean | null }) {
   const [label, cls] =
@@ -34,8 +35,7 @@ function Rule({ label, value, note }: { label: string; value: string; note: stri
 }
 
 export function Policy() {
-  const { owner, name } = useParams();
-  const repo = `${owner}/${name}`;
+  const { repo } = useRepo();
   const [policy, setPolicy] = useState<RepoPolicy | null | undefined>(undefined);
   const [status, setStatus] = useState<PolicyStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,10 +84,10 @@ export function Policy() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="font-mono text-lg font-semibold tracking-tight">{repo}</h1>
-          <p className="text-[13px] text-(--muted)">Merge policy — the “can I merge?” gate</p>
+          <h2 className="text-[15px] font-semibold tracking-tight">Merge policy</h2>
+          <p className="text-xs text-(--muted)">The “can I merge?” gate</p>
         </div>
         <StatusPill passed={passed} />
       </div>
@@ -162,12 +162,6 @@ export function Policy() {
           </div>
         </Card>
       )}
-
-      <p className="text-sm">
-        <Link to={`/r/${repo}`} className="text-(--ink-2) hover:underline">
-          ← Back to {repo}
-        </Link>
-      </p>
     </div>
   );
 }
