@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo } from "react";
+import type { ReactNode } from "react";
 import {
   type DirTrends,
   type PortfolioTrends,
@@ -41,7 +41,8 @@ export function RiskQuadrant({ repos }: { repos: RepoOverview[] }) {
       full: r.repo,
       kloc: r.latest.linesTotal / 1000,
       pct: r.latest.percent ?? 0,
-      uncovered: r.latest.linesTotal - r.latest.linesCovered,
+      // Uncovered in thousands of lines — bubble area scales with that.
+      uncovered: (r.latest.linesTotal - r.latest.linesCovered) / 1000,
     }));
   if (pts.length < 2) return <Empty>Two repositories with coverage will draw this. 🦘</Empty>;
 
@@ -54,7 +55,7 @@ export function RiskQuadrant({ repos }: { repos: RepoOverview[] }) {
   const maxK = Math.max(10, ...pts.map((p) => p.kloc)) * 1.12;
   const x = (k: number) => L + (k / maxK) * (W - L - R);
   const y = (p: number) => H - B - (p / 100) * (H - T - B);
-  const rOf = (u: number) => Math.max(6, Math.sqrt(u) * 2.6);
+  const rOf = (u: number) => Math.max(7, Math.min(46, Math.sqrt(u) * 7));
   const sizeMid = maxK * 0.42;
 
   return (
@@ -131,118 +132,50 @@ export function RiskQuadrant({ repos }: { repos: RepoOverview[] }) {
       >
         coverage %
       </text>
-      {pts.map((d) => {
-        const cx = x(d.kloc);
-        const cy = y(d.pct);
-        const r = rOf(d.uncovered);
-        const left = cx > (L + W - R) / 2;
-        return (
-          <g key={d.full}>
-            <circle cx={cx} cy={cy} r={r} fill={sv(d.pct)} opacity={0.22} />
-            <circle cx={cx} cy={cy} r={r} fill="none" stroke={sv(d.pct)} strokeWidth={1.6} />
-            <circle cx={cx} cy={cy} r={2.2} fill={sv(d.pct)} />
-            <text
-              x={left ? cx - r - 6 : cx + r + 6}
-              y={cy - 1}
-              textAnchor={left ? "end" : "start"}
-              fontSize={11}
-              fontWeight={600}
-              fill="var(--ink)"
-            >
-              {d.name}
-            </text>
-            <text
-              x={left ? cx - r - 6 : cx + r + 6}
-              y={cy + 11}
-              textAnchor={left ? "end" : "start"}
-              fontSize={10}
-              fontFamily="var(--font-mono)"
-              fill="var(--muted)"
-            >
-              {formatPercent(d.pct)}
-            </text>
-          </g>
-        );
-      })}
+      {(() => {
+        // Lay out labels, nudging any that would collide with an earlier one.
+        const anchors: Array<{ lx: number; ly: number }> = [];
+        return pts.map((d) => {
+          const cx = x(d.kloc);
+          const cy = y(d.pct);
+          const r = rOf(d.uncovered);
+          const left = cx > (L + W - R) / 2;
+          const lx = left ? cx - r - 6 : cx + r + 6;
+          let dy = 0;
+          while (anchors.some((a) => Math.abs(a.lx - lx) < 70 && Math.abs(a.ly - (cy + dy)) < 15)) {
+            dy += 17;
+          }
+          anchors.push({ lx, ly: cy + dy });
+          return (
+            <g key={d.full}>
+              <circle cx={cx} cy={cy} r={r} fill={sv(d.pct)} opacity={0.22} />
+              <circle cx={cx} cy={cy} r={r} fill="none" stroke={sv(d.pct)} strokeWidth={1.6} />
+              <circle cx={cx} cy={cy} r={2.2} fill={sv(d.pct)} />
+              <text
+                x={lx}
+                y={cy - 1 + dy}
+                textAnchor={left ? "end" : "start"}
+                fontSize={11}
+                fontWeight={600}
+                fill="var(--ink)"
+              >
+                {d.name}
+              </text>
+              <text
+                x={lx}
+                y={cy + 11 + dy}
+                textAnchor={left ? "end" : "start"}
+                fontSize={10}
+                fontFamily="var(--font-mono)"
+                fill="var(--muted)"
+              >
+                {formatPercent(d.pct)}
+              </text>
+            </g>
+          );
+        });
+      })()}
     </svg>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* 2 · Momentum board — who's moving, not who's highest                 */
-/* ------------------------------------------------------------------ */
-
-function MiniSpark({ pts, up }: { pts: number[]; up: boolean }) {
-  const w = 92;
-  const h = 26;
-  const pad = 2;
-  if (pts.length < 2)
-    return <svg width={w} height={h} style={{ flex: "none" }} aria-hidden="true" />;
-  const mn = Math.min(...pts);
-  const mx = Math.max(...pts);
-  const rng = mx - mn || 1;
-  const x = (i: number) => pad + (i / (pts.length - 1)) * (w - pad * 2);
-  const yv = (v: number) => h - pad - ((v - mn) / rng) * (h - pad * 2);
-  const col = up ? "var(--chip-up)" : "var(--chip-down)";
-  const line = pts
-    .map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${yv(v).toFixed(1)}`)
-    .join(" ");
-  const area = `M${x(0).toFixed(1)} ${h} ${pts.map((v, i) => `L${x(i).toFixed(1)} ${yv(v).toFixed(1)}`).join(" ")} L${x(pts.length - 1).toFixed(1)} ${h} Z`;
-  return (
-    <svg width={w} height={h} style={{ flex: "none" }} role="img" aria-label="recent trend">
-      <path d={area} fill={col} opacity={0.1} />
-      <path
-        d={line}
-        fill="none"
-        stroke={col}
-        strokeWidth={1.8}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx={x(pts.length - 1)} cy={yv(pts[pts.length - 1]!)} r={2.4} fill={col} />
-    </svg>
-  );
-}
-
-export function MomentumBoard({ repos }: { repos: RepoOverview[] }) {
-  const rows = repos
-    .map((r) => {
-      const pts = r.trend.filter((p): p is number => p !== null);
-      const delta = pts.length >= 2 ? pts[pts.length - 1]! - pts[0]! : 0;
-      return { repo: r.repo, pts, delta };
-    })
-    .filter((r) => r.pts.length >= 2)
-    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
-  if (rows.length === 0)
-    return <Empty>No trends yet — a few uploads and momentum shows up here.</Empty>;
-
-  return (
-    <div>
-      {rows.map((r) => {
-        const up = r.delta >= 0;
-        const [owner, name] = r.repo.split("/");
-        return (
-          <div
-            key={r.repo}
-            className="grid grid-cols-[1fr_auto_auto] items-center gap-3.5 border-t border-(--hairline) px-1 py-2 first:border-t-0"
-          >
-            <div className="truncate text-[13.5px] font-medium">
-              <span className="text-(--muted)">{owner}/</span>
-              {name}
-            </div>
-            <MiniSpark pts={r.pts} up={up} />
-            <span
-              className={`min-w-[58px] rounded-full px-2.5 py-0.5 text-right font-mono text-[12.5px] font-semibold tabular-nums ${
-                up ? "bg-(--chip-up-bg) text-(--chip-up)" : "bg-(--chip-down-bg) text-(--chip-down)"
-              }`}
-            >
-              {up ? "+" : ""}
-              {r.delta.toFixed(1)}
-            </span>
-          </div>
-        );
-      })}
-    </div>
   );
 }
 
@@ -462,64 +395,6 @@ export function CommitWaterfall({
         );
       })}
     </svg>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* 5 · Coverage calendar — a contribution grid of daily coverage        */
-/* ------------------------------------------------------------------ */
-
-export function CoverageCalendar({ history }: { history: UploadRow[] }) {
-  const cells = useMemo(() => {
-    const DAY = 86_400_000;
-    const byDay = new Map<number, number>(); // day → last percent that day
-    let min = Number.POSITIVE_INFINITY;
-    let max = Number.NEGATIVE_INFINITY;
-    for (const u of history) {
-      if (u.percent === null) continue;
-      const t = new Date(u.createdAt).getTime();
-      if (!Number.isFinite(t)) continue;
-      const day = Math.floor(t / DAY);
-      byDay.set(day, u.percent); // history is newest-first; last write = oldest of the day, close enough
-      min = Math.min(min, day);
-      max = Math.max(max, day);
-    }
-    if (!Number.isFinite(min)) return null;
-    // Align the grid to whole weeks ending at max.
-    const end = max;
-    const start = Math.min(min, end - 7 * 25); // ~26 weeks window at most
-    const startAligned = start - (((start % 7) + 7) % 7 || 0); // snap to a week boundary
-    const out: Array<{ day: number; pct: number | null }> = [];
-    for (let d = startAligned; d <= end; d++) out.push({ day: d, pct: byDay.get(d) ?? null });
-    return out;
-  }, [history]);
-
-  if (!cells) return <Empty>Uploads over a few days fill this calendar in. 🦘</Empty>;
-
-  return (
-    <div className="overflow-x-auto">
-      <div className="grid grid-flow-col grid-rows-7 gap-[3px]">
-        {cells.map((c) => {
-          const op = c.pct === null ? 1 : 0.35 + Math.min(1, Math.abs(c.pct - 60) / 40) * 0.55;
-          return (
-            <div
-              key={c.day}
-              className="aspect-square w-full rounded-[3px]"
-              style={{ background: c.pct === null ? "var(--surface-2)" : sv(c.pct), opacity: op }}
-              title={c.pct === null ? undefined : `${formatPercent(c.pct)}`}
-            />
-          );
-        })}
-      </div>
-      <div className="mt-3 flex items-center gap-1.5 text-[11px] text-(--muted)">
-        Lower
-        <span className="h-3 w-3 rounded-[3px]" style={{ background: "var(--bad)" }} />
-        <span className="h-3 w-3 rounded-[3px]" style={{ background: "var(--warn)" }} />
-        <span className="h-3 w-3 rounded-[3px]" style={{ background: "var(--ok)" }} />
-        <span className="h-3 w-3 rounded-[3px]" style={{ background: "var(--good)" }} />
-        Higher
-      </div>
-    </div>
   );
 }
 

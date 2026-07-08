@@ -23,7 +23,7 @@ import {
   Th,
   inkFor,
 } from "../components/ui.js";
-import { CommitWaterfall, CoverageCalendar, DirectoryStream } from "../components/viz.js";
+import { CommitWaterfall, DirectoryStream } from "../components/viz.js";
 
 function when(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
@@ -300,30 +300,19 @@ export function Repo() {
             </div>
           </Card>
 
-          <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
-            <Card>
-              <CardHeader
-                title="Coverage calendar"
-                description="Daily coverage — cadence and drift at a glance"
-              />
-              <div className="px-5 pb-4">
-                <CoverageCalendar history={data.history} />
-              </div>
-            </Card>
-            <Card>
-              <CardHeader
-                title="By directory"
-                description="Covered lines per top-level folder over time"
-              />
-              <div className="px-4 pb-4">
-                {dirs ? (
-                  <DirectoryStream data={dirs} />
-                ) : (
-                  <p className="px-1 py-6 text-sm text-(--muted)">Loading the folder breakdown…</p>
-                )}
-              </div>
-            </Card>
-          </div>
+          <Card>
+            <CardHeader
+              title="By directory"
+              description="Covered lines per top-level folder over time"
+            />
+            <div className="px-4 pb-4">
+              {dirs ? (
+                <DirectoryStream data={dirs} />
+              ) : (
+                <p className="px-1 py-6 text-sm text-(--muted)">Loading the folder breakdown…</p>
+              )}
+            </div>
+          </Card>
         </>
       )}
 
