@@ -15,7 +15,7 @@ interface Rect {
   h: number;
 }
 
-function squarify(nodes: TreeNode[], rect: Rect): Array<{ node: TreeNode } & Rect> {
+export function squarify(nodes: TreeNode[], rect: Rect): Array<{ node: TreeNode } & Rect> {
   const total = nodes.reduce((n, f) => n + f.total, 0);
   if (total === 0 || rect.w <= 0 || rect.h <= 0) return [];
   const scale = (rect.w * rect.h) / total;
@@ -42,7 +42,9 @@ function squarify(nodes: TreeNode[], rect: Rect): Array<{ node: TreeNode } & Rec
   const layoutRow = (r: typeof items) => {
     const sum = r.reduce((n, it) => n + it.area, 0);
     const horizontal = w >= h;
-    const side = horizontal ? h : w;
+    // Float drift can shrink the remaining side to ~0 with items still queued;
+    // clamp so thickness/length stay finite instead of producing Infinity rects.
+    const side = Math.max(horizontal ? h : w, 1e-6);
     const thickness = sum / side;
     let offset = 0;
     for (const it of r) {
@@ -83,14 +85,21 @@ const FILL: Record<string, string> = {
   muted: "var(--muted)",
 };
 
-function findNode(root: TreeNode, path: string): TreeNode {
+export function findNode(root: TreeNode, path: string): TreeNode {
   if (path === "") return root;
   let node = root;
   for (;;) {
-    const next = node.children.find((c) => path === c.path || path.startsWith(`${c.path}/`));
+    const next = node.children.find(
+      (c) =>
+        path === c.path ||
+        path.startsWith(`${c.path}/`) ||
+        // Target is an interior segment of a collapsed chain (e.g. "src/main"
+        // when the tree node is "src/main/java"): land on that node.
+        c.path.startsWith(`${path}/`),
+    );
     if (!next) return node;
     node = next;
-    if (node.path === path) return node;
+    if (node.path === path || node.path.startsWith(`${path}/`)) return node;
   }
 }
 
