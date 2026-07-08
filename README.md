@@ -195,3 +195,7 @@ The [GitHub Action, CLI, parsers, and coverage core](https://github.com/covallab
 stay **MIT** — the tools everyone installs carry no copyleft. This server
 vendors that MIT core (see [`src/vendor/`](src/vendor/)); combining MIT into an
 AGPL work is permitted and keeps the vendored files under their original MIT terms.
+
+---
+
+<sub>Created by [Josh Holtz](https://github.com/joshdholtz) · [Mostly Good LLC](https://mostlygood.dev) · AGPL-3.0</sub>

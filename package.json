@@ -43,5 +43,7 @@
     "typescript": "^5.7.3",
     "vite": "^6.1.0",
     "vitest": "^3.0.5"
-  }
+  },
+  "author": "Josh Holtz <me@joshholtz.com> (https://mostlygood.dev)",
+  "homepage": "https://covallaby.com"
 }
