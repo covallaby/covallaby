@@ -7,6 +7,7 @@ import { CompareBranches, PullRequest } from "./pages/Compare.js";
 import { Home } from "./pages/Home.js";
 import { Policy } from "./pages/Policy.js";
 import { RepoLayout } from "./pages/Repo.js";
+import { Insights } from "./pages/RepoInsights.js";
 import { PullRequests } from "./pages/RepoPulls.js";
 import { Summary } from "./pages/RepoSummary.js";
 import { Uploads } from "./pages/RepoUploads.js";
@@ -114,6 +115,9 @@ function RepoNavItem({ r, pathname }: { r: RepoOverview; pathname: string }) {
           <SubLink to={base} active={pathname === base || pathname.startsWith(`${base}/u/`)}>
             Summary
           </SubLink>
+          <SubLink to={`${base}/insights`} active={pathname.startsWith(`${base}/insights`)}>
+            Insights
+          </SubLink>
           <SubLink to={`${base}/uploads`} active={pathname.startsWith(`${base}/uploads`)}>
             Uploads
           </SubLink>
@@ -184,6 +188,7 @@ function Sidebar({ repos }: { repos: RepoOverview[] | null }) {
 /** Label for the trailing path segment of a repo route (Uploads, PR #12, …). */
 function tailLabel(rest: string): string | null {
   if (rest === "") return null;
+  if (rest.startsWith("insights")) return "Insights";
   if (rest.startsWith("uploads")) return "Uploads";
   if (rest.startsWith("pulls")) return "Pull requests";
   if (rest.startsWith("policy")) return "Policy";
@@ -276,6 +281,7 @@ export function App() {
               <Route path="/" element={<Home repos={repos} />} />
               <Route path="/r/:owner/:name" element={<RepoLayout />}>
                 <Route index element={<Summary />} />
+                <Route path="insights" element={<Insights />} />
                 <Route path="uploads" element={<Uploads />} />
                 <Route path="pulls" element={<PullRequests />} />
                 <Route path="policy" element={<Policy />} />

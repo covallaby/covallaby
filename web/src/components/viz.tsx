@@ -1,10 +1,11 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useMemo } from "react";
 import {
   type DirTrends,
   type PortfolioTrends,
   type RepoOverview,
   type ReportChanges,
   type Severity,
+  type UploadRow,
   formatPercent,
   severity,
 } from "../api.js";
@@ -324,6 +325,14 @@ export function DirectoryStream({ data }: { data: DirTrends }) {
     };
   });
 
+  const fmtK = (v: number) =>
+    v >= 1000 ? `${(v / 1000).toFixed(v >= 10_000 ? 0 : 1)}k` : `${Math.round(v)}`;
+  const fmtDay = (t: number) =>
+    Number.isFinite(t)
+      ? new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+      : "";
+  const xEvery = Math.max(1, Math.ceil(steps / 6));
+
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
@@ -332,6 +341,28 @@ export function DirectoryStream({ data }: { data: DirTrends }) {
       aria-label="covered lines by directory over time"
     >
       <title>Covered lines by top-level directory</title>
+      {[0, 0.5, 1].map((f) => (
+        <g key={f}>
+          <line
+            x1={L}
+            x2={W - Rp}
+            y1={y(max * f)}
+            y2={y(max * f)}
+            stroke="var(--hairline)"
+            opacity={0.5}
+          />
+          <text
+            x={L - 6}
+            y={y(max * f) + 3}
+            textAnchor="end"
+            fontSize={9.5}
+            fontFamily="var(--font-mono)"
+            fill="var(--muted)"
+          >
+            {fmtK(max * f)}
+          </text>
+        </g>
+      ))}
       {bands.map((b) => (
         <path
           key={b.dir}
@@ -342,6 +373,21 @@ export function DirectoryStream({ data }: { data: DirTrends }) {
           strokeWidth={0.6}
         />
       ))}
+      {data.steps.map((s, i) =>
+        i % xEvery === 0 ? (
+          <text
+            key={s.commit}
+            x={x(i)}
+            y={H - 6}
+            textAnchor="middle"
+            fontSize={9.5}
+            fontFamily="var(--font-mono)"
+            fill="var(--muted)"
+          >
+            {fmtDay(s.t)}
+          </text>
+        ) : null,
+      )}
       {bands.map((b) => (
         <text
           key={`l-${b.dir}`}
@@ -545,4 +591,182 @@ function sample(cov: string, n: number): string {
     out += worst;
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Commit waterfall — which upload moved coverage                       */
+/* ------------------------------------------------------------------ */
+
+export function CommitWaterfall({
+  history,
+  onPick,
+}: {
+  history: UploadRow[];
+  onPick?: (id: number) => void;
+}) {
+  const seq = [...history].reverse().slice(-24); // oldest → newest, capped
+  const bars = seq
+    .map((u, j) => {
+      const prev = seq[j - 1];
+      const d = u.percent !== null && prev?.percent != null ? u.percent - prev.percent : null;
+      return { u, d };
+    })
+    .filter((b): b is { u: UploadRow; d: number } => b.d !== null);
+  if (bars.length < 1) return <Empty>Two uploads and the per-commit swing shows up here. 🦘</Empty>;
+
+  const W = 760;
+  const H = 250;
+  const L = 30;
+  const Rp = 14;
+  const T = 22;
+  const B = 40;
+  const n = bars.length;
+  const slot = (W - L - Rp) / n;
+  const bw = Math.min(30, slot * 0.62);
+  const maxAbs = Math.max(1, ...bars.map((b) => Math.abs(b.d)));
+  const mid = (T + H - B) / 2;
+  const sh = (v: number) => (v / maxAbs) * ((H - T - B) / 2);
+  const grid = [maxAbs, maxAbs / 2, 0, -maxAbs / 2, -maxAbs].map((g) => Math.round(g * 10) / 10);
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      width="100%"
+      role="img"
+      aria-label="per-commit coverage change"
+      className="overflow-visible"
+    >
+      <title>Coverage change per upload</title>
+      {grid.map((g) => (
+        <g key={g}>
+          <line
+            x1={L}
+            x2={W - Rp}
+            y1={mid - sh(g)}
+            y2={mid - sh(g)}
+            stroke="var(--hairline)"
+            strokeDasharray={g === 0 ? undefined : "2 3"}
+            opacity={g === 0 ? 1 : 0.4}
+          />
+          <text
+            x={L - 5}
+            y={mid - sh(g) + 3}
+            textAnchor="end"
+            fontSize={9.5}
+            fontFamily="var(--font-mono)"
+            fill="var(--muted)"
+          >
+            {g > 0 ? "+" : ""}
+            {g}
+          </text>
+        </g>
+      ))}
+      {bars.map((b, i) => {
+        const cx = L + slot * i + slot / 2;
+        const up = b.d >= 0;
+        const bh = Math.max(1.5, Math.abs(sh(b.d)));
+        const by = up ? mid - bh : mid;
+        return (
+          // biome-ignore lint/a11y/useKeyWithClickEvents: the commit is reachable via the uploads table; this bar is a mouse shortcut
+          <g
+            key={b.u.id}
+            onClick={onPick ? () => onPick(b.u.id) : undefined}
+            style={{ cursor: onPick ? "pointer" : "default" }}
+          >
+            {onPick && (
+              <rect x={cx - slot / 2} y={T} width={slot} height={H - T - B} fill="transparent" />
+            )}
+            <rect
+              x={cx - bw / 2}
+              y={by}
+              width={bw}
+              height={bh}
+              rx={2}
+              fill={up ? "var(--good)" : "var(--bad)"}
+              opacity={0.9}
+            />
+            <text
+              x={cx}
+              y={up ? by - 4 : by + bh + 11}
+              textAnchor="middle"
+              fontSize={9.5}
+              fontFamily="var(--font-mono)"
+              fill={up ? "var(--good)" : "var(--bad)"}
+            >
+              {up ? "+" : ""}
+              {b.d.toFixed(1)}
+            </text>
+            <text
+              x={cx}
+              y={H - 6}
+              textAnchor="middle"
+              fontSize={9.5}
+              fontFamily="var(--font-mono)"
+              fill="var(--muted)"
+              opacity={0.85}
+            >
+              {b.u.commit.slice(0, 6)}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Coverage calendar — a contribution grid of daily coverage            */
+/* ------------------------------------------------------------------ */
+
+export function CoverageCalendar({ history }: { history: UploadRow[] }) {
+  const cells = useMemo(() => {
+    const DAY = 86_400_000;
+    const byDay = new Map<number, number>(); // day → last percent that day
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    for (const u of history) {
+      if (u.percent === null) continue;
+      const t = new Date(u.createdAt).getTime();
+      if (!Number.isFinite(t)) continue;
+      const day = Math.floor(t / DAY);
+      byDay.set(day, u.percent); // history is newest-first; last write = oldest of the day, close enough
+      min = Math.min(min, day);
+      max = Math.max(max, day);
+    }
+    if (!Number.isFinite(min)) return null;
+    const end = max;
+    const start = Math.min(min, end - 7 * 25); // ~26 weeks window at most
+    const startAligned = start - (((start % 7) + 7) % 7 || 0); // snap to a week boundary
+    const out: Array<{ day: number; pct: number | null }> = [];
+    for (let d = startAligned; d <= end; d++) out.push({ day: d, pct: byDay.get(d) ?? null });
+    return out;
+  }, [history]);
+
+  if (!cells) return <Empty>Uploads over a few days fill this calendar in. 🦘</Empty>;
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="grid grid-flow-col grid-rows-7 gap-[3px]">
+        {cells.map((c) => {
+          const op = c.pct === null ? 1 : 0.35 + Math.min(1, Math.abs(c.pct - 60) / 40) * 0.55;
+          return (
+            <div
+              key={c.day}
+              className="aspect-square w-full rounded-[3px]"
+              style={{ background: c.pct === null ? "var(--surface-2)" : sv(c.pct), opacity: op }}
+              title={c.pct === null ? undefined : `${formatPercent(c.pct)}`}
+            />
+          );
+        })}
+      </div>
+      <div className="mt-3 flex items-center gap-1.5 text-[11px] text-(--muted)">
+        Lower
+        <span className="h-3 w-3 rounded-[3px]" style={{ background: "var(--bad)" }} />
+        <span className="h-3 w-3 rounded-[3px]" style={{ background: "var(--warn)" }} />
+        <span className="h-3 w-3 rounded-[3px]" style={{ background: "var(--ok)" }} />
+        <span className="h-3 w-3 rounded-[3px]" style={{ background: "var(--good)" }} />
+        Higher
+      </div>
+    </div>
+  );
 }
