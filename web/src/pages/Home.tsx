@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { type RepoOverview, type UploadRow, api, formatPercent, severity } from "../api.js";
+import {
+  type PortfolioTrends,
+  type RepoOverview,
+  type UploadRow,
+  api,
+  formatPercent,
+  severity,
+} from "../api.js";
 import mascotUrl from "../assets/mascot.png";
 import { Sparkline } from "../components/charts.js";
 import { Skeleton } from "../components/skeleton.js";
@@ -15,6 +22,7 @@ import {
   Th,
   inkFor,
 } from "../components/ui.js";
+import { CoverageDebt, MomentumBoard, RiskQuadrant } from "../components/viz.js";
 
 function ago(iso: string): string {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -39,11 +47,16 @@ function Tile({ label, value, sub }: { label: string; value: React.ReactNode; su
 export function Home({ repos }: { repos: RepoOverview[] | null }) {
   const navigate = useNavigate();
   const [activity, setActivity] = useState<UploadRow[] | null>(null);
+  const [trends, setTrends] = useState<PortfolioTrends | null>(null);
   useEffect(() => {
     api
       .activity()
       .then((d) => setActivity(d.uploads))
       .catch(() => setActivity([]));
+    api
+      .trends()
+      .then(setTrends)
+      .catch(() => setTrends(null));
   }, []);
 
   if (!repos) {
@@ -118,6 +131,35 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
           sub={lastUpload ? lastUpload.repo : undefined}
         />
       </div>
+
+      {repos.length >= 2 && (
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Card className="lg:col-span-2">
+            <CardHeader
+              title="Risk map"
+              description="Coverage vs. codebase size — big and under-tested lands in the danger zone"
+            />
+            <div className="px-4 pb-4">
+              <RiskQuadrant repos={repos} />
+            </div>
+          </Card>
+          <Card>
+            <CardHeader title="Momentum" description="Biggest coverage movers, most recent trend" />
+            <div className="px-4 pb-3">
+              <MomentumBoard repos={repos} />
+            </div>
+          </Card>
+          <Card>
+            <CardHeader
+              title="Coverage debt"
+              description="Covered vs. total lines across every repository"
+            />
+            <div className="px-2 pb-3">
+              {trends ? <CoverageDebt trends={trends} /> : <Skeleton className="mx-3 my-6 h-40" />}
+            </div>
+          </Card>
+        </div>
+      )}
 
       <h2 className="mt-6 mb-3 text-[13.5px] font-semibold tracking-tight">Repositories</h2>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">

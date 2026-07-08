@@ -1,7 +1,15 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { type AppEnv, type HostedConfig, type HostedDeps, mountHosted } from "./hosted/index.js";
-import type { Store } from "./store.js";
+import {
+  type PolicyInput,
+  type PolicyViolation,
+  type RepoPolicy,
+  evaluatePolicy,
+  parsePolicy,
+  renderStatusBadge,
+} from "./policy.js";
+import type { Store, UploadRow } from "./store.js";
 import { renderBadge } from "./vendor/badge.js";
 import {
   type CoverageReport,
@@ -74,6 +82,192 @@ export function diffReports(head: CoverageReport, base: CoverageReport): ReportC
   changed.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
   added.sort((a, b) => (a.percent ?? 101) - (b.percent ?? 101));
   return { added, removed: before.size, changed: changed.slice(0, 100) };
+}
+
+/**
+ * Per-executable-line coverage as a compact string, one char per line in file
+ * order: "2" covered, "1" covered-but-a-branch-was-missed, "0" never hit.
+ * Powers the file "barcode" without ever shipping source — just the shape.
+ */
+function coverageBitmap(file: CoverageReport["files"][number]): string {
+  const partial = new Set<number>();
+  for (const b of file.branches) {
+    if (b.total > 0 && b.taken > 0 && b.taken < b.total) partial.add(b.line);
+  }
+  let out = "";
+  for (const l of file.lines) out += l.hits === 0 ? "0" : partial.has(l.line) ? "1" : "2";
+  return out;
+}
+
+/** Prefer the conventional default branch, else whatever the store lists first. */
+function defaultBranch(branches: string[], fallback: string): string {
+  return branches.find((b) => b === "main" || b === "master") ?? branches[0] ?? fallback;
+}
+
+/** Where a repo's policy lives in the meta KV — one JSON blob per repo. */
+const policyKey = (repo: string): string => `policy:${repo}`;
+
+async function loadPolicy(store: Store, repo: string): Promise<RepoPolicy | null> {
+  const raw = await store.getMeta(policyKey(repo));
+  if (!raw) return null;
+  try {
+    return parsePolicy(JSON.parse(raw));
+  } catch {
+    return null; // a corrupt blob shouldn't 500 the gate — treat as "no policy"
+  }
+}
+
+export interface Comparison {
+  head: UploadRow;
+  base: UploadRow;
+  same: boolean;
+  changes: ReportChanges | null;
+}
+
+/**
+ * Resolve the head/base pair a compare or status check runs on. Head is the
+ * latest upload of `?pr=N` or `?head=<branch>`; base is the latest on
+ * `?base=<branch>` (default main). Returns a friendly error + HTTP status when
+ * either side can't be found, so callers just forward it.
+ */
+async function resolveComparison(
+  store: Store,
+  repo: string,
+  q: { base?: string | undefined; pr?: string | undefined; head?: string | undefined },
+): Promise<Comparison | { error: string; status: 404 }> {
+  const baseBranch = q.base ?? "main";
+
+  let headRow: UploadRow | null = null;
+  if (q.pr && /^\d+$/.test(q.pr)) {
+    const prs = await store.listPRs(repo, 100);
+    headRow = prs.find((p) => p.pr === Number(q.pr))?.latest ?? null;
+  } else if (q.head) {
+    headRow = await store.latest(repo, q.head);
+  }
+  if (!headRow) return { error: "No uploads found for that head.", status: 404 };
+
+  const baseRow = await store.latest(repo, baseBranch);
+  if (!baseRow) {
+    return { error: `No uploads found on base branch "${baseBranch}".`, status: 404 };
+  }
+  if (baseRow.id === headRow.id) {
+    return { head: headRow, base: baseRow, same: true, changes: null };
+  }
+  const head = await store.getUpload(headRow.id);
+  const base = await store.getUpload(baseRow.id);
+  if (!head || !base) return { error: "Upload vanished.", status: 404 };
+  return {
+    head: headRow,
+    base: baseRow,
+    same: false,
+    changes: diffReports(head.report, base.report),
+  };
+}
+
+/** The policy verdict for a comparison, plus the inputs it was judged on. */
+function judge(
+  policy: RepoPolicy | null,
+  cmp: Comparison,
+): {
+  input: PolicyInput;
+  result: ReturnType<typeof evaluatePolicy>;
+} {
+  const input: PolicyInput = {
+    projectPercent: cmp.head.percent,
+    basePercent: cmp.base.percent,
+    addedFiles: (cmp.changes?.added ?? []).map((f) => ({ path: f.path, percent: f.percent })),
+  };
+  return { input, result: evaluatePolicy(policy, input) };
+}
+
+export interface StatusResult {
+  repo: string;
+  /** True when a policy is set — otherwise the gate is open. */
+  configured: boolean;
+  passed: boolean;
+  violations: PolicyViolation[];
+  head: UploadRow | null;
+  base: UploadRow | null;
+  /** How head/base were chosen: an explicit compare, the prior upload, or none. */
+  basis: "compare" | "previous" | "none";
+  note?: string;
+}
+
+/**
+ * Evaluate a repo's policy for the status endpoint and badge. With `pr`/`head`
+ * it judges that comparison; otherwise it judges the latest default-branch
+ * upload against the one before it. Never throws: a missing comparison leaves
+ * the gate open when no policy is set, and fails closed when one is.
+ */
+async function computeStatus(
+  store: Store,
+  repo: string,
+  q: { base?: string | undefined; pr?: string | undefined; head?: string | undefined },
+): Promise<StatusResult> {
+  const policy = await loadPolicy(store, repo);
+  const wantsCompare = Boolean(q.pr || q.head);
+
+  let cmp: Comparison | null = null;
+  let error: string | undefined;
+
+  if (wantsCompare) {
+    const resolved = await resolveComparison(store, repo, q);
+    if ("error" in resolved) error = resolved.error;
+    else cmp = resolved;
+  } else {
+    const branches = await store.branches(repo);
+    const branch = branches.find((b) => b === "main" || b === "master") ?? branches[0];
+    const headRow = branch ? await store.latest(repo, branch) : null;
+    if (!headRow) {
+      error = "No uploads found for this repository.";
+    } else {
+      const prev = await store.prevUpload(repo, headRow.branch, headRow.id);
+      const head = await store.getUpload(headRow.id);
+      cmp =
+        prev && head
+          ? {
+              head: headRow,
+              base: prev.row,
+              same: false,
+              changes: diffReports(head.report, prev.report),
+            }
+          : // A repo's very first upload: judge the project floor with no base.
+            { head: headRow, base: headRow, same: true, changes: null };
+    }
+  }
+
+  if (!cmp) {
+    return {
+      repo,
+      configured: Boolean(policy),
+      passed: !policy, // no policy → open gate; a set policy fails closed
+      violations: policy
+        ? [
+            {
+              kind: "project",
+              actual: null,
+              required: 0,
+              message: error ?? "No coverage data to evaluate the policy against.",
+            },
+          ]
+        : [],
+      head: null,
+      base: null,
+      basis: "none",
+      ...(error && { note: error }),
+    };
+  }
+
+  const { result } = judge(policy, cmp);
+  return {
+    repo,
+    configured: result.configured,
+    passed: result.passed,
+    violations: result.violations,
+    head: cmp.head,
+    base: cmp.same ? null : cmp.base,
+    basis: wantsCompare ? "compare" : "previous",
+  };
 }
 
 export function createApp({
@@ -240,35 +434,87 @@ export function createApp({
   // ?head=<branch> (latest on that branch); base = ?base=<branch> (default main).
   app.get("/api/v1/repos/:owner/:name/compare", async (c) => {
     const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
-    const baseBranch = c.req.query("base") ?? "main";
-    const prRaw = c.req.query("pr");
-    const headBranch = c.req.query("head");
-
-    let headRow = null;
-    if (prRaw && /^\d+$/.test(prRaw)) {
-      const prs = await store.listPRs(repo, 100);
-      headRow = prs.find((p) => p.pr === Number(prRaw))?.latest ?? null;
-    } else if (headBranch) {
-      headRow = await store.latest(repo, headBranch);
-    }
-    if (!headRow) return c.json({ ok: false, error: "No uploads found for that head." }, 404);
-
-    const baseRow = await store.latest(repo, baseBranch);
-    if (!baseRow) {
-      return c.json({ ok: false, error: `No uploads found on base branch "${baseBranch}".` }, 404);
-    }
-    if (baseRow.id === headRow.id) {
-      return c.json({ head: headRow, base: baseRow, same: true, changes: null });
-    }
-    const head = await store.getUpload(headRow.id);
-    const base = await store.getUpload(baseRow.id);
-    if (!head || !base) return c.json({ ok: false, error: "Upload vanished." }, 404);
-    return c.json({
-      head: headRow,
-      base: baseRow,
-      same: false,
-      changes: diffReports(head.report, base.report),
+    const cmp = await resolveComparison(store, repo, {
+      base: c.req.query("base"),
+      pr: c.req.query("pr"),
+      head: c.req.query("head"),
     });
+    if ("error" in cmp) return c.json({ ok: false, error: cmp.error }, cmp.status);
+    const policy = await loadPolicy(store, repo);
+    return c.json({
+      head: cmp.head,
+      base: cmp.base,
+      same: cmp.same,
+      changes: cmp.changes,
+      policy: judge(policy, cmp).result,
+    });
+  });
+
+  // Per-repo policy — the "can I merge?" gate. Reading is public (or behind the
+  // view gate); writing needs the admin upload token.
+  app.get("/api/v1/repos/:owner/:name/policy", async (c) => {
+    const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
+    return c.json({ repo, policy: await loadPolicy(store, repo) });
+  });
+
+  app.put("/api/v1/repos/:owner/:name/policy", async (c) => {
+    const token = bearer(c.req.header("authorization"));
+    if (!token || !tokenEquals(token, uploadToken)) {
+      return c.json({ ok: false, error: "Admin upload token required." }, 401);
+    }
+    const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
+    if (!REPO_RE.test(repo)) return c.json({ ok: false, error: "Bad repository name." }, 400);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ ok: false, error: "Body must be a JSON policy object." }, 400);
+    }
+    const policy = parsePolicy(body);
+    if (!policy) {
+      return c.json(
+        {
+          ok: false,
+          error:
+            "No valid rules. Set at least one of minProject, maxDrop, minNewFile (each 0–100).",
+        },
+        400,
+      );
+    }
+    await store.setMeta(policyKey(repo), JSON.stringify(policy));
+    return c.json({ ok: true, repo, policy });
+  });
+
+  app.delete("/api/v1/repos/:owner/:name/policy", async (c) => {
+    const token = bearer(c.req.header("authorization"));
+    if (!token || !tokenEquals(token, uploadToken)) {
+      return c.json({ ok: false, error: "Admin upload token required." }, 401);
+    }
+    const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
+    // Clearing == an empty policy; the meta KV has no delete, so store "".
+    await store.setMeta(policyKey(repo), "");
+    return c.json({ ok: true, repo, policy: null });
+  });
+
+  // The merge gate, as JSON. Give it ?pr=N (or ?head=<branch>&base=<branch>)
+  // to judge a comparison; with neither, it judges the latest default-branch
+  // upload against the one before it. CI gates with:
+  //   curl -sf ".../status/o/n.json?pr=$PR" | jq -e .passed
+  app.get("/api/v1/repos/:owner/:name/status", async (c) => {
+    const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
+    return c.json(await computeStatus(store, repo, c.req.query()));
+  });
+
+  app.get("/status/:owner/:file", async (c) => {
+    const file = c.req.param("file");
+    if (!file.endsWith(".svg")) return c.notFound();
+    const repo = `${c.req.param("owner")}/${file.slice(0, -4)}`;
+    const status = await computeStatus(store, repo, c.req.query());
+    const passed = status.configured ? status.passed : null;
+    const svg = renderStatusBadge(passed, c.req.query("label") ?? "covallaby");
+    c.header("Content-Type", "image/svg+xml");
+    c.header("Cache-Control", "no-cache, max-age=120");
+    return c.body(svg);
   });
 
   app.get("/api/v1/repos/:owner/:name/history", async (c) => {
@@ -285,6 +531,76 @@ export function createApp({
     });
   });
 
+  // Portfolio coverage debt over time: for each day any repo uploaded, the
+  // covered/total summed across every repo (carrying each repo's last-known
+  // value forward). Built from default-branch history — no schema, no source.
+  app.get("/api/v1/trends", async (c) => {
+    const accounts = c.get("accounts");
+    const overviews = await store.listRepos(1, accounts);
+    const perRepo = await Promise.all(
+      overviews.map(async (o) => {
+        const branch = defaultBranch(await store.branches(o.repo), o.latest.branch);
+        const hist = await store.history(o.repo, branch, 60);
+        return hist
+          .map((u) => ({
+            t: Date.parse(u.createdAt),
+            covered: u.linesCovered,
+            total: u.linesTotal,
+          }))
+          .filter((p) => Number.isFinite(p.t));
+      }),
+    );
+    const DAY = 86_400_000;
+    const dayOf = (t: number) => Math.floor(t / DAY) * DAY;
+    const days = [...new Set(perRepo.flat().map((p) => dayOf(p.t)))]
+      .sort((a, b) => a - b)
+      .slice(-24);
+    const series = days.map((day) => {
+      const end = day + DAY - 1;
+      let covered = 0;
+      let total = 0;
+      for (const repo of perRepo) {
+        let best: { t: number; covered: number; total: number } | null = null;
+        for (const p of repo) if (p.t <= end && (!best || p.t > best.t)) best = p;
+        if (best) {
+          covered += best.covered;
+          total += best.total;
+        }
+      }
+      return { t: day, covered, total, percent: total === 0 ? null : (covered / total) * 100 };
+    });
+    return c.json({ series });
+  });
+
+  // Covered lines by top-level directory across a branch's recent uploads —
+  // the streamgraph source. Rolls up each stored report; capped at 12 points.
+  app.get("/api/v1/repos/:owner/:name/dir-trends", async (c) => {
+    const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
+    const branches = await store.branches(repo);
+    if (branches.length === 0) return c.json({ ok: false, error: "Unknown repository." }, 404);
+    const branch = c.req.query("branch") ?? defaultBranch(branches, "main");
+    const hist = (await store.history(repo, branch, 12)).slice().reverse(); // oldest → newest
+    const steps: Array<{ t: number; commit: string }> = [];
+    const byDir = new Map<string, number[]>();
+    for (let i = 0; i < hist.length; i++) {
+      const u = hist[i]!;
+      steps.push({ t: Date.parse(u.createdAt), commit: u.commit });
+      const full = await store.getUpload(u.id);
+      if (!full) continue;
+      for (const f of summarize(full.report).files) {
+        const top = f.path.split("/")[0] || f.path;
+        if (!byDir.has(top)) byDir.set(top, new Array(hist.length).fill(0));
+        const arr = byDir.get(top)!;
+        arr[i] = (arr[i] ?? 0) + f.lines.covered;
+      }
+    }
+    const dirs = [...byDir.entries()]
+      .sort((a, b) => (b[1][b[1].length - 1] ?? 0) - (a[1][a[1].length - 1] ?? 0))
+      .slice(0, 6)
+      .map(([dir, values]) => ({ dir, values }));
+    return c.json({ repo, branch, steps, dirs });
+  });
+
   app.get("/api/v1/uploads/:id", async (c) => {
     const id = Number(c.req.param("id"));
     if (!Number.isInteger(id)) return c.json({ ok: false, error: "Bad id." }, 400);
@@ -294,6 +610,7 @@ export function createApp({
     const missingByPath = new Map(
       found.report.files.map((f) => [f.path, formatRanges(uncoveredRanges(f))]),
     );
+    const covByPath = new Map(found.report.files.map((f) => [f.path, coverageBitmap(f)]));
 
     // What changed vs the previous upload on this branch.
     const prev = await store.prevUpload(found.row.repo, found.row.branch, found.row.id);
@@ -358,6 +675,7 @@ export function createApp({
           total: f.lines.total,
           percent: f.lines.percent,
           missing: missingByPath.get(f.path) ?? "",
+          cov: covByPath.get(f.path) ?? "",
         })),
     });
   });

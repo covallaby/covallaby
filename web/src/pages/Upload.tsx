@@ -5,11 +5,13 @@ import { Breadcrumb, Hotspots, TreeOutline, buildTree } from "../components/expl
 import { PageSkeleton } from "../components/skeleton.js";
 import { Treemap } from "../components/treemap.js";
 import { Card, CardHeader, DeltaChip, Meter, Pct, Td, Th, inkFor } from "../components/ui.js";
+import { CoverageBarcode } from "../components/viz.js";
 
 const VIEWS = [
   { key: "tree", label: "Tree" },
   { key: "changes", label: "Changes" },
   { key: "map", label: "Map" },
+  { key: "lines", label: "Lines" },
   { key: "files", label: "Files" },
 ] as const;
 
@@ -128,11 +130,13 @@ export function Upload() {
                     : "First upload on this branch"
                   : view === "map"
                     ? "Click a directory block to zoom in, breadcrumb to climb out"
-                    : `${files.length} files, worst first`
+                    : view === "lines"
+                      ? "Every executable line as one tick — see where the gaps cluster"
+                      : `${files.length} files, worst first`
             }
             action={
               <div className="flex items-center gap-3">
-                {(view === "tree" || view === "files") && (
+                {(view === "tree" || view === "files" || view === "lines") && (
                   <input
                     type="search"
                     value={query}
@@ -266,6 +270,35 @@ export function Upload() {
               <Breadcrumb path={path} onNavigate={navigateTo} />
               <Treemap root={tree} path={path} onNavigate={navigateTo} />
             </>
+          )}
+
+          {view === "lines" && (
+            <div className="px-5 pb-4">
+              <div className="mb-3 flex items-center gap-4 text-[11.5px] text-(--muted)">
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className="inline-block h-2.5 w-2.5 rounded-[3px]"
+                    style={{ background: "var(--good)" }}
+                  />
+                  covered
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className="inline-block h-2.5 w-2.5 rounded-[3px]"
+                    style={{ background: "var(--warn)" }}
+                  />
+                  branch missed
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className="inline-block h-2.5 w-2.5 rounded-[3px]"
+                    style={{ background: "var(--bad)" }}
+                  />
+                  never hit
+                </span>
+              </div>
+              <CoverageBarcode files={files} limit={12} />
+            </div>
           )}
 
           {view === "files" && (

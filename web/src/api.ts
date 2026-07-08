@@ -61,7 +61,22 @@ export interface UploadDetail {
     total: number;
     percent: number | null;
     missing: string;
+    /** Per-executable-line state, one char/line: "2" covered, "1" partial, "0" missed. */
+    cov: string;
   }>;
+}
+
+/** Portfolio coverage debt over time — covered vs. total across every repo. */
+export interface PortfolioTrends {
+  series: Array<{ t: number; covered: number; total: number; percent: number | null }>;
+}
+
+/** Covered lines by top-level directory across a branch's recent uploads. */
+export interface DirTrends {
+  repo: string;
+  branch: string;
+  steps: Array<{ t: number; commit: string }>;
+  dirs: Array<{ dir: string; values: number[] }>;
 }
 
 export interface RepoHistory {
@@ -85,6 +100,11 @@ const liveApi = {
       `/api/v1/repos/${repo}/history${branch ? `?branch=${encodeURIComponent(branch)}` : ""}`,
     ),
   upload: (id: string) => get<UploadDetail>(`/api/v1/uploads/${id}`),
+  trends: () => get<PortfolioTrends>("/api/v1/trends"),
+  dirTrends: (repo: string, branch?: string) =>
+    get<DirTrends>(
+      `/api/v1/repos/${repo}/dir-trends${branch ? `?branch=${encodeURIComponent(branch)}` : ""}`,
+    ),
   prs: (repo: string) => get<{ prs: PROverview[] }>(`/api/v1/repos/${repo}/prs`),
   compare: (repo: string, q: { pr?: number; head?: string; base?: string }) => {
     const params = new URLSearchParams();
@@ -106,6 +126,8 @@ export const api: typeof liveApi = IS_DEMO
       activity: (...a) => load().then((d) => d.activity(...a)),
       history: (...a) => load().then((d) => d.history(...a)),
       upload: (...a) => load().then((d) => d.upload(...a)),
+      trends: (...a) => load().then((d) => d.trends(...a)),
+      dirTrends: (...a) => load().then((d) => d.dirTrends(...a)),
       prs: (...a) => load().then((d) => d.prs(...a)),
       compare: (...a) => load().then((d) => d.compare(...a)),
     }

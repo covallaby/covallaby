@@ -202,3 +202,113 @@ describe("PRs and compare", () => {
     expect(missing.status).toBe(404);
   });
 });
+
+describe("policy and status gate", () => {
+  const put = (body: unknown, token = "sekret") =>
+    app.request("/api/v1/repos/acme/gate/policy", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("reads null before anything is set", async () => {
+    const json = await (await app.request("/api/v1/repos/acme/gate/policy")).json();
+    expect(json.policy).toBe(null);
+  });
+
+  it("guards writes with the admin token and validates the body", async () => {
+    expect((await put({ minProject: 50 }, "wrong")).status).toBe(401);
+    expect(await put({}).then((r) => r.status)).toBe(400);
+    expect((await put({ minProject: 500 })).status).toBe(400);
+    const ok = await put({ minProject: 50, maxDrop: 0 });
+    expect(ok.status).toBe(200);
+    const read = await (await app.request("/api/v1/repos/acme/gate/policy")).json();
+    expect(read.policy).toEqual({ minProject: 50, maxDrop: 0 });
+  });
+
+  it("passes and fails the status gate on the latest upload", async () => {
+    await upload("repo=acme/gate&branch=main&commit=g1"); // 66.66%
+    await put({ minProject: 50 });
+    const pass = await (await app.request("/api/v1/repos/acme/gate/status")).json();
+    expect(pass.configured).toBe(true);
+    expect(pass.passed).toBe(true);
+
+    await put({ minProject: 90 });
+    const fail = await (await app.request("/api/v1/repos/acme/gate/status")).json();
+    expect(fail.passed).toBe(false);
+    expect(fail.violations[0].kind).toBe("project");
+
+    const badge = await (await app.request("/status/acme/gate.svg")).text();
+    expect(badge).toContain("failing");
+  });
+
+  it("gates a PR comparison on the coverage drop", async () => {
+    const worse = lcov.replace("DA:3,5", "DA:3,0"); // 1/3 = 33% on the PR head
+    await app.request("/api/v1/upload?repo=acme/gate&branch=feat/drop&commit=d1&pr=4", {
+      method: "POST",
+      headers: { authorization: "Bearer sekret" },
+      body: worse,
+    });
+    await put({ maxDrop: 0 });
+    const status = await (
+      await app.request("/api/v1/repos/acme/gate/status?pr=4&base=main")
+    ).json();
+    expect(status.basis).toBe("compare");
+    expect(status.passed).toBe(false);
+    expect(status.violations[0].kind).toBe("drop");
+
+    // The compare endpoint carries the same verdict.
+    const cmp = await (await app.request("/api/v1/repos/acme/gate/compare?pr=4&base=main")).json();
+    expect(cmp.policy.passed).toBe(false);
+  });
+
+  it("clears the policy on DELETE", async () => {
+    const del = await app.request("/api/v1/repos/acme/gate/policy", {
+      method: "DELETE",
+      headers: { authorization: "Bearer sekret" },
+    });
+    expect(del.status).toBe(200);
+    const json = await (await app.request("/api/v1/repos/acme/gate/policy")).json();
+    expect(json.policy).toBe(null);
+    // With no policy the badge reads "no policy" and the gate is open.
+    const badge = await (await app.request("/status/acme/gate.svg")).text();
+    expect(badge).toContain("no policy");
+  });
+});
+
+describe("visualization data endpoints", () => {
+  it("returns a per-line coverage bitmap on the upload detail", async () => {
+    const r = await upload("repo=viz/app&branch=main&commit=v1");
+    const id = (await r.json()).id;
+    const detail = await (await app.request(`/api/v1/uploads/${id}`)).json();
+    const file = detail.files.find((f: { path: string }) => f.path === "src/a.ts");
+    // lcov is DA:1,5 / DA:2,0 / DA:3,5 → covered, missed, covered.
+    expect(file.cov).toBe("202");
+  });
+
+  it("returns a portfolio coverage-debt series", async () => {
+    const json = await (await app.request("/api/v1/trends")).json();
+    expect(Array.isArray(json.series)).toBe(true);
+    expect(json.series.length).toBeGreaterThan(0);
+    const pt = json.series[json.series.length - 1];
+    expect(pt).toHaveProperty("covered");
+    expect(pt).toHaveProperty("total");
+    expect(pt.total).toBeGreaterThanOrEqual(pt.covered);
+  });
+
+  it("returns covered-lines by top-level directory over time", async () => {
+    await upload("repo=viz/dirs&branch=main&commit=d1");
+    const json = await (await app.request("/api/v1/repos/viz/dirs/dir-trends")).json();
+    expect(json.branch).toBe("main");
+    expect(json.steps.length).toBeGreaterThan(0);
+    const src = json.dirs.find((d: { dir: string }) => d.dir === "src");
+    expect(src).toBeTruthy();
+    expect(src.values.length).toBe(json.steps.length);
+    expect(src.values[src.values.length - 1]).toBeGreaterThan(0);
+  });
+
+  it("404s dir-trends for an unknown repo", async () => {
+    const res = await app.request("/api/v1/repos/no/such/dir-trends");
+    expect(res.status).toBe(404);
+  });
+});

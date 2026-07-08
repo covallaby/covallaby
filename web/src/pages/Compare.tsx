@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { type CompareResult, api, formatPercent, severity } from "../api.js";
 import { PageSkeleton } from "../components/skeleton.js";
 import { Card, CardHeader, DeltaChip, Meter, inkFor } from "../components/ui.js";
+import { PatchTreemap } from "../components/viz.js";
 
 function ChangesList({ changes }: { changes: NonNullable<CompareResult["changes"]> }) {
   return (
@@ -139,6 +140,18 @@ function CompareBody({
           </div>
         </div>
       </div>
+
+      {changes && (changes.added.length > 0 || changes.changed.length > 0) && (
+        <Card>
+          <CardHeader
+            title="Did the change get tested?"
+            description="New & changed files — size ≈ impact, color = coverage"
+          />
+          <div className="px-4 pb-4">
+            <PatchTreemap changes={changes} />
+          </div>
+        </Card>
+      )}
 
       {changes && (
         <Card>
