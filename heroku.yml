@@ -1,0 +1,5 @@
+# Heroku container deploy. With the Postgres addon from app.json, DATABASE_URL
+# is set automatically, so storage is durable on Heroku's ephemeral filesystem.
+build:
+  docker:
+    web: Dockerfile

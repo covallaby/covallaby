@@ -149,23 +149,29 @@ One process, one `Dockerfile`, runs anywhere. Ready-made templates and buttons:
 <p>
   <a href="https://render.com/deploy?repo=https://github.com/covallaby/covallaby"><img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" height="32"></a>
   &nbsp;
+  <a href="https://heroku.com/deploy?template=https://github.com/covallaby/covallaby"><img src="https://www.herokucdn.com/deploy/button.svg" alt="Deploy to Heroku" height="32"></a>
+  &nbsp;
   <a href="https://railway.app/new/template?template=https://github.com/covallaby/covallaby"><img src="https://railway.app/button.svg" alt="Deploy on Railway" height="32"></a>
+  &nbsp;
+  <a href="https://app.koyeb.com/deploy?type=git&repository=github.com/covallaby/covallaby&ports=8080;http;/"><img src="https://www.koyeb.com/static/images/deploy/button.svg" alt="Deploy to Koyeb" height="32"></a>
   &nbsp;
   <a href="https://cloud.digitalocean.com/apps/new?repo=https://github.com/covallaby/covallaby/tree/main"><img src="https://www.deploytodo.com/do-btn-blue.svg" alt="Deploy to DigitalOcean" height="32"></a>
 </p>
 
 - **Fly.io** — `fly launch` (or use [`deploy/fly.toml`](deploy/fly.toml)). Add a
   volume for `/data` (`fly volumes create covallaby_data`) or attach Fly Postgres.
-- **Render** — the button above, or the [`deploy/render.yaml`](deploy/render.yaml)
-  blueprint (provisions a persistent disk for SQLite).
-- **Railway / DigitalOcean** — the buttons above; templates in
-  [`deploy/`](deploy/). DO's filesystem is ephemeral, so set `DATABASE_URL`.
+- **Render / Heroku** — the buttons above. Render provisions a persistent disk
+  for SQLite ([`deploy/render.yaml`](deploy/render.yaml)); Heroku attaches a
+  Postgres addon and sets `DATABASE_URL` for you ([`app.json`](app.json)).
+- **Railway / Koyeb / DigitalOcean** — the buttons above; templates in
+  [`deploy/`](deploy/). These have ephemeral filesystems, so use `DATABASE_URL`.
 - **Any VPS / Docker host** — `docker compose up -d` behind Caddy/nginx, or
   `node dist/index.js` under systemd. Back up the single `data/covallaby.db`
   (or your Postgres).
 
 Storage in one line: **SQLite needs a persistent volume at `/data`; Postgres
-(`DATABASE_URL`) needs none.** Full guide in [`deploy/`](deploy/README.md).
+(`DATABASE_URL`) needs none.** Full guide — including why Cloudflare Workers
+needs a D1 adapter, not a button — in [`deploy/`](deploy/README.md).
 
 ## Design
 

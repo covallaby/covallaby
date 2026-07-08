@@ -1,0 +1,16 @@
+{
+  "name": "Covallaby",
+  "description": "Beautiful self-hosted coverage history, dashboards, and live badges — one tiny process.",
+  "repository": "https://github.com/covallaby/covallaby",
+  "logo": "https://covallaby.com/brand/logo.png",
+  "website": "https://covallaby.com",
+  "keywords": ["coverage", "ci", "github", "dashboard", "testing"],
+  "stack": "container",
+  "addons": ["heroku-postgresql:essential-0"],
+  "env": {
+    "COVALLABY_TOKEN": {
+      "description": "Bearer token CI uses to upload coverage.",
+      "generator": "secret"
+    }
+  }
+}
