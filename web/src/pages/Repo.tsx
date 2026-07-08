@@ -163,6 +163,7 @@ export function Repo() {
       percent: u.percent,
       label: u.commit.slice(0, 7),
       sublabel: when(u.createdAt),
+      t: new Date(u.createdAt).getTime(),
     }));
   const delta =
     latest?.percent != null && previous?.percent != null ? latest.percent - previous.percent : null;
