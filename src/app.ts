@@ -1,9 +1,11 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
-import { homePage, repoPage, uploadPage } from "./pages.js";
 import type { Store } from "./store.js";
 import { renderBadge } from "./vendor/badge.js";
-import { summarize } from "./vendor/model.js";
+import { formatRanges, rollupByDirectory, summarize, uncoveredRanges } from "./vendor/model.js";
 import { ParseError, parseCoverage } from "./vendor/parsers/index.js";
 
 export interface AppOptions {
@@ -11,6 +13,8 @@ export interface AppOptions {
   uploadToken: string;
   /** Optional read gate; unset = dashboard is public. */
   viewToken?: string;
+  /** Directory holding the built web app (index.html + assets). */
+  webDist?: string;
 }
 
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
@@ -31,7 +35,7 @@ export async function ensureUploadToken(store: Store, fromEnv?: string): Promise
   return generated;
 }
 
-export function createApp({ store, uploadToken, viewToken }: AppOptions): Hono {
+export function createApp({ store, uploadToken, viewToken, webDist }: AppOptions): Hono {
   const app = new Hono();
 
   const bearer = (header: string | undefined): string | null => {
@@ -44,9 +48,20 @@ export function createApp({ store, uploadToken, viewToken }: AppOptions): Hono {
     if (!viewToken) return next();
     const path = c.req.path;
     if (path === "/healthz" || path.startsWith("/api/v1/upload")) return next();
-    const provided = bearer(c.req.header("authorization")) ?? c.req.query("token") ?? "";
+    const provided =
+      bearer(c.req.header("authorization")) ??
+      c.req.query("token") ??
+      getTokenCookie(c.req.header("cookie")) ??
+      "";
     if (!tokenEquals(provided, viewToken)) {
       return c.text("Unauthorized. Pass ?token=… or an Authorization: Bearer header.", 401);
+    }
+    // Remember the token so SPA asset/API requests keep working.
+    if (c.req.query("token")) {
+      c.header(
+        "Set-Cookie",
+        `covallaby_view=${c.req.query("token")}; Path=/; HttpOnly; SameSite=Lax`,
+      );
     }
     return next();
   });
@@ -119,9 +134,50 @@ export function createApp({ store, uploadToken, viewToken }: AppOptions): Hono {
 
   app.get("/api/v1/repos/:owner/:name/history", async (c) => {
     const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
-    const branch = c.req.query("branch") ?? (await store.latest(repo))?.branch;
-    if (!branch) return c.json({ ok: false, error: "Unknown repository." }, 404);
-    return c.json({ repo, branch, history: await store.history(repo, branch, 200) });
+    const branches = await store.branches(repo);
+    if (branches.length === 0) return c.json({ ok: false, error: "Unknown repository." }, 404);
+    const branch = c.req.query("branch") ?? branches[0]!;
+    return c.json({
+      repo,
+      branch,
+      branches,
+      history: await store.history(repo, branch, 200),
+    });
+  });
+
+  app.get("/api/v1/uploads/:id", async (c) => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id)) return c.json({ ok: false, error: "Bad id." }, 400);
+    const found = await store.getUpload(id);
+    if (!found) return c.json({ ok: false, error: "Unknown upload." }, 404);
+    const summary = summarize(found.report);
+    const missingByPath = new Map(
+      found.report.files.map((f) => [f.path, formatRanges(uncoveredRanges(f))]),
+    );
+    return c.json({
+      row: found.row,
+      totals: {
+        lines: summary.lines,
+        functions: summary.functions,
+        branches: summary.branches,
+        files: summary.totalFiles,
+      },
+      directories: rollupByDirectory(summary).map((d) => ({
+        path: d.path,
+        covered: d.lines.covered,
+        total: d.lines.total,
+        percent: d.lines.percent,
+      })),
+      files: [...summary.files]
+        .sort((a, b) => (a.lines.percent ?? 101) - (b.lines.percent ?? 101))
+        .map((f) => ({
+          path: f.path,
+          covered: f.lines.covered,
+          total: f.lines.total,
+          percent: f.lines.percent,
+          missing: missingByPath.get(f.path) ?? "",
+        })),
+    });
   });
 
   app.get("/badge/:owner/:file", async (c) => {
@@ -136,24 +192,25 @@ export function createApp({ store, uploadToken, viewToken }: AppOptions): Hono {
     return c.body(svg);
   });
 
-  app.get("/", async (c) => c.html(homePage(await store.listRepos(12))));
-
-  app.get("/r/:owner/:name", async (c) => {
-    const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
-    const branches = await store.branches(repo);
-    if (branches.length === 0) return c.notFound();
-    const branch = c.req.query("branch") ?? branches[0]!;
-    const history = await store.history(repo, branch, 60);
-    return c.html(repoPage(repo, branch, branches, history));
-  });
-
-  app.get("/r/:owner/:name/u/:id", async (c) => {
-    const id = Number(c.req.param("id"));
-    if (!Number.isInteger(id)) return c.notFound();
-    const found = await store.getUpload(id);
-    if (!found) return c.notFound();
-    return c.html(uploadPage(found.row, found.report));
-  });
+  // The dashboard: built SPA assets with an index.html fallback for routes.
+  const dist = webDist ?? "web/dist";
+  if (existsSync(join(dist, "index.html"))) {
+    const index = readFileSync(join(dist, "index.html"), "utf8");
+    app.use("/assets/*", serveStatic({ root: dist }));
+    app.get("*", (c) => c.html(index));
+  } else {
+    app.get("*", (c) =>
+      c.text(
+        "Covallaby server is running, but the dashboard isn't built. Run `pnpm build` (or use the Docker image). The API at /api/v1/* works regardless.",
+        200,
+      ),
+    );
+  }
 
   return app;
+}
+
+function getTokenCookie(cookie: string | undefined): string | null {
+  const match = /(?:^|;\s*)covallaby_view=([^;]+)/.exec(cookie ?? "");
+  return match ? decodeURIComponent(match[1]!) : null;
 }

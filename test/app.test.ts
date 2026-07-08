@@ -45,28 +45,33 @@ describe("upload API", () => {
   });
 });
 
-describe("pages and badge", () => {
+describe("read API and badge", () => {
   beforeAll(async () => {
     await upload("repo=acme/app&branch=main&commit=def5678");
   });
 
-  it("renders the home page with the repo", async () => {
-    const html = await (await app.request("/")).text();
-    expect(html).toContain("acme/app");
-    expect(html).toContain("66.6%");
+  it("lists repos with trends", async () => {
+    const json = await (await app.request("/api/v1/repos")).json();
+    const repo = json.repos.find((r: { repo: string }) => r.repo === "acme/app");
+    expect(repo.latest.commit).toBe("def5678");
+    expect(repo.trend.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("renders the repo page with history", async () => {
-    const html = await (await app.request("/r/acme/app")).text();
-    expect(html).toContain("def5678".slice(0, 10));
+  it("serves history with branches", async () => {
+    const json = await (await app.request("/api/v1/repos/acme/app/history")).json();
+    expect(json.branch).toBe("main");
+    expect(json.branches).toContain("main");
+    expect(json.history[0].commit).toBe("def5678");
   });
 
-  it("renders the upload detail with files", async () => {
+  it("serves upload detail with directories and files", async () => {
     const repos = await (await app.request("/api/v1/repos")).json();
     const id = repos.repos[0].latest.id;
-    const html = await (await app.request(`/r/acme/app/u/${id}`)).text();
-    expect(html).toContain("src/a.ts");
-    expect(html).toContain("By directory");
+    const json = await (await app.request(`/api/v1/uploads/${id}`)).json();
+    expect(json.totals.lines.covered).toBe(2);
+    expect(json.directories[0].path).toBe("src");
+    expect(json.files[0].path).toBe("src/a.ts");
+    expect(json.files[0].missing).toBe("2");
   });
 
   it("serves a live badge", async () => {
@@ -75,8 +80,17 @@ describe("pages and badge", () => {
     expect(await res.text()).toContain("66.6%");
   });
 
-  it("404s unknown repos", async () => {
-    expect((await app.request("/r/acme/nope")).status).toBe(404);
+  it("404s unknown repos and uploads", async () => {
+    expect((await app.request("/api/v1/repos/acme/nope/history")).status).toBe(404);
+    expect((await app.request("/api/v1/uploads/99999")).status).toBe(404);
+  });
+
+  it("always answers dashboard routes: SPA when built, a pointer when not", async () => {
+    const res = await app.request("/r/acme/app");
+    expect(res.status).toBe(200);
+
+    const unbuilt = createApp({ store, uploadToken: "sekret", webDist: "/nonexistent" });
+    expect(await (await unbuilt.request("/r/acme/app")).text()).toContain("dashboard isn't built");
   });
 });
 
