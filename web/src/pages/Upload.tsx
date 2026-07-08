@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { type UploadDetail, api, formatPercent, severity } from "../api.js";
+import { Breadcrumb, Explorer, childrenOf } from "../components/explorer.js";
 import { PageSkeleton } from "../components/skeleton.js";
-import { FileTree } from "../components/tree.js";
 import { Treemap } from "../components/treemap.js";
 import { Card, CardHeader, Meter, Pct, Td, Th, inkFor } from "../components/ui.js";
 
 const VIEWS = [
-  { key: "tree", label: "Tree" },
+  { key: "explore", label: "Explorer" },
   { key: "map", label: "Map" },
   { key: "files", label: "Files" },
 ] as const;
@@ -17,9 +17,20 @@ export function Upload() {
   const repo = `${owner}/${name}`;
   const [data, setData] = useState<UploadDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [params] = useSearchParams();
-  const initialView = VIEWS.find((v) => v.key === params.get("view"))?.key ?? "tree";
+  const [params, setParams] = useSearchParams();
+  const initialView = VIEWS.find((v) => v.key === params.get("view"))?.key ?? "explore";
   const [view, setView] = useState<(typeof VIEWS)[number]["key"]>(initialView);
+  const path = params.get("path") ?? "";
+  const navigateTo = (next: string) =>
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (next) p.set("path", next);
+        else p.delete("path");
+        return p;
+      },
+      { replace: false },
+    );
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -30,11 +41,17 @@ export function Upload() {
   }, [id]);
 
   // biome-ignore lint/correctness/useHookAtTopLevel: guarded returns below never skip this hook
+  const scoped = useMemo(
+    () => (data ? data.files.filter((f) => path === "" || f.path.startsWith(`${path}/`)) : []),
+    [data, path],
+  );
+  // biome-ignore lint/correctness/useHookAtTopLevel: guarded returns below never skip this hook
   const files = useMemo(() => {
-    if (!data) return [];
     const q = query.trim().toLowerCase();
-    return q ? data.files.filter((f) => f.path.toLowerCase().includes(q)) : data.files;
-  }, [data, query]);
+    return q ? scoped.filter((f) => f.path.toLowerCase().includes(q)) : scoped;
+  }, [scoped, query]);
+  // biome-ignore lint/correctness/useHookAtTopLevel: guarded returns below never skip this hook
+  const currentChildren = useMemo(() => childrenOf(scoped, path), [scoped, path]);
 
   if (error) return <p className="text-sm text-(--bad)">{error}</p>;
   if (!data) return <PageSkeleton />;
@@ -100,11 +117,11 @@ export function Upload() {
         <CardHeader
           title="Where the coverage lives"
           description={
-            view === "tree"
-              ? "Every directory rolls up its children — worst first, click to drill in"
+            view === "explore"
+              ? "One level at a time — every directory rolls up its children, worst first"
               : view === "map"
-                ? "The big picture: area is code size, color is coverage"
-                : `${files.length} files, worst first`
+                ? "Area is code size, color is coverage — click a directory to zoom in"
+                : `${files.length} files under ${path || "root"}, worst first`
           }
           action={
             <div className="flex items-center gap-3">
@@ -136,8 +153,9 @@ export function Upload() {
             </div>
           }
         />
-        {view === "tree" && <FileTree files={data.files} />}
-        {view === "map" && <Treemap files={data.files} />}
+        <Breadcrumb path={path} onNavigate={navigateTo} />
+        {view === "explore" && <Explorer files={data.files} path={path} onNavigate={navigateTo} />}
+        {view === "map" && <Treemap items={currentChildren} onNavigate={navigateTo} />}
         {view === "files" && (
           <div className="px-1 pb-1">
             <table className="w-full text-[13.5px]">
