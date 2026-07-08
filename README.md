@@ -1,6 +1,10 @@
-# 🦘 Covallaby
+<p align="center">
+  <img src="brand/readme-header.png" alt="You write code. We cover it. — Covallaby generates beautiful coverage reports for your pull requests." width="820">
+</p>
 
-[![CI](https://github.com/covallaby/covallaby/actions/workflows/ci.yml/badge.svg)](https://github.com/covallaby/covallaby/actions/workflows/ci.yml)
+<p align="center">
+  <a href="https://github.com/covallaby/covallaby/actions/workflows/ci.yml"><img src="https://github.com/covallaby/covallaby/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
 
 **Self-hosted coverage history, dashboards, and live badges — one tiny
 process.** The home of Covallaby's platform. Pull requests are covered by the
