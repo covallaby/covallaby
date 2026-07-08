@@ -8,32 +8,10 @@ import { Home } from "./pages/Home.js";
 import { Repo } from "./pages/Repo.js";
 import { Upload } from "./pages/Upload.js";
 
+import logoUrl from "./assets/logo.png";
+
 export function Mark({ size = 24 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 512 512" aria-hidden="true">
-      <rect width="512" height="512" rx="120" fill="var(--accent)" />
-      <path d="M158 210 C104 84 136 48 208 148 Z" fill="#D9A066" />
-      <path d="M354 210 C408 84 376 48 304 148 Z" fill="#D9A066" />
-      <path d="M170 190 C136 110 152 88 200 156 Z" fill="#B87E46" />
-      <path d="M342 190 C376 110 360 88 312 156 Z" fill="#B87E46" />
-      <ellipse cx="256" cy="296" rx="138" ry="146" fill="#F4C48A" />
-      <ellipse cx="256" cy="344" rx="86" ry="72" fill="#FBDEB4" />
-      <ellipse cx="212" cy="272" rx="16" ry="20" fill="#2b2620" />
-      <circle cx="218" cy="264" r="5" fill="#fff" />
-      <ellipse cx="300" cy="272" rx="16" ry="20" fill="#2b2620" />
-      <circle cx="306" cy="264" r="5" fill="#fff" />
-      <ellipse cx="176" cy="318" rx="18" ry="10" fill="#F0A87C" opacity=".55" />
-      <ellipse cx="336" cy="318" rx="18" ry="10" fill="#F0A87C" opacity=".55" />
-      <ellipse cx="256" cy="316" rx="13" ry="9" fill="#8a5a34" />
-      <path
-        d="M232 348 C244 360 268 360 280 348"
-        stroke="#8a5a34"
-        strokeWidth="11"
-        strokeLinecap="round"
-        fill="none"
-      />
-    </svg>
-  );
+  return <img src={logoUrl} width={size} height={size} alt="" aria-hidden="true" />;
 }
 
 type Theme = "light" | "dark";

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { type RepoOverview, type UploadRow, api, formatPercent, severity } from "../api.js";
+import mascotUrl from "../assets/mascot.png";
 import { Sparkline } from "../components/charts.js";
 import { Skeleton } from "../components/skeleton.js";
 import {
@@ -60,12 +61,17 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
 
   if (repos.length === 0) {
     return (
-      <Card className="mx-auto mt-12 max-w-xl p-7">
+      <Card className="mx-auto mt-12 max-w-xl p-7 text-center">
+        <img
+          src={mascotUrl}
+          alt="The Covallaby wallaby holding a coverage checklist"
+          className="mx-auto mb-4 w-40"
+        />
         <h2 className="text-lg font-semibold tracking-tight">No coverage yet — let's fix that</h2>
         <p className="mt-2 text-sm text-(--ink-2)">
           Upload any coverage file (LCOV, JaCoCo, Cobertura, xccov) from CI or your machine:
         </p>
-        <pre className="mt-4 overflow-x-auto rounded-xl border border-(--hairline) bg-(--surface-2) p-4 font-mono text-xs leading-relaxed">
+        <pre className="mt-4 overflow-x-auto rounded-xl border border-(--hairline) bg-(--surface-2) p-4 text-left font-mono text-xs leading-relaxed">
           {`curl -X POST "$SERVER/api/v1/upload?repo=you/app&branch=main&commit=$(git rev-parse HEAD)" \\
   -H "Authorization: Bearer $COVALLABY_TOKEN" \\
   --data-binary @coverage/lcov.info`}
