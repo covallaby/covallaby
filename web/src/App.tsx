@@ -2,9 +2,10 @@ import { Github, LayoutDashboard, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { IS_DEMO, type RepoOverview, api, formatPercent, severity } from "./api.js";
-import { inkFor } from "./components/ui.js";
+import { Meter, inkFor } from "./components/ui.js";
 import { CompareBranches, PullRequest } from "./pages/Compare.js";
 import { Home } from "./pages/Home.js";
+import { Policy } from "./pages/Policy.js";
 import { Repo } from "./pages/Repo.js";
 import { Upload } from "./pages/Upload.js";
 
@@ -60,6 +61,65 @@ function SidebarLink({
   );
 }
 
+function SubLink({
+  to,
+  active,
+  children,
+}: {
+  to: string;
+  active: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      to={to}
+      className={`rounded-md px-2.5 py-1 text-[12px] transition-colors ${
+        active ? "font-medium text-(--ink)" : "text-(--muted) hover:text-(--ink)"
+      }`}
+    >
+      {children}
+    </Link>
+  );
+}
+
+/** A repo in the rail: name + coverage %, a mini bar, and — when active — quick links. */
+function RepoNavItem({ r, pathname }: { r: RepoOverview; pathname: string }) {
+  const base = `/r/${r.repo}`;
+  const active = pathname === base || pathname.startsWith(`${base}/`);
+  return (
+    <div>
+      <Link
+        to={base}
+        className={`block rounded-lg px-2.5 py-2 transition-colors ${
+          active ? "bg-(--accent-wash)" : "hover:bg-(--surface-2)"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-(--ink-2)">
+            {r.repo}
+          </span>
+          <span
+            className={`text-[11px] font-semibold tabular-nums ${inkFor[severity(r.latest.percent)]}`}
+          >
+            {formatPercent(r.latest.percent)}
+          </span>
+        </div>
+        <Meter percent={r.latest.percent} className="mt-1.5" />
+      </Link>
+      {active && (
+        <div className="mt-0.5 mb-1 ml-3 flex flex-col items-start gap-0.5 border-l border-(--hairline) pl-2">
+          <SubLink to={`${base}/compare`} active={pathname.startsWith(`${base}/compare`)}>
+            Compare
+          </SubLink>
+          <SubLink to={`${base}/policy`} active={pathname.startsWith(`${base}/policy`)}>
+            Policy
+          </SubLink>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Sidebar({ repos }: { repos: RepoOverview[] | null }) {
   const { pathname } = useLocation();
   return (
@@ -83,24 +143,13 @@ function Sidebar({ repos }: { repos: RepoOverview[] | null }) {
           </div>
           <div className="space-y-0.5">
             {repos === null && (
-              <div className="space-y-1.5 px-2.5 py-1">
-                <div className="h-3.5 animate-pulse rounded bg-(--surface-2)" />
-                <div className="h-3.5 w-3/4 animate-pulse rounded bg-(--surface-2)" />
+              <div className="space-y-2.5 px-2.5 py-1">
+                <div className="h-8 animate-pulse rounded bg-(--surface-2)" />
+                <div className="h-8 animate-pulse rounded bg-(--surface-2)" />
               </div>
             )}
             {repos?.map((r) => (
-              <SidebarLink
-                key={r.repo}
-                to={`/r/${r.repo}`}
-                active={pathname.startsWith(`/r/${r.repo}`)}
-              >
-                <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{r.repo}</span>
-                <span
-                  className={`text-[11px] font-semibold tabular-nums ${inkFor[severity(r.latest.percent)]}`}
-                >
-                  {formatPercent(r.latest.percent)}
-                </span>
-              </SidebarLink>
+              <RepoNavItem key={r.repo} r={r} pathname={pathname} />
             ))}
             {repos?.length === 0 && (
               <p className="px-2.5 py-1 text-[12px] text-(--muted)">Nothing uploaded yet.</p>
@@ -199,6 +248,7 @@ export function App() {
             <Routes>
               <Route path="/" element={<Home repos={repos} />} />
               <Route path="/r/:owner/:name" element={<Repo />} />
+              <Route path="/r/:owner/:name/policy" element={<Policy />} />
               <Route path="/r/:owner/:name/pr/:pr" element={<PullRequest />} />
               <Route path="/r/:owner/:name/compare" element={<CompareBranches />} />
               <Route path="/r/:owner/:name/u/:id" element={<Upload />} />

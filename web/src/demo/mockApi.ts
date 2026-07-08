@@ -1,9 +1,12 @@
 import type {
   CompareResult,
   DirTrends,
+  PolicyStatus,
+  PolicyViolation,
   PortfolioTrends,
   RepoHistory,
   RepoOverview,
+  RepoPolicy,
   UploadDetail,
   UploadRow,
 } from "../api.js";
@@ -126,8 +129,56 @@ function dirTrends(repo: string, branch?: string): DirTrends {
   return { repo, branch: resolved, steps, dirs };
 }
 
+// Demo-only sample policies so the Policy page shows both a pass and a fail.
+const DEMO_POLICIES: Record<string, RepoPolicy> = {
+  "acme/megarepo": { minProject: 70, maxDrop: 1 },
+  "covallaby/covallaby": { minProject: 90, maxDrop: 0.5 },
+};
+const pct1 = (n: number | null) => (n === null ? "—" : `${(Math.floor(n * 10) / 10).toFixed(1)}%`);
+
+function policyStatus(repo: string): PolicyStatus {
+  const policy = DEMO_POLICIES[repo] ?? null;
+  const hist = F.history[repo]?.history ?? [];
+  const head = hist[0] ?? null;
+  const base = hist[1] ?? null;
+  const violations: PolicyViolation[] = [];
+  if (policy && head) {
+    const p = head.percent;
+    if (policy.minProject !== undefined && (p === null || p < policy.minProject)) {
+      violations.push({
+        kind: "project",
+        actual: p,
+        required: policy.minProject,
+        message: `Project coverage is ${pct1(p)}, but ${pct1(policy.minProject)} is required.`,
+      });
+    }
+    if (policy.maxDrop !== undefined && base?.percent != null && p != null) {
+      const drop = base.percent - p;
+      if (drop > policy.maxDrop) {
+        violations.push({
+          kind: "drop",
+          actual: drop,
+          required: policy.maxDrop,
+          message: `Project coverage fell ${pct1(drop)}; at most ${pct1(policy.maxDrop)} is allowed.`,
+        });
+      }
+    }
+  }
+  return {
+    repo,
+    configured: policy !== null,
+    passed: violations.length === 0,
+    violations,
+    head,
+    base,
+    basis: base ? "previous" : "none",
+  };
+}
+
 export const demoApi = {
   repos: () => settle(F.repos),
+  policy: (repo: string) => settle({ repo, policy: DEMO_POLICIES[repo] ?? null }),
+  status: (repo: string) => settle(policyStatus(repo)),
   activity: () => settle(F.activity),
   history: (repo: string, branch?: string) => {
     const key = branch ? `${repo}@${branch}` : repo;

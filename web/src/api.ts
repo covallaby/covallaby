@@ -86,6 +86,31 @@ export interface RepoHistory {
   history: UploadRow[];
 }
 
+/** A repo's merge policy — the "can I merge?" gate. */
+export interface RepoPolicy {
+  minProject?: number;
+  maxDrop?: number;
+  minNewFile?: number;
+}
+
+export interface PolicyViolation {
+  kind: "project" | "drop" | "new-file";
+  actual: number | null;
+  required: number;
+  message: string;
+}
+
+export interface PolicyStatus {
+  repo: string;
+  configured: boolean;
+  passed: boolean;
+  violations: PolicyViolation[];
+  head: UploadRow | null;
+  base: UploadRow | null;
+  basis: "compare" | "previous" | "none";
+  note?: string;
+}
+
 async function get<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -106,6 +131,9 @@ const liveApi = {
       `/api/v1/repos/${repo}/dir-trends${branch ? `?branch=${encodeURIComponent(branch)}` : ""}`,
     ),
   prs: (repo: string) => get<{ prs: PROverview[] }>(`/api/v1/repos/${repo}/prs`),
+  policy: (repo: string) =>
+    get<{ repo: string; policy: RepoPolicy | null }>(`/api/v1/repos/${repo}/policy`),
+  status: (repo: string) => get<PolicyStatus>(`/api/v1/repos/${repo}/status`),
   compare: (repo: string, q: { pr?: number; head?: string; base?: string }) => {
     const params = new URLSearchParams();
     if (q.pr !== undefined) params.set("pr", String(q.pr));
@@ -129,6 +157,8 @@ export const api: typeof liveApi = IS_DEMO
       trends: (...a) => load().then((d) => d.trends(...a)),
       dirTrends: (...a) => load().then((d) => d.dirTrends(...a)),
       prs: (...a) => load().then((d) => d.prs(...a)),
+      policy: (...a) => load().then((d) => d.policy(...a)),
+      status: (...a) => load().then((d) => d.status(...a)),
       compare: (...a) => load().then((d) => d.compare(...a)),
     }
   : liveApi;
