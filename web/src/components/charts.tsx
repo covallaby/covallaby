@@ -80,6 +80,8 @@ export interface TrendPoint {
   percent: number | null;
   label: string;
   sublabel?: string;
+  /** Upload time (ms since epoch) — the x position. */
+  t: number;
 }
 
 const W = 960;
@@ -98,15 +100,41 @@ export function HistoryChart({ points, height = 260 }: { points: TrendPoint[]; h
     const span = yMax - yMin || 1;
     const iw = W - M.left - M.right;
     const ih = H - M.top - M.bottom;
-    const x = (i: number) => M.left + (points.length === 1 ? 0 : (i / (points.length - 1)) * iw);
+
+    // Time scale: real dates on x. Fall back to even spacing when the
+    // uploads share one timestamp (imports, backfills).
+    const tMin = Math.min(...points.map((p) => p.t));
+    const tMax = Math.max(...points.map((p) => p.t));
+    const tSpan = tMax - tMin;
+    const x = (i: number) =>
+      tSpan === 0
+        ? M.left + (points.length === 1 ? 0 : (i / (points.length - 1)) * iw)
+        : M.left + ((points[i]!.t - tMin) / tSpan) * iw;
     const y = (v: number) => M.top + ih - ((v - yMin) / span) * ih;
+
     const step = span > 25 ? 10 : 5;
     const ticks: number[] = [];
     for (let t = yMin + step; t <= yMax; t += step) ticks.push(t);
-    const every = Math.max(1, Math.ceil(points.length / 6));
-    const xTicks = points
-      .map((p, i) => ({ i, label: p.label }))
-      .filter(({ i }) => i % every === 0 || i === points.length - 1);
+
+    // ~5 date ticks across the time span.
+    const DAY = 86400e3;
+    const fmtDay = (ms: number) =>
+      new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const fmtTime = (ms: number) =>
+      new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    const xTicks: Array<{ px: number; label: string }> = [];
+    if (tSpan === 0) {
+      xTicks.push({ px: M.left + iw / 2, label: fmtDay(tMin) });
+    } else {
+      const n = 5;
+      for (let k = 0; k <= n; k++) {
+        const ms = tMin + (tSpan * k) / n;
+        xTicks.push({
+          px: M.left + ((ms - tMin) / tSpan) * iw,
+          label: tSpan < 2 * DAY ? fmtTime(ms) : fmtDay(ms),
+        });
+      }
+    }
     return { x, y, ticks, xTicks, yMin };
   }, [points, H]);
 
@@ -184,15 +212,14 @@ export function HistoryChart({ points, height = 260 }: { points: TrendPoint[]; h
             </text>
           </g>
         ))}
-        {xTicks.map(({ i, label }) => (
+        {xTicks.map(({ px, label }, k) => (
           <text
-            key={`x-${i}`}
-            x={x(i)}
+            key={`x-${px.toFixed(1)}`}
+            x={px}
             y={H - 7}
-            textAnchor={i === points.length - 1 ? "end" : "middle"}
+            textAnchor={k === xTicks.length - 1 ? "end" : k === 0 ? "start" : "middle"}
             fill="var(--muted)"
             fontSize={10.5}
-            fontFamily="ui-monospace, Menlo, monospace"
           >
             {label}
           </text>
@@ -209,6 +236,20 @@ export function HistoryChart({ points, height = 260 }: { points: TrendPoint[]; h
           strokeLinecap="round"
           strokeLinejoin="round"
         />
+        {points.length <= 60 &&
+          points.map((p, i) =>
+            p.percent === null ? null : (
+              <circle
+                key={`dot-${p.t}-${i}`}
+                cx={x(i)}
+                cy={y(p.percent)}
+                r={3}
+                fill="var(--series)"
+                stroke="var(--surface)"
+                strokeWidth={1.5}
+              />
+            ),
+          )}
         {hovered && hovered.percent !== null && (
           <g>
             <line
@@ -223,7 +264,7 @@ export function HistoryChart({ points, height = 260 }: { points: TrendPoint[]; h
             <circle
               cx={x(hovered.i)}
               cy={y(hovered.percent)}
-              r={4.5}
+              r={5}
               fill="var(--series)"
               stroke="var(--surface)"
               strokeWidth={2}
