@@ -1,0 +1,18 @@
+services:
+  covallaby:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - covallaby-data:/data
+    environment:
+      # Set your own, or read the generated one from `docker compose logs`.
+      # COVALLABY_TOKEN: change-me
+      # Optional: gate the dashboard behind a token too.
+      # COVALLABY_VIEW_TOKEN: peek
+      # Optional: use Postgres instead of the bundled SQLite file.
+      # DATABASE_URL: postgres://covallaby:covallaby@db:5432/covallaby
+    restart: unless-stopped
+
+volumes:
+  covallaby-data:
