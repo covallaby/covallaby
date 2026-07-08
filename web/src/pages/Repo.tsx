@@ -23,7 +23,7 @@ import {
   Th,
   inkFor,
 } from "../components/ui.js";
-import { CommitWaterfall, DirectoryStream } from "../components/viz.js";
+import { DirectoryStream } from "../components/viz.js";
 
 function when(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
@@ -285,37 +285,6 @@ export function Repo() {
         </div>
       </Card>
 
-      {data.history.length >= 2 && (
-        <>
-          <Card>
-            <CardHeader
-              title="What moved coverage"
-              description={`Change per upload on ${data.branch} — click a bar to open that commit`}
-            />
-            <div className="px-4 pb-4">
-              <CommitWaterfall
-                history={data.history}
-                onPick={(uid) => navigate(`/r/${repo}/u/${uid}`)}
-              />
-            </div>
-          </Card>
-
-          <Card>
-            <CardHeader
-              title="By directory"
-              description="Covered lines per top-level folder over time"
-            />
-            <div className="px-4 pb-4">
-              {dirs ? (
-                <DirectoryStream data={dirs} />
-              ) : (
-                <p className="px-1 py-6 text-sm text-(--muted)">Loading the folder breakdown…</p>
-              )}
-            </div>
-          </Card>
-        </>
-      )}
-
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_290px]">
         <Card>
           <CardHeader
@@ -407,6 +376,22 @@ export function Repo() {
           <BadgeCard repo={repo} />
         </div>
       </div>
+
+      {data.history.length >= 2 && (
+        <Card>
+          <CardHeader
+            title="By directory"
+            description="Covered lines per top-level folder over time"
+          />
+          <div className="px-4 pb-4">
+            {dirs ? (
+              <DirectoryStream data={dirs} />
+            ) : (
+              <p className="px-1 py-6 text-sm text-(--muted)">Loading the folder breakdown…</p>
+            )}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

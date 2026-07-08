@@ -5,7 +5,6 @@ import {
   type RepoOverview,
   type ReportChanges,
   type Severity,
-  type UploadRow,
   formatPercent,
   severity,
 } from "../api.js";
@@ -273,127 +272,6 @@ export function CoverageDebt({ trends }: { trends: PortfolioTrends }) {
       <text x={L + 79} y={T + 8} fontSize={10} fontFamily="var(--font-mono)" fill="var(--muted)">
         total
       </text>
-    </svg>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* 4 · Commit waterfall — which upload moved coverage                   */
-/* ------------------------------------------------------------------ */
-
-export function CommitWaterfall({
-  history,
-  onPick,
-}: {
-  history: UploadRow[];
-  onPick?: (id: number) => void;
-}) {
-  const seq = [...history].reverse().slice(-24); // oldest → newest, capped
-  const bars = seq
-    .map((u, j) => {
-      const prev = seq[j - 1];
-      const d = u.percent !== null && prev?.percent != null ? u.percent - prev.percent : null;
-      return { u, d };
-    })
-    .filter((b): b is { u: UploadRow; d: number } => b.d !== null);
-  if (bars.length < 1) return <Empty>Two uploads and the per-commit swing shows up here. 🦘</Empty>;
-
-  const W = 760;
-  const H = 250;
-  const L = 30;
-  const Rp = 14;
-  const T = 22;
-  const B = 40;
-  const n = bars.length;
-  const slot = (W - L - Rp) / n;
-  const bw = Math.min(30, slot * 0.62);
-  const maxAbs = Math.max(1, ...bars.map((b) => Math.abs(b.d)));
-  const mid = (T + H - B) / 2;
-  const sh = (v: number) => (v / maxAbs) * ((H - T - B) / 2);
-  const grid = [maxAbs, maxAbs / 2, 0, -maxAbs / 2, -maxAbs].map((g) => Math.round(g * 10) / 10);
-
-  return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      width="100%"
-      role="img"
-      aria-label="per-commit coverage change"
-      className="overflow-visible"
-    >
-      <title>Coverage change per upload</title>
-      {grid.map((g) => (
-        <g key={g}>
-          <line
-            x1={L}
-            x2={W - Rp}
-            y1={mid - sh(g)}
-            y2={mid - sh(g)}
-            stroke="var(--hairline)"
-            strokeDasharray={g === 0 ? undefined : "2 3"}
-            opacity={g === 0 ? 1 : 0.4}
-          />
-          <text
-            x={L - 5}
-            y={mid - sh(g) + 3}
-            textAnchor="end"
-            fontSize={9.5}
-            fontFamily="var(--font-mono)"
-            fill="var(--muted)"
-          >
-            {g > 0 ? "+" : ""}
-            {g}
-          </text>
-        </g>
-      ))}
-      {bars.map((b, i) => {
-        const cx = L + slot * i + slot / 2;
-        const up = b.d >= 0;
-        const bh = Math.max(1.5, Math.abs(sh(b.d)));
-        const by = up ? mid - bh : mid;
-        return (
-          // biome-ignore lint/a11y/useKeyWithClickEvents: the commit is reachable via the uploads table; this bar is a mouse shortcut
-          <g
-            key={b.u.id}
-            onClick={onPick ? () => onPick(b.u.id) : undefined}
-            style={{ cursor: onPick ? "pointer" : "default" }}
-          >
-            {onPick && (
-              <rect x={cx - slot / 2} y={T} width={slot} height={H - T - B} fill="transparent" />
-            )}
-            <rect
-              x={cx - bw / 2}
-              y={by}
-              width={bw}
-              height={bh}
-              rx={2}
-              fill={up ? "var(--good)" : "var(--bad)"}
-              opacity={0.9}
-            />
-            <text
-              x={cx}
-              y={up ? by - 4 : by + bh + 11}
-              textAnchor="middle"
-              fontSize={9.5}
-              fontFamily="var(--font-mono)"
-              fill={up ? "var(--good)" : "var(--bad)"}
-            >
-              {up ? "+" : ""}
-              {b.d.toFixed(1)}
-            </text>
-            <text
-              x={cx}
-              y={H - 6}
-              textAnchor="middle"
-              fontSize={9.5}
-              fontFamily="var(--font-mono)"
-              fill="var(--muted)"
-              opacity={0.85}
-            >
-              {b.u.commit.slice(0, 6)}
-            </text>
-          </g>
-        );
-      })}
     </svg>
   );
 }
