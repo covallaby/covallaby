@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTree, type FileEntry } from "../web/src/components/explorer.js";
+import { type FileEntry, buildTree } from "../web/src/components/explorer.js";
 import { findNode, squarify } from "../web/src/components/treemap.js";
 
 // Two top-level dirs so the root stays root; one branch is a collapsed chain.
