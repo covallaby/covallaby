@@ -5,6 +5,7 @@ import {
   type RepoOverview,
   type Store,
   type UploadRow,
+  accountOf,
   packReport,
   percentOf,
   unpackReport,
@@ -21,10 +22,12 @@ CREATE TABLE IF NOT EXISTS uploads (
   lines_total INTEGER NOT NULL,
   files INTEGER NOT NULL,
   report BYTEA NOT NULL,
+  account TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_repo_branch_time
   ON uploads(repo, branch, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_uploads_account ON uploads(account);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS repo_tokens (repo TEXT PRIMARY KEY, token TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_uploads_repo_pr ON uploads(repo, pr) WHERE pr IS NOT NULL;
@@ -68,18 +71,24 @@ export class PostgresStore implements Store {
 
   async recordUpload(input: RecordUploadInput): Promise<UploadRow> {
     const [raw] = await this.sql<RawRow[]>`
-      INSERT INTO uploads (repo, branch, commit_sha, pr, lines_covered, lines_total, files, report)
+      INSERT INTO uploads (repo, branch, commit_sha, pr, lines_covered, lines_total, files, report, account)
       VALUES (${input.repo}, ${input.branch}, ${input.commit}, ${input.pr},
               ${input.linesCovered}, ${input.linesTotal}, ${input.files},
-              ${Buffer.from(packReport(input.report))})
+              ${Buffer.from(packReport(input.report))}, ${accountOf(input.repo)})
       RETURNING id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at`;
     return toRow(raw!);
   }
 
-  async listRepos(trendPoints: number): Promise<RepoOverview[]> {
+  async listRepos(trendPoints: number, accounts?: string[]): Promise<RepoOverview[]> {
+    const sub =
+      accounts === undefined
+        ? this.sql``
+        : accounts.length === 0
+          ? this.sql`WHERE false`
+          : this.sql`WHERE account = ANY(${accounts})`;
     const latest = await this.sql<RawRow[]>`
       SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at
-      FROM uploads WHERE id IN (SELECT MAX(id) FROM uploads GROUP BY repo)
+      FROM uploads WHERE id IN (SELECT MAX(id) FROM uploads ${sub} GROUP BY repo)
       ORDER BY repo`;
     const overviews: RepoOverview[] = [];
     for (const raw of latest) {
@@ -102,10 +111,16 @@ export class PostgresStore implements Store {
     return rows.map(toRow);
   }
 
-  async recentUploads(limit: number): Promise<UploadRow[]> {
+  async recentUploads(limit: number, accounts?: string[]): Promise<UploadRow[]> {
+    const sub =
+      accounts === undefined
+        ? this.sql``
+        : accounts.length === 0
+          ? this.sql`WHERE false`
+          : this.sql`WHERE account = ANY(${accounts})`;
     const rows = await this.sql<RawRow[]>`
       SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at
-      FROM uploads ORDER BY id DESC LIMIT ${limit}`;
+      FROM uploads ${sub} ORDER BY id DESC LIMIT ${limit}`;
     return rows.map(toRow);
   }
 

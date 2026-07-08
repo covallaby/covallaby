@@ -7,6 +7,7 @@ import {
   type RepoOverview,
   type Store,
   type UploadRow,
+  accountOf,
   packReport,
   percentOf,
   unpackReport,
@@ -23,10 +24,12 @@ CREATE TABLE IF NOT EXISTS uploads (
   lines_total INTEGER NOT NULL,
   files INTEGER NOT NULL,
   report BLOB NOT NULL,
+  account TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_repo_branch_time
   ON uploads(repo, branch, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_uploads_account ON uploads(account);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS repo_tokens (repo TEXT PRIMARY KEY, token TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_uploads_repo_pr ON uploads(repo, pr) WHERE pr IS NOT NULL;
@@ -62,6 +65,14 @@ function toRow(raw: RawRow): UploadRow {
 const ROW_COLUMNS =
   "id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at";
 
+/** Optional account scope for cross-repo queries (hosted multi-tenancy). */
+function accountFilter(accounts?: string[]): { sub: string; params: string[] } {
+  if (!accounts) return { sub: "", params: [] };
+  if (accounts.length === 0) return { sub: "WHERE 1 = 0", params: [] };
+  const placeholders = accounts.map(() => "?").join(", ");
+  return { sub: `WHERE account IN (${placeholders})`, params: accounts };
+}
+
 export class SqliteStore implements Store {
   private readonly db: DatabaseSync;
 
@@ -75,8 +86,8 @@ export class SqliteStore implements Store {
   async recordUpload(input: RecordUploadInput): Promise<UploadRow> {
     const result = this.db
       .prepare(
-        `INSERT INTO uploads (repo, branch, commit_sha, pr, lines_covered, lines_total, files, report)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO uploads (repo, branch, commit_sha, pr, lines_covered, lines_total, files, report, account)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.repo,
@@ -87,6 +98,7 @@ export class SqliteStore implements Store {
         input.linesTotal,
         input.files,
         packReport(input.report),
+        accountOf(input.repo),
       );
     const raw = this.db
       .prepare(`SELECT ${ROW_COLUMNS} FROM uploads WHERE id = ?`)
@@ -94,14 +106,15 @@ export class SqliteStore implements Store {
     return toRow(raw);
   }
 
-  async listRepos(trendPoints: number): Promise<RepoOverview[]> {
+  async listRepos(trendPoints: number, accounts?: string[]): Promise<RepoOverview[]> {
+    const scope = accountFilter(accounts);
     const latest = this.db
       .prepare(
         `SELECT ${ROW_COLUMNS} FROM uploads
-         WHERE id IN (SELECT MAX(id) FROM uploads GROUP BY repo)
+         WHERE id IN (SELECT MAX(id) FROM uploads ${scope.sub} GROUP BY repo)
          ORDER BY repo`,
       )
-      .all() as unknown as RawRow[];
+      .all(...scope.params) as unknown as RawRow[];
     return latest.map((raw) => {
       const row = toRow(raw);
       const trendRaw = this.db
@@ -129,10 +142,11 @@ export class SqliteStore implements Store {
     return rows.map(toRow);
   }
 
-  async recentUploads(limit: number): Promise<UploadRow[]> {
+  async recentUploads(limit: number, accounts?: string[]): Promise<UploadRow[]> {
+    const scope = accountFilter(accounts);
     const rows = this.db
-      .prepare(`SELECT ${ROW_COLUMNS} FROM uploads ORDER BY id DESC LIMIT ?`)
-      .all(limit) as unknown as RawRow[];
+      .prepare(`SELECT ${ROW_COLUMNS} FROM uploads ${scope.sub} ORDER BY id DESC LIMIT ?`)
+      .all(...scope.params, limit) as unknown as RawRow[];
     return rows.map(toRow);
   }
 

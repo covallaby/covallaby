@@ -107,6 +107,32 @@ describe.each(stores)("store contract (%s)", (_name, store) => {
     expect(await store.prevUpload("acme/app", "main", first.id)).toBeNull();
   });
 
+  it("scopes cross-repo reads by account (hosted multi-tenancy)", async () => {
+    await store.recordUpload({
+      repo: "other-org/thing",
+      branch: "main",
+      commit: "oo1",
+      pr: null,
+      report,
+      linesCovered: 1,
+      linesTotal: 1,
+      files: 1,
+    });
+    // no scope → sees every account (self-hosted behavior)
+    const all = await store.listRepos(12);
+    expect(all.some((r) => r.repo === "acme/app")).toBe(true);
+    expect(all.some((r) => r.repo === "other-org/thing")).toBe(true);
+    // scoped to acme → only acme repos
+    const acme = await store.listRepos(12, ["acme"]);
+    expect(acme.every((r) => r.repo.startsWith("acme/"))).toBe(true);
+    expect(acme.some((r) => r.repo === "other-org/thing")).toBe(false);
+    // empty scope → nothing
+    expect(await store.listRepos(12, [])).toEqual([]);
+    // recentUploads honors the scope too
+    const recent = await store.recentUploads(50, ["other-org"]);
+    expect(recent.every((u) => u.repo.startsWith("other-org/"))).toBe(true);
+  });
+
   it("stores meta key-values with upsert", async () => {
     await store.setMeta("k", "v1");
     await store.setMeta("k", "v2");

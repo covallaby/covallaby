@@ -44,12 +44,21 @@ export interface PROverview {
   uploads: number;
 }
 
+/** The tenant boundary: the GitHub owner of a repo. */
+export function accountOf(repo: string): string {
+  return repo.split("/")[0] ?? repo;
+}
+
 export interface Store {
   recordUpload(input: RecordUploadInput): Promise<UploadRow>;
-  listRepos(trendPoints: number): Promise<RepoOverview[]>;
+  /**
+   * Cross-repo overview. `accounts` (hosted mode) scopes to those owners;
+   * omit for the self-hosted single-tenant view (all repos).
+   */
+  listRepos(trendPoints: number, accounts?: string[]): Promise<RepoOverview[]>;
   history(repo: string, branch: string, limit: number): Promise<UploadRow[]>;
-  /** Latest uploads across every repo, newest first. */
-  recentUploads(limit: number): Promise<UploadRow[]>;
+  /** Latest uploads across every repo, newest first. `accounts` scopes them. */
+  recentUploads(limit: number, accounts?: string[]): Promise<UploadRow[]>;
   /** The upload immediately before `beforeId` on the same repo+branch. */
   prevUpload(
     repo: string,
