@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { createApp, ensureUploadToken } from "../src/app.js";
+import { attachDashboard } from "../src/static-node.js";
 import { SqliteStore } from "../src/store/sqlite.js";
 
 const lcov = `SF:src/a.ts
@@ -11,6 +12,7 @@ end_of_record
 
 const store = new SqliteStore(":memory:");
 const app = createApp({ store, uploadToken: "sekret" });
+attachDashboard(app, "/nonexistent"); // Node runtime attaches the SPA catch-all
 
 const upload = (query = "repo=acme/app&branch=main&commit=abc1234", token = "sekret") =>
   app.request(`/api/v1/upload?${query}`, {
@@ -85,17 +87,16 @@ describe("read API and badge", () => {
     expect((await app.request("/api/v1/uploads/99999")).status).toBe(404);
   });
 
-  it("always answers dashboard routes: SPA when built, a pointer when not", async () => {
+  it("answers dashboard routes with a pointer when the SPA isn't built", async () => {
     const res = await app.request("/r/acme/app");
     expect(res.status).toBe(200);
-
-    const unbuilt = createApp({ store, uploadToken: "sekret", webDist: "/nonexistent" });
-    expect(await (await unbuilt.request("/r/acme/app")).text()).toContain("dashboard isn't built");
+    expect(await res.text()).toContain("dashboard isn't built");
   });
 });
 
 describe("view token gate", () => {
   const gated = createApp({ store, uploadToken: "sekret", viewToken: "peek" });
+  attachDashboard(gated, "/nonexistent");
 
   it("blocks pages without the token but allows health and upload", async () => {
     expect((await gated.request("/")).status).toBe(401);

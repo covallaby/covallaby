@@ -19,16 +19,25 @@ from the logs on first boot).
 | **Heroku** | [`app.json`](../app.json) + [`heroku.yml`](../heroku.yml) | Postgres addon (auto `DATABASE_URL`) |
 | **DigitalOcean** | [`digitalocean.app.yaml`](digitalocean.app.yaml) | Postgres (ephemeral FS) |
 | **Railway / Koyeb / any Docker host** | the root `Dockerfile` | your volume or Postgres |
+| **Cloudflare Workers** | [`wrangler.toml`](../wrangler.toml) + [`D1Store`](../src/store/d1.ts) | D1 (edge SQLite) |
 
 See each file's header comments for the exact commands.
 
-### A note on Cloudflare
+### Cloudflare Workers + D1 (edge)
 
-Cloudflare Workers/Pages is **not** a drop-in target for this server. It's an
-edge runtime, not Node — no `node:sqlite`, no filesystem, and no TCP for the
-Postgres driver, so the server can't run there unchanged. Hono itself is
-Cloudflare-native, so a real port is possible: it needs a **D1-backed `Store`
-adapter** (Cloudflare's SQLite) plus static assets served from Workers Assets.
-That's tracked as a future adapter, not a one-click button — we won't ship a
-button that doesn't actually work. For a managed host today, Fly/Render/Heroku
-run the real thing in minutes.
+Covallaby runs on Cloudflare's edge too, on **D1** (Cloudflare's SQLite). Same
+core app — a dedicated [`D1Store`](../src/store/d1.ts) driver and a
+[Workers entry point](../src/worker.ts) that serves the dashboard from the
+Assets binding. No `node:sqlite`, no filesystem, no Postgres driver on this path.
+
+```bash
+npx wrangler d1 create covallaby        # paste the database_id into wrangler.toml
+pnpm build                              # compiles src → dist (incl. worker.js)
+npx wrangler secret put COVALLABY_TOKEN # your CI upload token
+npx wrangler deploy                     # bundles dist/worker.js + web/dist assets
+```
+
+Config lives in [`wrangler.toml`](../wrangler.toml). The D1 schema is created
+lazily on the first request — no migration step. Scales to zero, runs on
+Cloudflare's free tier, and the hosted tier (`COVALLABY_HOSTED=1` + secrets)
+works here too.

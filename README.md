@@ -169,9 +169,13 @@ One process, one `Dockerfile`, runs anywhere. Ready-made templates and buttons:
   `node dist/index.js` under systemd. Back up the single `data/covallaby.db`
   (or your Postgres).
 
+- **Cloudflare Workers** — runs on **D1** (edge SQLite) via
+  [`wrangler.toml`](wrangler.toml): `wrangler d1 create covallaby`, `pnpm build`,
+  `wrangler deploy`. Scales to zero on the free tier.
+
 Storage in one line: **SQLite needs a persistent volume at `/data`; Postgres
-(`DATABASE_URL`) needs none.** Full guide — including why Cloudflare Workers
-needs a D1 adapter, not a button — in [`deploy/`](deploy/README.md).
+(`DATABASE_URL`) needs none; Cloudflare uses D1.** Full guide in
+[`deploy/`](deploy/README.md).
 
 ## Design
 

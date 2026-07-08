@@ -1,0 +1,21 @@
+# Cloudflare Workers deploy — runs the server on D1 (edge SQLite) + Assets.
+#
+#   npx wrangler d1 create covallaby      # → paste the database_id below
+#   pnpm build                            # compiles src → dist (incl. worker.js)
+#   npx wrangler deploy                   # bundles dist/worker.js and ships it
+#
+# Set secrets:  npx wrangler secret put COVALLABY_TOKEN
+# The D1 schema is created lazily on first request — no migration step needed.
+name = "covallaby"
+main = "dist/worker.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "covallaby"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+
+[assets]
+directory = "web/dist"
+binding = "ASSETS"

@@ -1,7 +1,4 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { type AppEnv, type HostedConfig, type HostedDeps, mountHosted } from "./hosted/index.js";
 import type { Store } from "./store.js";
@@ -20,8 +17,6 @@ export interface AppOptions {
   uploadToken: string;
   /** Optional read gate; unset = dashboard is public. */
   viewToken?: string;
-  /** Directory holding the built web app (index.html + assets). */
-  webDist?: string;
   /** Upload rate limit per token (sliding minute). Default 30. */
   uploadsPerMinute?: number;
   /** Present → mount the hosted tier (OAuth, billing, per-account scoping). */
@@ -85,7 +80,6 @@ export function createApp({
   store,
   uploadToken,
   viewToken,
-  webDist,
   uploadsPerMinute = 30,
   hosted,
   hostedDeps,
@@ -220,7 +214,9 @@ export function createApp({
     c.json({ repos: await store.listRepos(12, c.get("accounts")) }),
   );
 
-  app.get("/api/v1/activity", async (c) => c.json({ uploads: await store.recentUploads(15) }));
+  app.get("/api/v1/activity", async (c) =>
+    c.json({ uploads: await store.recentUploads(15, c.get("accounts")) }),
+  );
 
   // Mint (or rotate) a per-repo upload token. Admin token required.
   app.post("/api/v1/repos/:owner/:name/token", async (c) => {
@@ -378,21 +374,9 @@ export function createApp({
     return c.body(svg);
   });
 
-  // The dashboard: built SPA assets with an index.html fallback for routes.
-  const dist = webDist ?? "web/dist";
-  if (existsSync(join(dist, "index.html"))) {
-    const index = readFileSync(join(dist, "index.html"), "utf8");
-    app.use("/assets/*", serveStatic({ root: dist }));
-    app.get("*", (c) => c.html(index));
-  } else {
-    app.get("*", (c) =>
-      c.text(
-        "Covallaby server is running, but the dashboard isn't built. Run `pnpm build` (or use the Docker image). The API at /api/v1/* works regardless.",
-        200,
-      ),
-    );
-  }
-
+  // The SPA/dashboard catch-all is attached by the runtime entry point
+  // (Node serves built files; the Worker serves from its Assets binding), so
+  // createApp itself stays runtime-agnostic — no node:fs, no @hono/node-server.
   return app;
 }
 

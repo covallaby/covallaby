@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { createApp, ensureUploadToken } from "./app.js";
 import { loadHostedConfig } from "./hosted/index.js";
+import { attachDashboard } from "./static-node.js";
 import { openStore } from "./store.js";
 
 const store = await openStore();
@@ -14,6 +15,7 @@ const app = createApp({
   ...(viewToken && { viewToken }),
   ...(hosted && { hosted }),
 });
+attachDashboard(app, process.env.COVALLABY_WEB_DIST); // Node serves the built SPA
 
 const port = Number(process.env.PORT ?? 8080);
 serve({ fetch: app.fetch, port, hostname: "0.0.0.0" });
