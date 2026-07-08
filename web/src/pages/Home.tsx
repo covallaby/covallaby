@@ -3,7 +3,17 @@ import { Link } from "react-router-dom";
 import { type RepoOverview, type UploadRow, api, formatPercent, severity } from "../api.js";
 import { Sparkline } from "../components/charts.js";
 import { Skeleton } from "../components/skeleton.js";
-import { Card, DeltaChip, Meter, Pct, Td, Th, inkFor } from "../components/ui.js";
+import {
+  Card,
+  CardFooter,
+  CardHeader,
+  DeltaChip,
+  Meter,
+  Pct,
+  Td,
+  Th,
+  inkFor,
+} from "../components/ui.js";
 
 function ago(iso: string): string {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -15,10 +25,12 @@ function ago(iso: string): string {
 
 function Tile({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
   return (
-    <Card className="p-4">
-      <div className="text-xs text-(--muted)">{label}</div>
-      <div className="mt-1 text-2xl font-semibold tracking-tight">{value}</div>
-      {sub && <div className="mt-0.5 text-[11.5px] text-(--muted)">{sub}</div>}
+    <Card>
+      <div className="px-5 pt-4 pb-3">
+        <div className="text-xs text-(--muted)">{label}</div>
+        <div className="mt-1.5 text-[26px] leading-none font-semibold tracking-tight">{value}</div>
+      </div>
+      <CardFooter>{sub ?? "\u00a0"}</CardFooter>
     </Card>
   );
 }
@@ -100,9 +112,7 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
         />
       </div>
 
-      <h2 className="mt-8 mb-3 text-xs font-semibold tracking-wide text-(--muted) uppercase">
-        Repositories
-      </h2>
+      <h2 className="mt-6 mb-3 text-[13.5px] font-semibold tracking-tight">Repositories</h2>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {repos.map((r) => {
           const prev = r.trend.length > 1 ? r.trend[r.trend.length - 2] : null;
@@ -135,57 +145,57 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
         })}
       </div>
 
-      <h2 className="mt-8 mb-3 text-xs font-semibold tracking-wide text-(--muted) uppercase">
-        Recent activity
-      </h2>
-      <Card className="px-1 pt-3 pb-1">
-        <table className="w-full text-[13.5px]">
-          <thead>
-            <tr>
-              <Th>Repository</Th>
-              <Th>Commit</Th>
-              <Th>Branch</Th>
-              <Th>When</Th>
-              <Th right>Coverage</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {(activity ?? []).map((u) => (
-              <tr key={u.id} className="transition-colors hover:bg-(--surface-2)">
-                <Td>
-                  <Link to={`/r/${u.repo}`} className="font-mono text-[12.5px] hover:underline">
-                    {u.repo}
-                  </Link>
-                </Td>
-                <Td>
-                  <Link
-                    to={`/r/${u.repo}/u/${u.id}`}
-                    className="font-mono text-[12.5px] hover:underline"
-                  >
-                    {u.commit.slice(0, 10)}
-                  </Link>
-                  {u.pr ? <span className="ml-1.5 text-(--muted)">#{u.pr}</span> : null}
-                </Td>
-                <Td className="text-(--muted)">{u.branch}</Td>
-                <Td className="text-(--muted)">{ago(u.createdAt)}</Td>
-                <Td className="text-right">
-                  <Pct percent={u.percent} />
-                </Td>
-              </tr>
-            ))}
-            {activity?.length === 0 && (
+      <Card className="mt-4">
+        <CardHeader title="Recent activity" description="Latest uploads across every repository" />
+        <div className="px-1 pb-1">
+          <table className="w-full text-[13.5px]">
+            <thead>
               <tr>
-                <Td className="text-(--muted)">
-                  Quiet in here — uploads from CI will hop in soon. 🦘
-                </Td>
-                <Td />
-                <Td />
-                <Td />
-                <Td />
+                <Th>Repository</Th>
+                <Th>Commit</Th>
+                <Th>Branch</Th>
+                <Th>When</Th>
+                <Th right>Coverage</Th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(activity ?? []).map((u) => (
+                <tr key={u.id} className="transition-colors hover:bg-(--surface-2)">
+                  <Td>
+                    <Link to={`/r/${u.repo}`} className="font-mono text-[12.5px] hover:underline">
+                      {u.repo}
+                    </Link>
+                  </Td>
+                  <Td>
+                    <Link
+                      to={`/r/${u.repo}/u/${u.id}`}
+                      className="font-mono text-[12.5px] hover:underline"
+                    >
+                      {u.commit.slice(0, 10)}
+                    </Link>
+                    {u.pr ? <span className="ml-1.5 text-(--muted)">#{u.pr}</span> : null}
+                  </Td>
+                  <Td className="text-(--muted)">{u.branch}</Td>
+                  <Td className="text-(--muted)">{ago(u.createdAt)}</Td>
+                  <Td className="text-right">
+                    <Pct percent={u.percent} />
+                  </Td>
+                </tr>
+              ))}
+              {activity?.length === 0 && (
+                <tr>
+                  <Td className="text-(--muted)">
+                    Quiet in here — uploads from CI will hop in soon. 🦘
+                  </Td>
+                  <Td />
+                  <Td />
+                  <Td />
+                  <Td />
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </Card>
     </div>
   );

@@ -4,8 +4,36 @@ import { type Severity, formatPercent, severity } from "../api.js";
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
     <div
-      className={`rounded-2xl border border-(--border) bg-(--surface) shadow-[0_1px_2px_rgba(0,0,0,.04),0_4px_16px_rgba(0,0,0,.04)] ${className}`}
+      className={`flex flex-col rounded-xl border border-(--border) bg-(--surface) shadow-[0_1px_2px_rgba(0,0,0,.04)] ${className}`}
     >
+      {children}
+    </div>
+  );
+}
+
+export function CardHeader({
+  title,
+  description,
+  action,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 px-5 pt-4 pb-3">
+      <div>
+        <div className="text-[13.5px] font-semibold tracking-tight">{title}</div>
+        {description && <div className="mt-0.5 text-xs text-(--muted)">{description}</div>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+export function CardFooter({ children }: { children: ReactNode }) {
+  return (
+    <div className="mt-auto border-t border-(--hairline) px-5 py-2.5 text-xs text-(--muted)">
       {children}
     </div>
   );

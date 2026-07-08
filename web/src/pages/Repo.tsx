@@ -6,23 +6,15 @@ import { HistoryChart } from "../components/charts.js";
 import { PageSkeleton } from "../components/skeleton.js";
 import {
   Card,
+  CardFooter,
+  CardHeader,
   DeltaChip,
   Meter,
   Pct,
-  SectionTitle,
-  Stat,
   Td,
   Th,
   inkFor,
 } from "../components/ui.js";
-
-function mood(percent: number | null, delta: number | null): string {
-  if (percent === null) return "Nothing coverable yet.";
-  if (delta !== null && delta >= 1) return "Nice jump! Coverage improved. 🎉";
-  if (percent >= 90) return "You’re covered.";
-  if (percent >= 75) return "Almost covered.";
-  return "This one needs some love.";
-}
 
 function when(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
@@ -31,6 +23,40 @@ function when(iso: string): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function mood(percent: number | null, delta: number | null): string {
+  if (percent === null) return "Nothing coverable yet.";
+  if (delta !== null && delta >= 1) return "Nice jump! Coverage improved 🎉";
+  if (percent >= 90) return "You're covered.";
+  if (percent >= 75) return "Almost covered.";
+  return "This one needs some love.";
+}
+
+const RANGES = [
+  { key: "10", label: "Last 10", n: 10 },
+  { key: "30", label: "Last 30", n: 30 },
+  { key: "all", label: "All", n: Number.POSITIVE_INFINITY },
+] as const;
+
+function StatCard({
+  label,
+  value,
+  footer,
+}: {
+  label: string;
+  value: React.ReactNode;
+  footer: React.ReactNode;
+}) {
+  return (
+    <Card>
+      <div className="px-5 pt-4 pb-3">
+        <div className="text-xs text-(--muted)">{label}</div>
+        <div className="mt-1.5 text-[26px] leading-none font-semibold tracking-tight">{value}</div>
+      </div>
+      <CardFooter>{footer}</CardFooter>
+    </Card>
+  );
 }
 
 function BadgeCard({ repo }: { repo: string }) {
@@ -43,31 +69,31 @@ function BadgeCard({ repo }: { repo: string }) {
     setTimeout(() => setCopied(false), 1500);
   };
   return (
-    <Card className="p-4">
-      <div className="mb-2.5 text-xs font-semibold tracking-wide text-(--muted) uppercase">
-        Badge
+    <Card>
+      <CardHeader title="Badge" description="Live from the latest main upload" />
+      <div className="px-5 pb-4">
+        <img src={`/badge/${repo}.svg`} alt="coverage badge" className="mb-3 h-5" />
+        <button
+          type="button"
+          onClick={copy}
+          className="flex w-full items-center justify-between gap-2 rounded-lg border border-(--hairline) bg-(--surface-2) px-3 py-2 text-left font-mono text-[11px] text-(--ink-2) transition-colors hover:border-(--muted)"
+        >
+          <span className="min-w-0 truncate">{markdown}</span>
+          {copied ? (
+            <Check size={13} className="shrink-0 text-(--good)" />
+          ) : (
+            <Copy size={13} className="shrink-0" />
+          )}
+        </button>
       </div>
-      <img src={`/badge/${repo}.svg`} alt="coverage badge" className="mb-3 h-5" />
-      <button
-        type="button"
-        onClick={copy}
-        className="flex w-full items-center justify-between gap-2 rounded-lg border border-(--hairline) bg-(--surface-2) px-3 py-2 text-left font-mono text-[11px] break-all text-(--ink-2) transition-colors hover:border-(--muted)"
-      >
-        <span className="min-w-0 truncate">{markdown}</span>
-        {copied ? (
-          <Check size={13} className="shrink-0 text-(--good)" />
-        ) : (
-          <Copy size={13} className="shrink-0" />
-        )}
-      </button>
-      <p className="mt-2 text-[11.5px] text-(--muted)">
-        {copied ? "Copied! Paste it into your README." : "Click to copy the README markdown."}
-      </p>
+      <CardFooter>
+        {copied ? "Copied! Paste it into your README. 🎉" : "Click to copy the README markdown."}
+      </CardFooter>
     </Card>
   );
 }
 
-function NeedsAttention({ latestId }: { latestId: number }) {
+function NeedsLove({ latestId }: { latestId: number }) {
   const [detail, setDetail] = useState<UploadDetail | null>(null);
   useEffect(() => {
     api
@@ -79,11 +105,9 @@ function NeedsAttention({ latestId }: { latestId: number }) {
   const worst = detail.directories.filter((d) => (d.percent ?? 100) < 100).slice(0, 5);
   if (worst.length === 0) return null;
   return (
-    <Card className="p-4">
-      <div className="mb-3 text-xs font-semibold tracking-wide text-(--muted) uppercase">
-        Needs some love
-      </div>
-      <div className="space-y-3">
+    <Card>
+      <CardHeader title="Needs some love" description="Lowest directories, latest upload" />
+      <div className="space-y-3 px-5 pb-4">
         {worst.map((d) => (
           <div key={d.path}>
             <div className="mb-1 flex items-baseline justify-between gap-2">
@@ -100,12 +124,11 @@ function NeedsAttention({ latestId }: { latestId: number }) {
           </div>
         ))}
       </div>
-      <Link
-        to={`/r/${detail.row.repo}/u/${detail.row.id}`}
-        className="mt-3 block text-[12px] text-(--ink-2) hover:underline"
-      >
-        Full breakdown →
-      </Link>
+      <CardFooter>
+        <Link to={`/r/${detail.row.repo}/u/${detail.row.id}`} className="hover:text-(--ink)">
+          Full breakdown →
+        </Link>
+      </CardFooter>
     </Card>
   );
 }
@@ -117,6 +140,7 @@ export function Repo() {
   const branch = params.get("branch") ?? undefined;
   const [data, setData] = useState<RepoHistory | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [range, setRange] = useState<(typeof RANGES)[number]["key"]>("30");
 
   useEffect(() => {
     api
@@ -130,87 +154,116 @@ export function Repo() {
 
   const latest = data.history[0];
   const previous = data.history[1];
-  const chartPoints = [...data.history].reverse().map((u) => ({
-    percent: u.percent,
-    label: u.commit.slice(0, 7),
-    sublabel: when(u.createdAt),
-  }));
+  const rangeN = RANGES.find((r) => r.key === range)!.n;
+  const chartPoints = [...data.history]
+    .slice(0, rangeN === Number.POSITIVE_INFINITY ? undefined : rangeN)
+    .reverse()
+    .map((u) => ({
+      percent: u.percent,
+      label: u.commit.slice(0, 7),
+      sublabel: when(u.createdAt),
+    }));
+  const delta =
+    latest?.percent != null && previous?.percent != null ? latest.percent - previous.percent : null;
 
   return (
-    <div>
-      {latest && (
-        <div className="mb-7 flex flex-wrap items-end justify-between gap-6">
-          <div>
-            <div className="text-xs text-(--muted)">
-              Coverage on <span className="font-mono">{data.branch}</span>
-            </div>
-            <div
-              className={`mt-1 flex items-center gap-3 text-[52px] leading-none font-semibold tracking-tighter ${inkFor[severity(latest.percent)]}`}
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="font-mono text-lg font-semibold tracking-tight">{repo}</h1>
+          <p className="text-[13px] text-(--muted)">
+            {latest ? mood(latest.percent, delta) : "No uploads yet."}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {data.branches.slice(0, 6).map((b) => (
+            <Link
+              key={b}
+              to={`/r/${repo}?branch=${encodeURIComponent(b)}`}
+              className={`rounded-lg border px-3 py-1 text-[12.5px] transition-colors ${
+                b === data.branch
+                  ? "border-(--accent) bg-(--accent-wash) font-medium text-(--ink)"
+                  : "border-(--border) bg-(--surface) text-(--ink-2) hover:border-(--muted)"
+              }`}
             >
-              {formatPercent(latest.percent)}
-              <DeltaChip current={latest.percent} previous={previous?.percent} />
-            </div>
-            <p className="mt-3 text-sm text-(--ink-2)">
-              {mood(
-                latest.percent,
-                previous?.percent != null && latest.percent !== null
-                  ? latest.percent - previous.percent
-                  : null,
-              )}
-            </p>
-            <Meter percent={latest.percent} className="mt-3 w-72" />
-          </div>
-          <div className="flex flex-wrap gap-8 pb-1.5">
-            <Stat
-              value={
-                <>
-                  {latest.linesCovered.toLocaleString()}
-                  <span className="font-normal text-(--muted)">
-                    /{latest.linesTotal.toLocaleString()}
-                  </span>
-                </>
-              }
-              label="lines covered"
-            />
-            <Stat value={latest.files} label="files" />
-            <Stat value={data.history.length} label="uploads" />
-            <Stat
-              value={
-                <span className="pt-1 font-mono text-[15px]">{latest.commit.slice(0, 7)}</span>
-              }
-              label="latest commit"
-            />
-          </div>
+              {b}
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      {latest && (
+        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+          <StatCard
+            label="Coverage"
+            value={
+              <span className={inkFor[severity(latest.percent)]}>
+                {formatPercent(latest.percent)}
+              </span>
+            }
+            footer={
+              <span className="flex items-center gap-2">
+                <DeltaChip current={latest.percent} previous={previous?.percent} />
+                vs previous upload
+              </span>
+            }
+          />
+          <StatCard
+            label="Lines covered"
+            value={
+              <>
+                {latest.linesCovered.toLocaleString()}
+                <span className="text-[15px] font-normal text-(--muted)">
+                  /{latest.linesTotal.toLocaleString()}
+                </span>
+              </>
+            }
+            footer={`${(latest.linesTotal - latest.linesCovered).toLocaleString()} lines still uncovered`}
+          />
+          <StatCard label="Files" value={latest.files} footer="tracked in the latest upload" />
+          <StatCard
+            label="Latest commit"
+            value={<span className="font-mono text-[19px]">{latest.commit.slice(0, 7)}</span>}
+            footer={`uploaded ${when(latest.createdAt)}`}
+          />
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <div>
-          <div className="mb-3 flex items-center justify-between gap-4">
-            <h2 className="text-xs font-semibold tracking-wide text-(--muted) uppercase">
-              History
-            </h2>
-            <div className="flex flex-wrap gap-1.5">
-              {data.branches.slice(0, 6).map((b) => (
-                <Link
-                  key={b}
-                  to={`/r/${repo}?branch=${encodeURIComponent(b)}`}
-                  className={`rounded-full border px-3 py-0.5 text-[12.5px] transition-colors ${
-                    b === data.branch
-                      ? "border-(--ink) bg-(--ink) font-medium text-(--page)"
-                      : "border-(--border) bg-(--surface) text-(--ink-2) hover:border-(--muted)"
+      <Card>
+        <CardHeader
+          title="Coverage history"
+          description={`Uploads on ${data.branch}`}
+          action={
+            <div className="flex rounded-lg border border-(--hairline) p-0.5">
+              {RANGES.map((r) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  onClick={() => setRange(r.key)}
+                  className={`rounded-md px-2.5 py-1 text-[12px] transition-colors ${
+                    range === r.key
+                      ? "bg-(--surface-2) font-medium text-(--ink)"
+                      : "text-(--muted) hover:text-(--ink)"
                   }`}
                 >
-                  {b}
-                </Link>
+                  {r.label}
+                </button>
               ))}
             </div>
-          </div>
-          <Card className="px-3 pt-4 pb-2">
-            <HistoryChart points={chartPoints} />
-          </Card>
+          }
+        />
+        <div className="px-2 pb-2">
+          <HistoryChart points={chartPoints} />
+        </div>
+      </Card>
 
-          <Card className="mt-4 px-1 pt-3 pb-1">
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_290px]">
+        <Card>
+          <CardHeader
+            title="Uploads"
+            description={`${data.history.length} on ${data.branch}, newest first`}
+          />
+          <div className="px-1 pb-1">
             <table className="w-full text-[13.5px]">
               <thead>
                 <tr>
@@ -244,18 +297,18 @@ export function Repo() {
                     <Td className="text-right">
                       <Pct percent={u.percent} />
                     </Td>
-                    <Td className="w-28">
+                    <Td className="w-24">
                       <Meter percent={u.percent} />
                     </Td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </Card>
-        </div>
+          </div>
+        </Card>
 
         <div className="space-y-4">
-          {latest && <NeedsAttention latestId={latest.id} />}
+          {latest && <NeedsLove latestId={latest.id} />}
           <BadgeCard repo={repo} />
         </div>
       </div>
