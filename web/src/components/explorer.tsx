@@ -176,16 +176,11 @@ function Row({
             </>
           )}
           <span
-            className={`shrink-0 truncate font-mono text-[12.5px] ${isDir ? "text-(--ink)" : "text-(--ink-2)"}`}
-            style={{ maxWidth: "65%" }}
+            className={`min-w-0 truncate font-mono text-[12.5px] ${isDir ? "text-(--ink)" : "text-(--ink-2)"}`}
+            title={!isDir && node.file!.missing ? `missing ${node.file!.missing}` : undefined}
           >
             {node.name}
           </span>
-          {!isDir && node.file!.missing && (
-            <span className="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-(--muted) xl:inline">
-              missing {node.file!.missing}
-            </span>
-          )}
         </span>
         <span className="text-right text-[11.5px] tabular-nums">
           {node.missed > 0 ? (

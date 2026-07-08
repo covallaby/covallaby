@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { type RepoOverview, type UploadRow, api, formatPercent, severity } from "../api.js";
 import { Sparkline } from "../components/charts.js";
 import { Skeleton } from "../components/skeleton.js";
@@ -36,6 +36,7 @@ function Tile({ label, value, sub }: { label: string; value: React.ReactNode; su
 }
 
 export function Home({ repos }: { repos: RepoOverview[] | null }) {
+  const navigate = useNavigate();
   const [activity, setActivity] = useState<UploadRow[] | null>(null);
   useEffect(() => {
     api

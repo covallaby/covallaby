@@ -1,6 +1,6 @@
 import { Check, Copy } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { type RepoHistory, type UploadDetail, api, formatPercent, severity } from "../api.js";
 import { HistoryChart } from "../components/charts.js";
 import { PageSkeleton } from "../components/skeleton.js";
@@ -141,6 +141,7 @@ export function Repo() {
   const [data, setData] = useState<RepoHistory | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<(typeof RANGES)[number]["key"]>("30");
+  const navigate = useNavigate();
 
   useEffect(() => {
     api
@@ -277,7 +278,11 @@ export function Repo() {
               </thead>
               <tbody>
                 {data.history.map((u, i) => (
-                  <tr key={u.id} className="transition-colors hover:bg-(--surface-2)">
+                  <tr
+                    key={u.id}
+                    onClick={() => navigate(`/r/${repo}/u/${u.id}`)}
+                    className="cursor-pointer transition-colors hover:bg-(--surface-2)"
+                  >
                     <Td>
                       <Link
                         className="font-mono text-[12.5px] hover:underline"

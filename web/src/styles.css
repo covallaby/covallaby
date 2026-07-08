@@ -61,6 +61,11 @@
   }
 }
 
+button:not(:disabled),
+[role="button"] {
+  cursor: pointer;
+}
+
 body {
   background: var(--page);
   color: var(--ink);
