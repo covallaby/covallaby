@@ -233,30 +233,40 @@ export function Hotspots({
         .map((f) => ({ ...f, missed: f.total - f.covered }))
         .filter((f) => f.missed > 0)
         .sort((a, b) => b.missed - a.missed)
-        .slice(0, 6),
+        .slice(0, 7),
     [files],
   );
   if (top.length === 0) return null;
   const totalMissed = files.reduce((n, f) => n + (f.total - f.covered), 0);
   const topShare = Math.round((top.reduce((n, f) => n + f.missed, 0) / totalMissed) * 100);
+  const max = top[0]!.missed;
   return (
-    <div className="mx-5 mb-3 rounded-xl border border-(--hairline) bg-(--surface-2)/60 px-4 py-3">
-      <div className="mb-2 flex items-center gap-1.5 text-[11.5px] font-semibold tracking-wide text-(--ink-2) uppercase">
-        <Flame size={13} className="text-(--warn)" /> Hotspots
-        <span className="font-normal normal-case text-(--muted)">
-          — these {top.length} files hold {topShare}% of all missed lines
-        </span>
+    <div>
+      <div className="flex items-center gap-1.5 px-5 pb-1 text-[11.5px] text-(--muted)">
+        <Flame size={12} className="text-(--warn)" />
+        These {top.length} files hold {topShare}% of all missed lines
       </div>
-      <div className="flex flex-wrap gap-1.5">
+      <div className="space-y-0.5 px-3 pb-3">
         {top.map((f) => (
           <button
             key={f.path}
             type="button"
             onClick={() => onPick(f.path)}
-            className="flex items-center gap-2 rounded-lg border border-(--border) bg-(--surface) px-2.5 py-1 font-mono text-[11.5px] text-(--ink-2) transition-colors hover:border-(--muted) hover:text-(--ink)"
+            title={f.path}
+            className="grid w-full grid-cols-[minmax(0,1fr)_84px] items-center gap-3 rounded-lg px-2 py-[7px] text-left transition-colors hover:bg-(--surface-2)"
           >
-            <span className="max-w-64 truncate">{f.path.split("/").slice(-2).join("/")}</span>
-            <span className={`font-semibold ${inkFor[severity(f.percent)]}`}>
+            <span className="min-w-0">
+              <span className="block truncate font-mono text-[12px] text-(--ink-2)">
+                {f.path.split("/").slice(-2).join("/")}
+              </span>
+              <span className="mt-1 block h-1 overflow-hidden rounded-full bg-(--surface-2)">
+                <span
+                  className="block h-full rounded-full bg-(--bad) opacity-70"
+                  style={{ width: `${Math.max(4, (f.missed / max) * 100)}%` }}
+                />
+              </span>
+            </span>
+            <span className="text-right text-[11.5px] font-semibold text-(--ink-2) tabular-nums">
               {f.missed.toLocaleString()} missed
             </span>
           </button>

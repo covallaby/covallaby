@@ -156,7 +156,49 @@ export function createApp({ store, uploadToken, viewToken, webDist }: AppOptions
     const missingByPath = new Map(
       found.report.files.map((f) => [f.path, formatRanges(uncoveredRanges(f))]),
     );
+
+    // What changed vs the previous upload on this branch.
+    const prev = await store.prevUpload(found.row.repo, found.row.branch, found.row.id);
+    let changes: unknown = null;
+    if (prev) {
+      const before = new Map(summarize(prev.report).files.map((f) => [f.path, f.lines]));
+      const added: Array<{ path: string; percent: number | null; total: number }> = [];
+      const changed: Array<{
+        path: string;
+        before: number | null;
+        after: number | null;
+        delta: number;
+      }> = [];
+      for (const f of summary.files) {
+        const b = before.get(f.path);
+        if (!b) {
+          added.push({ path: f.path, percent: f.lines.percent, total: f.lines.total });
+        } else if (
+          f.lines.percent !== null &&
+          b.percent !== null &&
+          Math.abs(f.lines.percent - b.percent) >= 0.05
+        ) {
+          changed.push({
+            path: f.path,
+            before: b.percent,
+            after: f.lines.percent,
+            delta: f.lines.percent - b.percent,
+          });
+        }
+        before.delete(f.path);
+      }
+      changed.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+      added.sort((a, b) => (a.percent ?? 101) - (b.percent ?? 101));
+      changes = {
+        prevCommit: prev.row.commit,
+        prevPercent: prev.row.percent,
+        added,
+        removed: before.size,
+        changed: changed.slice(0, 100),
+      };
+    }
     return c.json({
+      changes,
       row: found.row,
       totals: {
         lines: summary.lines,

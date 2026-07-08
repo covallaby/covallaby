@@ -133,6 +133,17 @@ export class SqliteStore implements Store {
     return rows.map(toRow);
   }
 
+  async prevUpload(repo: string, branch: string, beforeId: number) {
+    const raw = this.db
+      .prepare(
+        `SELECT ${ROW_COLUMNS}, report FROM uploads
+         WHERE repo = ? AND branch = ? AND id < ? ORDER BY id DESC LIMIT 1`,
+      )
+      .get(repo, branch, beforeId) as unknown as (RawRow & { report: Uint8Array }) | undefined;
+    if (!raw) return null;
+    return { row: toRow(raw), report: unpackReport(raw.report) };
+  }
+
   async branches(repo: string): Promise<string[]> {
     const rows = this.db
       .prepare(

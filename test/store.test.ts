@@ -97,6 +97,16 @@ describe.each(stores)("store contract (%s)", (_name, store) => {
     expect(recent.length).toBe(3);
   });
 
+  it("finds the previous upload on the same branch", async () => {
+    const history = await store.history("acme/app", "main", 10);
+    const latest = history[0]!;
+    const prev = await store.prevUpload("acme/app", "main", latest.id);
+    expect(prev?.row.commit).toBe(history[1]!.commit);
+    expect(prev?.report.files.length).toBeGreaterThan(0);
+    const first = history[history.length - 1]!;
+    expect(await store.prevUpload("acme/app", "main", first.id)).toBeNull();
+  });
+
   it("stores meta key-values with upsert", async () => {
     await store.setMeta("k", "v1");
     await store.setMeta("k", "v2");

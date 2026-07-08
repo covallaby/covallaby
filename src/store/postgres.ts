@@ -106,6 +106,15 @@ export class PostgresStore implements Store {
     return rows.map(toRow);
   }
 
+  async prevUpload(repo: string, branch: string, beforeId: number) {
+    const [raw] = await this.sql<Array<RawRow & { report: Buffer }>>`
+      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at, report
+      FROM uploads WHERE repo = ${repo} AND branch = ${branch} AND id < ${beforeId}
+      ORDER BY id DESC LIMIT 1`;
+    if (!raw) return null;
+    return { row: toRow(raw), report: unpackReport(raw.report) };
+  }
+
   async branches(repo: string): Promise<string[]> {
     const rows = await this.sql<Array<{ branch: string }>>`
       SELECT branch, MAX(id) AS last FROM uploads WHERE repo = ${repo}

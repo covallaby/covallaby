@@ -44,6 +44,12 @@ export interface Store {
   history(repo: string, branch: string, limit: number): Promise<UploadRow[]>;
   /** Latest uploads across every repo, newest first. */
   recentUploads(limit: number): Promise<UploadRow[]>;
+  /** The upload immediately before `beforeId` on the same repo+branch. */
+  prevUpload(
+    repo: string,
+    branch: string,
+    beforeId: number,
+  ): Promise<{ row: UploadRow; report: import("./vendor/model.js").CoverageReport } | null>;
   branches(repo: string): Promise<string[]>;
   getUpload(id: number): Promise<{ row: UploadRow; report: CoverageReport } | null>;
   latest(repo: string, branch?: string): Promise<UploadRow | null>;

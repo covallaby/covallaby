@@ -23,7 +23,16 @@ export interface Counter {
   percent: number | null;
 }
 
+export interface UploadChanges {
+  prevCommit: string;
+  prevPercent: number | null;
+  added: Array<{ path: string; percent: number | null; total: number }>;
+  removed: number;
+  changed: Array<{ path: string; before: number | null; after: number | null; delta: number }>;
+}
+
 export interface UploadDetail {
+  changes: UploadChanges | null;
   row: UploadRow;
   totals: { lines: Counter; functions: Counter; branches: Counter; files: number };
   directories: Array<{ path: string; covered: number; total: number; percent: number | null }>;

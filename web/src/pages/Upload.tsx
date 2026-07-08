@@ -4,12 +4,20 @@ import { type UploadDetail, api, formatPercent, severity } from "../api.js";
 import { Breadcrumb, Hotspots, TreeOutline, buildTree } from "../components/explorer.js";
 import { PageSkeleton } from "../components/skeleton.js";
 import { Treemap } from "../components/treemap.js";
-import { Card, CardHeader, Meter, Pct, Td, Th, inkFor } from "../components/ui.js";
+import { Card, CardHeader, DeltaChip, Meter, Pct, Td, Th, inkFor } from "../components/ui.js";
 
 const VIEWS = [
   { key: "tree", label: "Tree" },
+  { key: "changes", label: "Changes" },
   { key: "map", label: "Map" },
   { key: "files", label: "Files" },
+] as const;
+
+const SWATCHES = [
+  ["var(--good)", "90%+"],
+  ["var(--ok)", "75%+"],
+  ["var(--warn)", "60%+"],
+  ["var(--bad)", "below"],
 ] as const;
 
 export function Upload() {
@@ -20,18 +28,15 @@ export function Upload() {
   const [params, setParams] = useSearchParams();
   const initialView = VIEWS.find((v) => v.key === params.get("view"))?.key ?? "tree";
   const [view, setView] = useState<(typeof VIEWS)[number]["key"]>(initialView);
+  const [query, setQuery] = useState("");
   const path = params.get("path") ?? "";
   const navigateTo = (next: string) =>
-    setParams(
-      (prev) => {
-        const p = new URLSearchParams(prev);
-        if (next) p.set("path", next);
-        else p.delete("path");
-        return p;
-      },
-      { replace: false },
-    );
-  const [query, setQuery] = useState("");
+    setParams((prev) => {
+      const p = new URLSearchParams(prev);
+      if (next) p.set("path", next);
+      else p.delete("path");
+      return p;
+    });
 
   useEffect(() => {
     api
@@ -52,7 +57,7 @@ export function Upload() {
   if (error) return <p className="text-sm text-(--bad)">{error}</p>;
   if (!data) return <PageSkeleton />;
 
-  const { row, totals } = data;
+  const { row, totals, changes } = data;
   const shown = files.slice(0, 200);
   const missed = totals.lines.total - totals.lines.covered;
 
@@ -66,9 +71,10 @@ export function Upload() {
             {row.pr ? <> · PR #{row.pr}</> : null}
           </div>
           <div
-            className={`mt-1 text-[44px] leading-none font-semibold tracking-tighter ${inkFor[severity(row.percent)]}`}
+            className={`mt-1 flex items-center gap-3 text-[44px] leading-none font-semibold tracking-tighter ${inkFor[severity(row.percent)]}`}
           >
             {formatPercent(row.percent)}
+            {changes && <DeltaChip current={row.percent} previous={changes.prevPercent} />}
           </div>
           <p className="mt-2 text-sm text-(--ink-2)">
             {row.percent === null
@@ -109,113 +115,222 @@ export function Upload() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader
-          title="Where the coverage lives"
-          description={
-            view === "tree"
-              ? "Opens where the missed lines are — sorted by missed mass, search filters in place"
-              : view === "map"
-                ? "The whole repo at once — area is code size, color is coverage"
-                : `${files.length} files, worst first`
-          }
-          action={
-            <div className="flex items-center gap-3">
-              {view !== "map" && (
-                <input
-                  type="search"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Filter files…"
-                  className="w-52 rounded-lg border border-(--border) bg-(--surface) px-3 py-1.5 text-[13px] outline-none placeholder:text-(--muted) focus:border-(--muted)"
-                />
-              )}
-              <div className="flex rounded-lg border border-(--hairline) p-0.5">
-                {VIEWS.map((v) => (
-                  <button
-                    key={v.key}
-                    type="button"
-                    onClick={() => setView(v.key)}
-                    className={`rounded-md px-2.5 py-1 text-[12px] transition-colors ${
-                      view === v.key
-                        ? "bg-(--surface-2) font-medium text-(--ink)"
-                        : "text-(--muted) hover:text-(--ink)"
-                    }`}
-                  >
-                    {v.label}
-                  </button>
-                ))}
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_290px]">
+        <Card>
+          <CardHeader
+            title="Where the coverage lives"
+            description={
+              view === "tree"
+                ? "Opens where the missed lines are — search filters in place"
+                : view === "changes"
+                  ? changes
+                    ? `vs ${changes.prevCommit.slice(0, 7)}, the previous upload on ${row.branch}`
+                    : "First upload on this branch"
+                  : view === "map"
+                    ? "Click a directory block to zoom in, breadcrumb to climb out"
+                    : `${files.length} files, worst first`
+            }
+            action={
+              <div className="flex items-center gap-3">
+                {(view === "tree" || view === "files") && (
+                  <input
+                    type="search"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Filter files…"
+                    className="w-44 rounded-lg border border-(--border) bg-(--surface) px-3 py-1.5 text-[13px] outline-none placeholder:text-(--muted) focus:border-(--muted)"
+                  />
+                )}
+                <div className="flex rounded-lg border border-(--hairline) p-0.5">
+                  {VIEWS.map((v) => (
+                    <button
+                      key={v.key}
+                      type="button"
+                      onClick={() => setView(v.key)}
+                      className={`rounded-md px-2.5 py-1 text-[12px] transition-colors ${
+                        view === v.key
+                          ? "bg-(--surface-2) font-medium text-(--ink)"
+                          : "text-(--muted) hover:text-(--ink)"
+                      }`}
+                    >
+                      {v.label}
+                    </button>
+                  ))}
+                </div>
               </div>
+            }
+          />
+
+          {view === "tree" && <TreeOutline files={data.files} query={query} />}
+
+          {view === "changes" && (
+            <div className="px-5 pb-4">
+              {!changes ? (
+                <p className="text-sm text-(--muted)">
+                  This is the first upload on <span className="font-mono">{row.branch}</span> —
+                  everything is new. The next upload gets a comparison. 🦘
+                </p>
+              ) : (
+                <div className="space-y-5">
+                  {changes.added.length > 0 && (
+                    <div>
+                      <h3 className="mb-1.5 text-xs font-semibold tracking-wide text-(--muted) uppercase">
+                        New files ({changes.added.length})
+                      </h3>
+                      <div className="space-y-0.5">
+                        {changes.added.slice(0, 30).map((f) => (
+                          <div
+                            key={f.path}
+                            className="grid grid-cols-[minmax(0,1fr)_72px_56px_110px] items-center gap-3 rounded-lg px-2 py-1.5"
+                          >
+                            <span className="truncate font-mono text-[12.5px] text-(--ink-2)">
+                              {f.path}
+                            </span>
+                            <span className="text-right font-mono text-[11.5px] text-(--muted) tabular-nums">
+                              {f.total} lines
+                            </span>
+                            <span
+                              className={`text-right text-[12px] font-semibold tabular-nums ${inkFor[severity(f.percent)]}`}
+                            >
+                              {formatPercent(f.percent)}
+                            </span>
+                            <Meter percent={f.percent} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {changes.changed.length > 0 && (
+                    <div>
+                      <h3 className="mb-1.5 text-xs font-semibold tracking-wide text-(--muted) uppercase">
+                        Coverage moved ({changes.changed.length})
+                      </h3>
+                      <div className="space-y-0.5">
+                        {changes.changed.slice(0, 30).map((f) => (
+                          <div
+                            key={f.path}
+                            className="grid grid-cols-[minmax(0,1fr)_150px_80px] items-center gap-3 rounded-lg px-2 py-1.5"
+                          >
+                            <span className="truncate font-mono text-[12.5px] text-(--ink-2)">
+                              {f.path}
+                            </span>
+                            <span className="text-right font-mono text-[12px] text-(--muted) tabular-nums">
+                              {formatPercent(f.before)} →{" "}
+                              <span className={inkFor[severity(f.after)]}>
+                                {formatPercent(f.after)}
+                              </span>
+                            </span>
+                            <span className="text-right">
+                              <DeltaChip current={f.after} previous={f.before} />
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {changes.removed > 0 && (
+                    <p className="text-[12.5px] text-(--muted)">
+                      {changes.removed} {changes.removed === 1 ? "file" : "files"} from the previous
+                      upload {changes.removed === 1 ? "is" : "are"} gone (deleted or renamed).
+                    </p>
+                  )}
+                  {changes.added.length === 0 &&
+                    changes.changed.length === 0 &&
+                    changes.removed === 0 && (
+                      <p className="text-sm text-(--muted)">
+                        Same files, same coverage — steady as she goes.
+                      </p>
+                    )}
+                </div>
+              )}
             </div>
-          }
-        />
-        {view === "tree" && (
-          <>
-            <Hotspots files={data.files} onPick={(p) => setQuery(p)} />
-            <TreeOutline files={data.files} query={query} />
-          </>
-        )}
-        {view === "map" && tree && (
-          <>
-            <Breadcrumb path={path} onNavigate={navigateTo} />
-            <Treemap root={tree} path={path} onNavigate={navigateTo} />
-          </>
-        )}
-        {view === "files" && (
-          <div className="px-1 pb-1">
-            <table className="w-full text-[13.5px]">
-              <thead>
-                <tr>
-                  <Th>File</Th>
-                  <Th>Missing lines</Th>
-                  <Th right>Lines</Th>
-                  <Th right>Coverage</Th>
-                  <Th />
-                </tr>
-              </thead>
-              <tbody>
-                {shown.map((f) => (
-                  <tr key={f.path} className="transition-colors hover:bg-(--surface-2)">
-                    <Td className="font-mono text-[12.5px]">{f.path}</Td>
-                    <Td className="max-w-64 truncate font-mono text-[12px] text-(--muted)">
-                      <span title={f.missing}>{f.missing}</span>
-                    </Td>
-                    <Td className="text-right font-mono text-[12.5px] text-(--muted) tabular-nums">
-                      {f.covered}/{f.total}
-                    </Td>
-                    <Td className="text-right">
-                      <Pct percent={f.percent} />
-                    </Td>
-                    <Td className="w-24">
-                      <Meter percent={f.percent} />
-                    </Td>
-                  </tr>
-                ))}
-                {files.length > shown.length && (
+          )}
+
+          {view === "map" && tree && (
+            <>
+              <div className="flex items-center gap-4 px-5 pb-2 text-[11.5px] text-(--muted)">
+                <span>Block size = lines of code</span>
+                <span className="flex items-center gap-2">
+                  color = coverage:
+                  {SWATCHES.map(([c, label]) => (
+                    <span key={label} className="flex items-center gap-1">
+                      <span
+                        className="inline-block h-2.5 w-2.5 rounded-[3px]"
+                        style={{ background: c, opacity: 0.6 }}
+                      />
+                      {label}
+                    </span>
+                  ))}
+                </span>
+              </div>
+              <Breadcrumb path={path} onNavigate={navigateTo} />
+              <Treemap root={tree} path={path} onNavigate={navigateTo} />
+            </>
+          )}
+
+          {view === "files" && (
+            <div className="px-1 pb-1">
+              <table className="w-full text-[13.5px]">
+                <thead>
                   <tr>
-                    <Td className="text-(--muted)">
-                      …and {files.length - shown.length} more — narrow the filter.
-                    </Td>
-                    <Td />
-                    <Td />
-                    <Td />
-                    <Td />
+                    <Th>File</Th>
+                    <Th right>Lines</Th>
+                    <Th right>Coverage</Th>
+                    <Th />
                   </tr>
-                )}
-                {files.length === 0 && (
-                  <tr>
-                    <Td className="text-(--muted)">No files match "{query}".</Td>
-                    <Td />
-                    <Td />
-                    <Td />
-                    <Td />
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+                </thead>
+                <tbody>
+                  {shown.map((f) => (
+                    <tr key={f.path} className="transition-colors hover:bg-(--surface-2)">
+                      <Td className="font-mono text-[12.5px]">
+                        <span title={f.missing ? `missing ${f.missing}` : undefined}>{f.path}</span>
+                      </Td>
+                      <Td className="text-right font-mono text-[12.5px] text-(--muted) tabular-nums">
+                        {f.covered}/{f.total}
+                      </Td>
+                      <Td className="text-right">
+                        <Pct percent={f.percent} />
+                      </Td>
+                      <Td className="w-24">
+                        <Meter percent={f.percent} />
+                      </Td>
+                    </tr>
+                  ))}
+                  {files.length > shown.length && (
+                    <tr>
+                      <Td className="text-(--muted)">
+                        …and {files.length - shown.length} more — narrow the filter.
+                      </Td>
+                      <Td />
+                      <Td />
+                      <Td />
+                    </tr>
+                  )}
+                  {files.length === 0 && (
+                    <tr>
+                      <Td className="text-(--muted)">No files match "{query}".</Td>
+                      <Td />
+                      <Td />
+                      <Td />
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+
+        <Card>
+          <CardHeader title="Hotspots" description="Ranked by missed lines — click to filter" />
+          <Hotspots
+            files={data.files}
+            onPick={(p) => {
+              setView("tree");
+              setQuery(p);
+            }}
+          />
+        </Card>
+      </div>
 
       <p className="text-sm">
         <Link to={`/r/${repo}`} className="text-(--ink-2) hover:underline">
