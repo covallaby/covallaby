@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { type RepoHistory, api, formatPercent, severity } from "../api.js";
 import { HistoryChart } from "../components/charts.js";
+import { PageSkeleton } from "../components/skeleton.js";
 import {
   Card,
   DeltaChip,
@@ -39,13 +40,15 @@ export function Repo() {
   }, [repo, branch]);
 
   if (error) return <p className="text-sm text-(--bad)">{error}</p>;
-  if (!data) return null;
+  if (!data) return <PageSkeleton />;
 
   const latest = data.history[0];
   const previous = data.history[1];
-  const chartPoints = [...data.history]
-    .reverse()
-    .map((u) => ({ percent: u.percent, label: u.commit.slice(0, 7) }));
+  const chartPoints = [...data.history].reverse().map((u) => ({
+    percent: u.percent,
+    label: u.commit.slice(0, 7),
+    sublabel: when(u.createdAt),
+  }));
 
   return (
     <div>

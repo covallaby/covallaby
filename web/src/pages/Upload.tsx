@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { type UploadDetail, api, formatPercent, severity } from "../api.js";
+import { PageSkeleton } from "../components/skeleton.js";
 import { Card, Meter, Pct, SectionTitle, Stat, Td, Th, inkFor } from "../components/ui.js";
 
 export function Upload() {
@@ -8,6 +9,7 @@ export function Upload() {
   const repo = `${owner}/${name}`;
   const [data, setData] = useState<UploadDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     api
@@ -16,10 +18,18 @@ export function Upload() {
       .catch((e) => setError(String(e)));
   }, [id]);
 
+  // biome-ignore lint/correctness/useHookAtTopLevel: guarded returns below never skip this hook
+  const files = useMemo(() => {
+    if (!data) return [];
+    const q = query.trim().toLowerCase();
+    return q ? data.files.filter((f) => f.path.toLowerCase().includes(q)) : data.files;
+  }, [data, query]);
+
   if (error) return <p className="text-sm text-(--bad)">{error}</p>;
-  if (!data) return null;
+  if (!data) return <PageSkeleton />;
 
   const { row, totals } = data;
+  const shown = files.slice(0, 200);
 
   return (
     <div>
@@ -38,8 +48,12 @@ export function Upload() {
           <Meter percent={row.percent} className="mt-4 w-72" />
         </div>
         <div className="flex flex-wrap gap-8 pb-1.5">
-          <Stat value={formatPercent(totals.functions.percent)} label="functions" />
-          <Stat value={formatPercent(totals.branches.percent)} label="branches" />
+          {totals.functions.total > 0 && (
+            <Stat value={formatPercent(totals.functions.percent)} label="functions" />
+          )}
+          {totals.branches.total > 0 && (
+            <Stat value={formatPercent(totals.branches.percent)} label="branches" />
+          )}
           <Stat value={totals.files} label="files" />
           <Stat
             value={(totals.lines.total - totals.lines.covered).toLocaleString()}
@@ -78,7 +92,18 @@ export function Upload() {
         </table>
       </Card>
 
-      <SectionTitle>Files</SectionTitle>
+      <div className="mt-8 mb-3 flex items-center justify-between gap-4">
+        <h2 className="text-xs font-semibold tracking-wide text-(--muted) uppercase">
+          Files <span className="normal-case">({files.length})</span>
+        </h2>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filter files…"
+          className="w-64 rounded-lg border border-(--border) bg-(--surface) px-3 py-1.5 text-[13px] outline-none placeholder:text-(--muted) focus:border-(--muted)"
+        />
+      </div>
       <Card className="px-1 pt-3 pb-1">
         <table className="w-full text-[13.5px]">
           <thead>
@@ -91,7 +116,7 @@ export function Upload() {
             </tr>
           </thead>
           <tbody>
-            {data.files.map((f) => (
+            {shown.map((f) => (
               <tr key={f.path} className="transition-colors hover:bg-(--surface-2)">
                 <Td className="font-mono text-[12.5px]">{f.path}</Td>
                 <Td
@@ -111,6 +136,26 @@ export function Upload() {
                 </Td>
               </tr>
             ))}
+            {files.length > shown.length && (
+              <tr>
+                <Td className="text-(--muted)">
+                  …and {files.length - shown.length} more — narrow the filter.
+                </Td>
+                <Td />
+                <Td />
+                <Td />
+                <Td />
+              </tr>
+            )}
+            {files.length === 0 && (
+              <tr>
+                <Td className="text-(--muted)">No files match "{query}".</Td>
+                <Td />
+                <Td />
+                <Td />
+                <Td />
+              </tr>
+            )}
           </tbody>
         </table>
       </Card>

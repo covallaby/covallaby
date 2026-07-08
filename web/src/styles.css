@@ -65,3 +65,54 @@ body {
   font-feature-settings: "cv11", "ss01";
   text-rendering: optimizeLegibility;
 }
+
+/* Explicit theme (the toggle sets data-theme; it wins over the OS setting). */
+html[data-theme="light"] {
+  --page: #fafaf8;
+  --surface: #ffffff;
+  --surface-2: #f4f4f1;
+  --ink: #111113;
+  --ink-2: #54545c;
+  --muted: #8f8f96;
+  --hairline: #e8e8e4;
+  --border: rgba(17, 17, 19, 0.07);
+  --accent: #22c55e;
+  --series: #2a78d6;
+  --series-wash: rgba(42, 120, 214, 0.09);
+  --good: #0ca30c;
+  --good-track: #e0f2e0;
+  --ok: #7a9c00;
+  --ok-track: #eef2d8;
+  --warn: #c77d00;
+  --warn-track: #f8ecd6;
+  --bad: #d03b3b;
+  --bad-track: #f8dede;
+  --chip-up-bg: #e0f2e0;
+  --chip-up: #0a7a0a;
+  --chip-down-bg: #f8dede;
+  --chip-down: #b32e2e;
+}
+html[data-theme="dark"] {
+  --page: #0b0b0d;
+  --surface: #151518;
+  --surface-2: #1d1d21;
+  --ink: #f4f4f5;
+  --ink-2: #b9b9c0;
+  --muted: #7e7e86;
+  --hairline: #26262b;
+  --border: rgba(244, 244, 245, 0.08);
+  --series: #3987e5;
+  --series-wash: rgba(57, 135, 229, 0.12);
+  --good: #22c55e;
+  --good-track: #123c1e;
+  --ok: #a3b330;
+  --ok-track: #2c3110;
+  --warn: #d29922;
+  --warn-track: #3a2c07;
+  --bad: #e66767;
+  --bad-track: #3d1616;
+  --chip-up-bg: #123c1e;
+  --chip-up: #4ade80;
+  --chip-down-bg: #3d1616;
+  --chip-down: #f18f8f;
+}
