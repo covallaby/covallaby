@@ -186,4 +186,12 @@ TEST_DATABASE_URL=postgres://… pnpm test   # also run the Postgres store tests
 
 ## License
 
-MIT
+**AGPL-3.0-only.** You can run, self-host, modify, and study the whole server
+freely — the one obligation is that if you offer a *modified* version to others
+over a network, you share your changes. Using Covallaby (uploading coverage,
+running the Action) never touches your own code's license.
+
+The [GitHub Action, CLI, parsers, and coverage core](https://github.com/covallaby/action)
+stay **MIT** — the tools everyone installs carry no copyleft. This server
+vendors that MIT core (see [`src/vendor/`](src/vendor/)); combining MIT into an
+AGPL work is permitted and keeps the vendored files under their original MIT terms.

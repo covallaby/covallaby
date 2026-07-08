@@ -2,7 +2,7 @@
   "name": "@covallaby/server",
   "version": "0.1.0",
   "description": "Self-hosted Covallaby: coverage history, dashboards, and live badges from one tiny process.",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "packageManager": "pnpm@9.15.4",
   "engines": {
