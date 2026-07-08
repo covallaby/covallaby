@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
+import { type AppEnv, type HostedConfig, type HostedDeps, mountHosted } from "./hosted/index.js";
 import type { Store } from "./store.js";
 import { renderBadge } from "./vendor/badge.js";
 import {
@@ -23,6 +24,9 @@ export interface AppOptions {
   webDist?: string;
   /** Upload rate limit per token (sliding minute). Default 30. */
   uploadsPerMinute?: number;
+  /** Present → mount the hosted tier (OAuth, billing, per-account scoping). */
+  hosted?: HostedConfig;
+  hostedDeps?: HostedDeps;
 }
 
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
@@ -83,7 +87,9 @@ export function createApp({
   viewToken,
   webDist,
   uploadsPerMinute = 30,
-}: AppOptions): Hono {
+  hosted,
+  hostedDeps,
+}: AppOptions): Hono<AppEnv> {
   // Sliding-window upload rate limit, keyed by presented token.
   const uploadWindows = new Map<string, number[]>();
   const rateLimited = (key: string): boolean => {
@@ -99,12 +105,16 @@ export function createApp({
     return false;
   };
 
-  const app = new Hono();
+  const app = new Hono<AppEnv>();
 
   const bearer = (header: string | undefined): string | null => {
     const match = /^Bearer\s+(.+)$/.exec(header ?? "");
     return match ? match[1]!.trim() : null;
   };
+
+  // Hosted tier (opt-in): sign-in, billing, and per-account read scoping.
+  // Mounted before the API routes so its gate runs first. Off in self-hosted.
+  if (hosted) mountHosted(app, store, hosted, hostedDeps);
 
   // Optional read gate for everything except health + upload.
   app.use("*", async (c, next) => {
@@ -206,7 +216,9 @@ export function createApp({
     }
   });
 
-  app.get("/api/v1/repos", async (c) => c.json({ repos: await store.listRepos(12) }));
+  app.get("/api/v1/repos", async (c) =>
+    c.json({ repos: await store.listRepos(12, c.get("accounts")) }),
+  );
 
   app.get("/api/v1/activity", async (c) => c.json({ uploads: await store.recentUploads(15) }));
 

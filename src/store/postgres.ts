@@ -4,6 +4,7 @@ import {
   type RecordUploadInput,
   type RepoOverview,
   type Store,
+  type Subscription,
   type UploadRow,
   accountOf,
   packReport,
@@ -30,6 +31,10 @@ CREATE INDEX IF NOT EXISTS idx_uploads_repo_branch_time
 CREATE INDEX IF NOT EXISTS idx_uploads_account ON uploads(account);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS repo_tokens (repo TEXT PRIMARY KEY, token TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS subscriptions (
+  account TEXT PRIMARY KEY, plan TEXT NOT NULL, status TEXT NOT NULL,
+  stripe_customer TEXT, current_period_end TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_uploads_repo_pr ON uploads(repo, pr) WHERE pr IS NOT NULL;
 `;
 
@@ -183,6 +188,58 @@ export class PostgresStore implements Store {
     await this.sql`
       INSERT INTO repo_tokens (repo, token) VALUES (${repo}, ${token})
       ON CONFLICT (repo) DO UPDATE SET token = EXCLUDED.token`;
+  }
+
+  async getSubscription(account: string): Promise<Subscription | null> {
+    const rows = await this.sql<
+      Array<{
+        account: string;
+        plan: string;
+        status: string;
+        stripe_customer: string | null;
+        current_period_end: string | null;
+      }>
+    >`SELECT account, plan, status, stripe_customer, current_period_end FROM subscriptions WHERE account = ${account}`;
+    const r = rows[0];
+    return r
+      ? {
+          account: r.account,
+          plan: r.plan as Subscription["plan"],
+          status: r.status,
+          stripeCustomer: r.stripe_customer,
+          currentPeriodEnd: r.current_period_end,
+        }
+      : null;
+  }
+
+  async setSubscription(sub: Subscription): Promise<void> {
+    await this.sql`
+      INSERT INTO subscriptions (account, plan, status, stripe_customer, current_period_end)
+      VALUES (${sub.account}, ${sub.plan}, ${sub.status}, ${sub.stripeCustomer}, ${sub.currentPeriodEnd})
+      ON CONFLICT (account) DO UPDATE SET plan = EXCLUDED.plan, status = EXCLUDED.status,
+        stripe_customer = EXCLUDED.stripe_customer, current_period_end = EXCLUDED.current_period_end`;
+  }
+
+  async findSubscriptionByCustomer(stripeCustomer: string): Promise<Subscription | null> {
+    const rows = await this.sql<
+      Array<{
+        account: string;
+        plan: string;
+        status: string;
+        stripe_customer: string | null;
+        current_period_end: string | null;
+      }>
+    >`SELECT account, plan, status, stripe_customer, current_period_end FROM subscriptions WHERE stripe_customer = ${stripeCustomer}`;
+    const r = rows[0];
+    return r
+      ? {
+          account: r.account,
+          plan: r.plan as Subscription["plan"],
+          status: r.status,
+          stripeCustomer: r.stripe_customer,
+          currentPeriodEnd: r.current_period_end,
+        }
+      : null;
   }
 
   async getMeta(key: string): Promise<string | null> {

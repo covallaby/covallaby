@@ -1,15 +1,18 @@
 import { serve } from "@hono/node-server";
 import { createApp, ensureUploadToken } from "./app.js";
+import { loadHostedConfig } from "./hosted/index.js";
 import { openStore } from "./store.js";
 
 const store = await openStore();
 const uploadToken = await ensureUploadToken(store, process.env.COVALLABY_TOKEN);
 const viewToken = process.env.COVALLABY_VIEW_TOKEN?.trim();
+const hosted = loadHostedConfig(); // null unless COVALLABY_HOSTED=1
 
 const app = createApp({
   store,
   uploadToken,
   ...(viewToken && { viewToken }),
+  ...(hosted && { hosted }),
 });
 
 const port = Number(process.env.PORT ?? 8080);
@@ -19,6 +22,11 @@ console.log(`🦘 Covallaby server listening on :${port}`);
 console.log(
   `   storage: ${process.env.DATABASE_URL ? "postgres" : `sqlite (${process.env.COVALLABY_DB ?? "data/covallaby.db"})`}`,
 );
+if (hosted) {
+  console.log(
+    `   mode:    hosted (GitHub sign-in${hosted.stripe ? " + Stripe billing" : ", billing disabled"})`,
+  );
+}
 if (!process.env.COVALLABY_TOKEN) {
   // A generated admin secret: to stderr with a nudge, not into stdout logs.
   console.error(

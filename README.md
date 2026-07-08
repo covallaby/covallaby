@@ -78,6 +78,7 @@ Everything is optional:
 | `COVALLABY_VIEW_TOKEN` | If set, the dashboard needs `?token=…` (or a Bearer header) to view | unset (public) |
 | `COVALLABY_DB` | SQLite file path | `data/covallaby.db` |
 | `DATABASE_URL` | `postgres://…` — switches storage to Postgres | unset (SQLite) |
+| `COVALLABY_HOSTED` | `1` turns on the multi-tenant hosted tier (GitHub sign-in + per-account scoping). Requires the GitHub OAuth + session env below. | unset (single-tenant) |
 
 ## API
 
@@ -114,6 +115,32 @@ where the diff lives.
   code, no git credentials.
 - Set `COVALLABY_VIEW_TOKEN` to gate the dashboard; terminate TLS with your
   reverse proxy.
+
+## Hosted / multi-tenant mode (optional)
+
+The same binary runs a multi-tenant hosted product when `COVALLABY_HOSTED=1`.
+It adds **Sign in with GitHub** and scopes every read to the accounts GitHub
+says you can see — authorization is deferred to GitHub, never our own ACLs.
+Uploads stay token-authed and unchanged. Leave `COVALLABY_HOSTED` unset and
+you get the plain single-tenant server; none of this mounts.
+
+Required in hosted mode:
+
+| Env var | Meaning |
+|---|---|
+| `COVALLABY_BASE_URL` | Public base URL (for OAuth redirect + Stripe return) |
+| `COVALLABY_SESSION_SECRET` | Random secret signing session cookies |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | A GitHub OAuth app |
+| `GITHUB_API_BASE` | Optional — a GHES API base for self-hosted GitHub |
+
+Billing is optional even in hosted mode — set the Stripe env to enable the Pro
+plan, omit it and everything is `free`:
+
+| Env var | Meaning |
+|---|---|
+| `STRIPE_SECRET_KEY` · `STRIPE_WEBHOOK_SECRET` · `STRIPE_PRICE_ID` | Stripe subscription billing |
+
+Design: [`docs/HOSTED.md`](docs/HOSTED.md).
 
 ## Deploying
 

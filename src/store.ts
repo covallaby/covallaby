@@ -49,6 +49,16 @@ export function accountOf(repo: string): string {
   return repo.split("/")[0] ?? repo;
 }
 
+export type Plan = "free" | "pro";
+
+export interface Subscription {
+  account: string;
+  plan: Plan;
+  status: string; // stripe status: active, past_due, canceled, …
+  stripeCustomer: string | null;
+  currentPeriodEnd: string | null;
+}
+
 export interface Store {
   recordUpload(input: RecordUploadInput): Promise<UploadRow>;
   /**
@@ -72,6 +82,10 @@ export interface Store {
   listPRs(repo: string, limit: number): Promise<PROverview[]>;
   getRepoToken(repo: string): Promise<string | null>;
   setRepoToken(repo: string, token: string): Promise<void>;
+  /** Hosted-tier billing (unused by the self-hosted server). */
+  getSubscription(account: string): Promise<Subscription | null>;
+  setSubscription(sub: Subscription): Promise<void>;
+  findSubscriptionByCustomer(stripeCustomer: string): Promise<Subscription | null>;
   getMeta(key: string): Promise<string | null>;
   setMeta(key: string, value: string): Promise<void>;
   close(): Promise<void>;

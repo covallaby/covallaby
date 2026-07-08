@@ -1,0 +1,151 @@
+import { createHmac } from "node:crypto";
+import { describe, expect, it } from "vitest";
+import { createApp } from "../src/app.js";
+import type { BillingClient } from "../src/hosted/billing.js";
+import { planFor, verifyStripeSignature } from "../src/hosted/billing.js";
+import type { HostedConfig } from "../src/hosted/config.js";
+import type { GitHubClient } from "../src/hosted/github.js";
+import { decodeSession, encodeSession } from "../src/hosted/session.js";
+import { SqliteStore } from "../src/store/sqlite.js";
+
+const lcov = "SF:src/a.ts\nDA:1,1\nDA:2,0\nend_of_record\n";
+
+const config: HostedConfig = {
+  baseUrl: "http://localhost:8080",
+  sessionSecret: "test-secret",
+  github: { clientId: "id", clientSecret: "sec", apiBase: "https://api.github.com" },
+  stripe: { secretKey: "sk_test", webhookSecret: "whsec", priceId: "price_x" },
+};
+
+// A fake GitHub that signs in "alice" with access to accounts alice + acme.
+const fakeGitHub: GitHubClient = {
+  exchangeCode: async () => "user-token",
+  getUser: async () => ({ login: "alice", name: "Alice" }),
+  getAccounts: async () => ["alice", "acme"],
+};
+
+describe("sessions", () => {
+  it("round-trips a signed session and rejects tampering", () => {
+    const token = encodeSession(
+      { login: "alice", name: "Alice", accounts: ["alice"], iat: Date.now() },
+      "s",
+    );
+    expect(decodeSession(token, "s")?.login).toBe("alice");
+    expect(decodeSession(token, "different-secret")).toBeNull();
+    expect(decodeSession(`${token}x`, "s")).toBeNull();
+  });
+
+  it("expires old sessions", () => {
+    const old = encodeSession(
+      { login: "a", name: null, accounts: [], iat: Date.now() - 40 * 24 * 3600 * 1000 },
+      "s",
+    );
+    expect(decodeSession(old, "s")).toBeNull();
+  });
+});
+
+describe("Stripe signature", () => {
+  it("verifies the t=,v1= HMAC scheme and rejects bad ones", () => {
+    const body = '{"type":"x"}';
+    const t = "1700000000";
+    const v1 = createHmac("sha256", "whsec").update(`${t}.${body}`).digest("hex");
+    expect(verifyStripeSignature(body, `t=${t},v1=${v1}`, "whsec")).toBe(true);
+    expect(verifyStripeSignature(body, `t=${t},v1=deadbeef`, "whsec")).toBe(false);
+    expect(verifyStripeSignature(body, undefined, "whsec")).toBe(false);
+  });
+});
+
+describe("planFor", () => {
+  it("is free without a subscription, pro when active", async () => {
+    const store = new SqliteStore(":memory:");
+    expect(await planFor(store, "acme")).toBe("free");
+    await store.setSubscription({
+      account: "acme",
+      plan: "pro",
+      status: "active",
+      stripeCustomer: "cus_1",
+      currentPeriodEnd: null,
+    });
+    expect(await planFor(store, "acme")).toBe("pro");
+    await store.setSubscription({
+      account: "acme",
+      plan: "pro",
+      status: "canceled",
+      stripeCustomer: "cus_1",
+      currentPeriodEnd: null,
+    });
+    expect(await planFor(store, "acme")).toBe("free");
+    await store.close();
+  });
+});
+
+describe("hosted mode: auth + tenancy scoping", () => {
+  const store = new SqliteStore(":memory:");
+  const noBilling: BillingClient | null = null;
+  const app = createApp({
+    store,
+    uploadToken: "up",
+    hosted: config,
+    hostedDeps: { github: fakeGitHub, billing: noBilling },
+  });
+
+  const upload = (repo: string, commit: string) =>
+    app.request(`/api/v1/upload?repo=${repo}&branch=main&commit=${commit}`, {
+      method: "POST",
+      headers: { authorization: "Bearer up" },
+      body: lcov,
+    });
+
+  const session = (accounts: string[]) =>
+    `covallaby_session=${encodeSession({ login: "alice", name: "Alice", accounts, iat: Date.now() }, config.sessionSecret)}`;
+
+  it("uploads stay token-authed (no session needed) and record the account", async () => {
+    expect((await upload("acme/app", "c1")).status).toBe(200);
+    expect((await upload("bob/secret", "c2")).status).toBe(200);
+  });
+
+  it("browsing requires a session", async () => {
+    expect((await app.request("/api/v1/repos")).status).toBe(401);
+  });
+
+  it("scopes /repos to the signed-in user's accounts", async () => {
+    const res = await app.request("/api/v1/repos", { headers: { cookie: session(["acme"]) } });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.repos.every((r: { repo: string }) => r.repo.startsWith("acme/"))).toBe(true);
+    expect(json.repos.some((r: { repo: string }) => r.repo === "bob/secret")).toBe(false);
+  });
+
+  it("404s a repo the user can't access", async () => {
+    const mine = await app.request("/api/v1/repos/acme/app/history", {
+      headers: { cookie: session(["acme"]) },
+    });
+    expect(mine.status).toBe(200);
+    const notMine = await app.request("/api/v1/repos/bob/secret/history", {
+      headers: { cookie: session(["acme"]) },
+    });
+    expect(notMine.status).toBe(404);
+  });
+
+  it("reports the signed-in user at /api/v1/me", async () => {
+    const res = await app.request("/api/v1/me", {
+      headers: { cookie: session(["alice", "acme"]) },
+    });
+    const json = await res.json();
+    expect(json.authenticated).toBe(true);
+    expect(json.accounts).toEqual(["alice", "acme"]);
+  });
+});
+
+describe("self-hosted mode is unaffected", () => {
+  it("serves /repos with no session when hosted is off", async () => {
+    const store = new SqliteStore(":memory:");
+    const app = createApp({ store, uploadToken: "up" });
+    await app.request("/api/v1/upload?repo=x/y&branch=main&commit=c", {
+      method: "POST",
+      headers: { authorization: "Bearer up" },
+      body: lcov,
+    });
+    expect((await app.request("/api/v1/repos")).status).toBe(200);
+  });
+});
