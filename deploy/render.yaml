@@ -1,0 +1,20 @@
+# Render Blueprint. Point Render at this repo (or the "Deploy to Render" button)
+# and it provisions the service + a persistent disk for the SQLite database.
+services:
+  - type: web
+    name: covallaby
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    plan: starter
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: COVALLABY_DB
+        value: /data/covallaby.db
+      - key: COVALLABY_TOKEN
+        generateValue: true # a strong upload token, generated once
+    disk:
+      name: covallaby-data
+      mountPath: /data
+      sizeGB: 1

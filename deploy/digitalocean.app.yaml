@@ -1,0 +1,32 @@
+# DigitalOcean App Platform spec.
+#   doctl apps create --spec deploy/digitalocean.app.yaml
+# Note: App Platform has an ephemeral filesystem, so SQLite won't persist across
+# deploys — attach a managed Postgres (uncomment the database block) for real use.
+name: covallaby
+region: nyc
+services:
+  - name: web
+    dockerfile_path: Dockerfile
+    github:
+      repo: covallaby/covallaby
+      branch: main
+      deploy_on_push: true
+    http_port: 8080
+    instance_size_slug: basic-xxs
+    instance_count: 1
+    health_check:
+      http_path: /healthz
+    envs:
+      - key: PORT
+        value: "8080"
+      - key: COVALLABY_TOKEN
+        type: SECRET
+        value: CHANGE_ME
+      # Uncomment with a managed database for durable storage:
+      # - key: DATABASE_URL
+      #   scope: RUN_TIME
+      #   value: ${covallaby-db.DATABASE_URL}
+# databases:
+#   - name: covallaby-db
+#     engine: PG
+#     production: false

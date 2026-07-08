@@ -1,0 +1,36 @@
+# Fly.io deploy template. Copy to the repo root (or `fly launch --copy-config`)
+# then `fly deploy`. A 256MB machine is plenty; add a volume for the SQLite file.
+app = "covallaby"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  COVALLABY_DB = "/data/covallaby.db"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/healthz"
+    interval = "15s"
+    timeout = "2s"
+
+# Persist the SQLite database:  fly volumes create covallaby_data --size 1
+[mounts]
+  source = "covallaby_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+# Set your upload token once:  fly secrets set COVALLABY_TOKEN=...
+# Or attach Fly Postgres and:  fly secrets set DATABASE_URL=postgres://...

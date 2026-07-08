@@ -117,14 +117,28 @@ where the diff lives.
 
 ## Deploying
 
-- **Fly.io** — `fly launch` detects the Dockerfile. Add a volume for
-  `/data` (`fly volumes create covallaby_data`) or attach Fly Postgres and
-  set `DATABASE_URL`. The smallest machine is plenty.
-- **Any VPS** — `docker compose up -d` behind Caddy/nginx, or run
+One process, one `Dockerfile`, runs anywhere. Ready-made templates and buttons:
+
+<p>
+  <a href="https://render.com/deploy?repo=https://github.com/covallaby/covallaby"><img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" height="32"></a>
+  &nbsp;
+  <a href="https://railway.app/new/template?template=https://github.com/covallaby/covallaby"><img src="https://railway.app/button.svg" alt="Deploy on Railway" height="32"></a>
+  &nbsp;
+  <a href="https://cloud.digitalocean.com/apps/new?repo=https://github.com/covallaby/covallaby/tree/main"><img src="https://www.deploytodo.com/do-btn-blue.svg" alt="Deploy to DigitalOcean" height="32"></a>
+</p>
+
+- **Fly.io** — `fly launch` (or use [`deploy/fly.toml`](deploy/fly.toml)). Add a
+  volume for `/data` (`fly volumes create covallaby_data`) or attach Fly Postgres.
+- **Render** — the button above, or the [`deploy/render.yaml`](deploy/render.yaml)
+  blueprint (provisions a persistent disk for SQLite).
+- **Railway / DigitalOcean** — the buttons above; templates in
+  [`deploy/`](deploy/). DO's filesystem is ephemeral, so set `DATABASE_URL`.
+- **Any VPS / Docker host** — `docker compose up -d` behind Caddy/nginx, or
   `node dist/index.js` under systemd. Back up the single `data/covallaby.db`
-  file (or your Postgres).
-- **Render / Railway / Coolify** — point them at the Dockerfile; add a disk
-  or a Postgres.
+  (or your Postgres).
+
+Storage in one line: **SQLite needs a persistent volume at `/data`; Postgres
+(`DATABASE_URL`) needs none.** Full guide in [`deploy/`](deploy/README.md).
 
 ## Design
 
