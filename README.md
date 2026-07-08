@@ -80,8 +80,34 @@ Everything is optional:
 | `POST /api/v1/upload?repo=o/n&branch=&commit=&pr=&format=&strip-prefix=` | raw coverage file as the body; Bearer auth |
 | `GET /api/v1/repos` | repos with latest coverage + trend |
 | `GET /api/v1/repos/:owner/:name/history?branch=` | upload history |
+| `GET /api/v1/repos/:owner/:name/prs` | PRs with uploads, latest first |
+| `GET /api/v1/repos/:owner/:name/compare?pr=N` or `?head=<branch>` (+`&base=`) | head vs base: delta + per-file changes |
+| `POST /api/v1/repos/:owner/:name/token` | mint/rotate a per-repo upload token (admin token required) |
 | `GET /badge/:owner/:name.svg?branch=&label=` | live SVG badge |
 | `GET /healthz` | liveness |
+
+## Pull requests & branch compare
+
+Upload with `&pr=123` from PR CI (use the PR's branch) and the dashboard
+grows a Pull requests rail; each PR page compares its latest upload against
+the base branch (`?base=`, default `main`) with per-file changes. The
+Compare page does the same for any two branches. This is the project-level
+story — line-level *patch* coverage stays in the GitHub Action's PR comment,
+where the diff lives.
+
+## Security
+
+- Uploads require a bearer token: the admin token (`COVALLABY_TOKEN`, or
+  generated + persisted on first boot) or a **per-repo token** minted via
+  `POST /api/v1/repos/:owner/:name/token` (admin-authed). Repo tokens can
+  only write their own repo — hand those to CI, keep the admin token out of it.
+- Uploads are **rate limited** (30/minute per token; `uploadsPerMinute` in
+  code) and capped at 50 MB.
+- The server never clones or reads your repositories — it only ever sees the
+  coverage files CI posts: file paths, line numbers, hit counts. No source
+  code, no git credentials.
+- Set `COVALLABY_VIEW_TOKEN` to gate the dashboard; terminate TLS with your
+  reverse proxy.
 
 ## Deploying
 

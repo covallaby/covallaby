@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { type RepoOverview, api, formatPercent, severity } from "./api.js";
 import { inkFor } from "./components/ui.js";
+import { CompareBranches, PullRequest } from "./pages/Compare.js";
 import { Home } from "./pages/Home.js";
 import { Repo } from "./pages/Repo.js";
 import { Upload } from "./pages/Upload.js";
@@ -212,6 +213,8 @@ export function App() {
             <Routes>
               <Route path="/" element={<Home repos={repos} />} />
               <Route path="/r/:owner/:name" element={<Repo />} />
+              <Route path="/r/:owner/:name/pr/:pr" element={<PullRequest />} />
+              <Route path="/r/:owner/:name/compare" element={<CompareBranches />} />
               <Route path="/r/:owner/:name/u/:id" element={<Upload />} />
             </Routes>
           </div>

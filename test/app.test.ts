@@ -114,3 +114,79 @@ describe("ensureUploadToken", () => {
     await s.close();
   });
 });
+
+describe("per-repo tokens and rate limiting", () => {
+  it("mints repo tokens (admin only) that work only for their repo", async () => {
+    const denied = await app.request("/api/v1/repos/acme/app/token", {
+      method: "POST",
+      headers: { authorization: "Bearer wrong" },
+    });
+    expect(denied.status).toBe(401);
+
+    const minted = await app.request("/api/v1/repos/acme/app/token", {
+      method: "POST",
+      headers: { authorization: "Bearer sekret" },
+    });
+    expect(minted.status).toBe(200);
+    const { token } = await minted.json();
+
+    const ok = await app.request("/api/v1/upload?repo=acme/app&branch=main&commit=tok1", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      body: lcov,
+    });
+    expect(ok.status).toBe(200);
+
+    const otherRepo = await app.request("/api/v1/upload?repo=acme/other&branch=main&commit=tok2", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      body: lcov,
+    });
+    expect(otherRepo.status).toBe(401);
+  });
+
+  it("rate limits uploads per token", async () => {
+    const tight = createApp({ store, uploadToken: "sekret", uploadsPerMinute: 2 });
+    const hit = () =>
+      tight.request("/api/v1/upload?repo=acme/limited&branch=main&commit=rl", {
+        method: "POST",
+        headers: { authorization: "Bearer sekret" },
+        body: lcov,
+      });
+    expect((await hit()).status).toBe(200);
+    expect((await hit()).status).toBe(200);
+    expect((await hit()).status).toBe(429);
+  });
+});
+
+describe("PRs and compare", () => {
+  it("groups uploads by PR and compares against a base branch", async () => {
+    await upload("repo=acme/app&branch=feat/x&commit=pr1a&pr=7");
+    const better = lcov.replace("DA:2,0", "DA:2,4");
+    await app.request("/api/v1/upload?repo=acme/app&branch=feat/x&commit=pr1b&pr=7", {
+      method: "POST",
+      headers: { authorization: "Bearer sekret" },
+      body: better,
+    });
+
+    const prs = await (await app.request("/api/v1/repos/acme/app/prs")).json();
+    const seven = prs.prs.find((p: { pr: number }) => p.pr === 7);
+    expect(seven.uploads).toBe(2);
+    expect(seven.latest.commit).toBe("pr1b");
+
+    const cmp = await (await app.request("/api/v1/repos/acme/app/compare?pr=7&base=main")).json();
+    expect(cmp.head.commit).toBe("pr1b");
+    expect(cmp.base.branch).toBe("main");
+    expect(cmp.same).toBe(false);
+    expect(cmp.head.percent).toBeGreaterThan(cmp.base.percent);
+    expect(Array.isArray(cmp.changes.changed)).toBe(true);
+
+    const byBranch = await (
+      await app.request("/api/v1/repos/acme/app/compare?head=feat/x&base=main")
+    ).json();
+    expect(byBranch.head.commit).toBe("pr1b");
+
+    const missing = await app.request("/api/v1/repos/acme/app/compare?pr=999");
+    expect(missing.status).toBe(404);
+  });
+});

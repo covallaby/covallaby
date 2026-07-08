@@ -1,7 +1,14 @@
 import { Check, Copy } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { type RepoHistory, type UploadDetail, api, formatPercent, severity } from "../api.js";
+import {
+  type PROverview,
+  type RepoHistory,
+  type UploadDetail,
+  api,
+  formatPercent,
+  severity,
+} from "../api.js";
 import { HistoryChart } from "../components/charts.js";
 import { PageSkeleton } from "../components/skeleton.js";
 import {
@@ -139,6 +146,7 @@ export function Repo() {
   const [params] = useSearchParams();
   const branch = params.get("branch") ?? undefined;
   const [data, setData] = useState<RepoHistory | null>(null);
+  const [prs, setPrs] = useState<PROverview[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<(typeof RANGES)[number]["key"]>("30");
   const navigate = useNavigate();
@@ -148,6 +156,10 @@ export function Repo() {
       .history(repo, branch)
       .then(setData)
       .catch((e) => setError(String(e)));
+    api
+      .prs(repo)
+      .then((d) => setPrs(d.prs))
+      .catch(() => setPrs([]));
   }, [repo, branch]);
 
   if (error) return <p className="text-sm text-(--bad)">{error}</p>;
@@ -177,7 +189,13 @@ export function Repo() {
             {latest ? mood(latest.percent, delta) : "No uploads yet."}
           </p>
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Link
+            to={`/r/${repo}/compare?head=${encodeURIComponent(data.branch)}&base=main`}
+            className="rounded-lg border border-(--border) bg-(--surface) px-3 py-1 text-[12.5px] text-(--ink-2) transition-colors hover:border-(--muted)"
+          >
+            Compare…
+          </Link>
           {data.branches.slice(0, 6).map((b) => (
             <Link
               key={b}
@@ -315,6 +333,37 @@ export function Repo() {
         </Card>
 
         <div className="space-y-4">
+          {prs.length > 0 && (
+            <Card>
+              <CardHeader title="Pull requests" description="Latest upload per PR" />
+              <div className="space-y-0.5 px-3 pb-3">
+                {prs.slice(0, 8).map((p) => (
+                  <Link
+                    key={p.pr}
+                    to={`/r/${repo}/pr/${p.pr}`}
+                    className="grid grid-cols-[minmax(0,1fr)_56px] items-center gap-3 rounded-lg px-2 py-[7px] transition-colors hover:bg-(--surface-2)"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-[12.5px] font-medium">
+                        #{p.pr}{" "}
+                        <span className="font-mono font-normal text-(--muted)">
+                          {p.latest.commit.slice(0, 7)}
+                        </span>
+                      </span>
+                      <span className="block text-[11px] text-(--muted)">
+                        {p.uploads} {p.uploads === 1 ? "upload" : "uploads"} · {p.latest.branch}
+                      </span>
+                    </span>
+                    <span
+                      className={`text-right text-[12px] font-semibold tabular-nums ${inkFor[severity(p.latest.percent)]}`}
+                    >
+                      {formatPercent(p.latest.percent)}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </Card>
+          )}
           {latest && <NeedsLove latestId={latest.id} />}
           <BadgeCard repo={repo} />
         </div>

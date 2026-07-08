@@ -23,6 +23,25 @@ export interface Counter {
   percent: number | null;
 }
 
+export interface PROverview {
+  pr: number;
+  latest: UploadRow;
+  uploads: number;
+}
+
+export interface ReportChanges {
+  added: Array<{ path: string; percent: number | null; total: number }>;
+  removed: number;
+  changed: Array<{ path: string; before: number | null; after: number | null; delta: number }>;
+}
+
+export interface CompareResult {
+  head: UploadRow;
+  base: UploadRow;
+  same: boolean;
+  changes: ReportChanges | null;
+}
+
 export interface UploadChanges {
   prevCommit: string;
   prevPercent: number | null;
@@ -66,6 +85,14 @@ export const api = {
       `/api/v1/repos/${repo}/history${branch ? `?branch=${encodeURIComponent(branch)}` : ""}`,
     ),
   upload: (id: string) => get<UploadDetail>(`/api/v1/uploads/${id}`),
+  prs: (repo: string) => get<{ prs: PROverview[] }>(`/api/v1/repos/${repo}/prs`),
+  compare: (repo: string, q: { pr?: number; head?: string; base?: string }) => {
+    const params = new URLSearchParams();
+    if (q.pr !== undefined) params.set("pr", String(q.pr));
+    if (q.head) params.set("head", q.head);
+    if (q.base) params.set("base", q.base);
+    return get<CompareResult>(`/api/v1/repos/${repo}/compare?${params}`);
+  },
 };
 
 export function formatPercent(value: number | null): string {

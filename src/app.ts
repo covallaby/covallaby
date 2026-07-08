@@ -5,7 +5,13 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import type { Store } from "./store.js";
 import { renderBadge } from "./vendor/badge.js";
-import { formatRanges, rollupByDirectory, summarize, uncoveredRanges } from "./vendor/model.js";
+import {
+  type CoverageReport,
+  formatRanges,
+  rollupByDirectory,
+  summarize,
+  uncoveredRanges,
+} from "./vendor/model.js";
 import { ParseError, parseCoverage } from "./vendor/parsers/index.js";
 
 export interface AppOptions {
@@ -15,6 +21,8 @@ export interface AppOptions {
   viewToken?: string;
   /** Directory holding the built web app (index.html + assets). */
   webDist?: string;
+  /** Upload rate limit per token (sliding minute). Default 30. */
+  uploadsPerMinute?: number;
 }
 
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
@@ -35,7 +43,62 @@ export async function ensureUploadToken(store: Store, fromEnv?: string): Promise
   return generated;
 }
 
-export function createApp({ store, uploadToken, viewToken, webDist }: AppOptions): Hono {
+export interface ReportChanges {
+  added: Array<{ path: string; percent: number | null; total: number }>;
+  removed: number;
+  changed: Array<{ path: string; before: number | null; after: number | null; delta: number }>;
+}
+
+/** Per-file diff between two normalized reports (project-level, not patch). */
+export function diffReports(head: CoverageReport, base: CoverageReport): ReportChanges {
+  const before = new Map(summarize(base).files.map((f) => [f.path, f.lines]));
+  const added: ReportChanges["added"] = [];
+  const changed: ReportChanges["changed"] = [];
+  for (const f of summarize(head).files) {
+    const b = before.get(f.path);
+    if (!b) {
+      added.push({ path: f.path, percent: f.lines.percent, total: f.lines.total });
+    } else if (
+      f.lines.percent !== null &&
+      b.percent !== null &&
+      Math.abs(f.lines.percent - b.percent) >= 0.05
+    ) {
+      changed.push({
+        path: f.path,
+        before: b.percent,
+        after: f.lines.percent,
+        delta: f.lines.percent - b.percent,
+      });
+    }
+    before.delete(f.path);
+  }
+  changed.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  added.sort((a, b) => (a.percent ?? 101) - (b.percent ?? 101));
+  return { added, removed: before.size, changed: changed.slice(0, 100) };
+}
+
+export function createApp({
+  store,
+  uploadToken,
+  viewToken,
+  webDist,
+  uploadsPerMinute = 30,
+}: AppOptions): Hono {
+  // Sliding-window upload rate limit, keyed by presented token.
+  const uploadWindows = new Map<string, number[]>();
+  const rateLimited = (key: string): boolean => {
+    const now = Date.now();
+    const window = (uploadWindows.get(key) ?? []).filter((t) => now - t < 60_000);
+    if (window.length >= uploadsPerMinute) {
+      uploadWindows.set(key, window);
+      return true;
+    }
+    window.push(now);
+    uploadWindows.set(key, window);
+    if (uploadWindows.size > 10_000) uploadWindows.clear(); // memory backstop
+    return false;
+  };
+
   const app = new Hono();
 
   const bearer = (header: string | undefined): string | null => {
@@ -70,14 +133,26 @@ export function createApp({ store, uploadToken, viewToken, webDist }: AppOptions
 
   app.post("/api/v1/upload", async (c) => {
     const token = bearer(c.req.header("authorization"));
-    if (!token || !tokenEquals(token, uploadToken)) {
-      return c.json({ ok: false, error: "Missing or invalid upload token." }, 401);
+    if (!token) {
+      return c.json({ ok: false, error: "Missing upload token." }, 401);
     }
     const repo = c.req.query("repo") ?? "";
     if (!REPO_RE.test(repo)) {
       return c.json(
         { ok: false, error: 'Pass ?repo=owner/name (letters, digits, ".", "-", "_").' },
         400,
+      );
+    }
+    const repoToken = await store.getRepoToken(repo);
+    const authorized =
+      tokenEquals(token, uploadToken) || (repoToken !== null && tokenEquals(token, repoToken));
+    if (!authorized) {
+      return c.json({ ok: false, error: "Invalid upload token for this repository." }, 401);
+    }
+    if (rateLimited(token)) {
+      return c.json(
+        { ok: false, error: `Rate limited: at most ${uploadsPerMinute} uploads per minute.` },
+        429,
       );
     }
     const branch = (c.req.query("branch") ?? "main").slice(0, 200);
@@ -134,11 +209,65 @@ export function createApp({ store, uploadToken, viewToken, webDist }: AppOptions
 
   app.get("/api/v1/activity", async (c) => c.json({ uploads: await store.recentUploads(15) }));
 
+  // Mint (or rotate) a per-repo upload token. Admin token required.
+  app.post("/api/v1/repos/:owner/:name/token", async (c) => {
+    const token = bearer(c.req.header("authorization"));
+    if (!token || !tokenEquals(token, uploadToken)) {
+      return c.json({ ok: false, error: "Admin upload token required." }, 401);
+    }
+    const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
+    if (!REPO_RE.test(repo)) return c.json({ ok: false, error: "Bad repository name." }, 400);
+    const minted = randomBytes(18).toString("base64url");
+    await store.setRepoToken(repo, minted);
+    return c.json({ ok: true, repo, token: minted });
+  });
+
+  app.get("/api/v1/repos/:owner/:name/prs", async (c) => {
+    const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
+    return c.json({ prs: await store.listPRs(repo, 30) });
+  });
+
+  // Compare two uploads: head = ?pr=N (latest upload of that PR) or
+  // ?head=<branch> (latest on that branch); base = ?base=<branch> (default main).
+  app.get("/api/v1/repos/:owner/:name/compare", async (c) => {
+    const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
+    const baseBranch = c.req.query("base") ?? "main";
+    const prRaw = c.req.query("pr");
+    const headBranch = c.req.query("head");
+
+    let headRow = null;
+    if (prRaw && /^\d+$/.test(prRaw)) {
+      const prs = await store.listPRs(repo, 100);
+      headRow = prs.find((p) => p.pr === Number(prRaw))?.latest ?? null;
+    } else if (headBranch) {
+      headRow = await store.latest(repo, headBranch);
+    }
+    if (!headRow) return c.json({ ok: false, error: "No uploads found for that head." }, 404);
+
+    const baseRow = await store.latest(repo, baseBranch);
+    if (!baseRow) {
+      return c.json({ ok: false, error: `No uploads found on base branch "${baseBranch}".` }, 404);
+    }
+    if (baseRow.id === headRow.id) {
+      return c.json({ head: headRow, base: baseRow, same: true, changes: null });
+    }
+    const head = await store.getUpload(headRow.id);
+    const base = await store.getUpload(baseRow.id);
+    if (!head || !base) return c.json({ ok: false, error: "Upload vanished." }, 404);
+    return c.json({
+      head: headRow,
+      base: baseRow,
+      same: false,
+      changes: diffReports(head.report, base.report),
+    });
+  });
+
   app.get("/api/v1/repos/:owner/:name/history", async (c) => {
     const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
     const branches = await store.branches(repo);
     if (branches.length === 0) return c.json({ ok: false, error: "Unknown repository." }, 404);
-    const branch = c.req.query("branch") ?? branches[0]!;
+    const preferred = branches.find((b) => b === "main" || b === "master") ?? branches[0]!;
+    const branch = c.req.query("branch") ?? preferred;
     return c.json({
       repo,
       branch,

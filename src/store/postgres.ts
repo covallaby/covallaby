@@ -1,5 +1,6 @@
 import postgres from "postgres";
 import {
+  type PROverview,
   type RecordUploadInput,
   type RepoOverview,
   type Store,
@@ -25,6 +26,8 @@ CREATE TABLE IF NOT EXISTS uploads (
 CREATE INDEX IF NOT EXISTS idx_uploads_repo_branch_time
   ON uploads(repo, branch, created_at DESC);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS repo_tokens (repo TEXT PRIMARY KEY, token TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_uploads_repo_pr ON uploads(repo, pr) WHERE pr IS NOT NULL;
 `;
 
 interface RawRow {
@@ -139,6 +142,32 @@ export class PostgresStore implements Store {
           SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at
           FROM uploads WHERE repo = ${repo} ORDER BY id DESC LIMIT 1`;
     return rows[0] ? toRow(rows[0]) : null;
+  }
+
+  async listPRs(repo: string, limit: number): Promise<PROverview[]> {
+    const groups = await this.sql<Array<{ pr: number; latest_id: string; uploads: string }>>`
+      SELECT pr, MAX(id) AS latest_id, COUNT(*) AS uploads FROM uploads
+      WHERE repo = ${repo} AND pr IS NOT NULL GROUP BY pr ORDER BY latest_id DESC LIMIT ${limit}`;
+    const out: PROverview[] = [];
+    for (const g of groups) {
+      const [raw] = await this.sql<RawRow[]>`
+        SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at
+        FROM uploads WHERE id = ${g.latest_id}`;
+      out.push({ pr: g.pr, latest: toRow(raw!), uploads: Number(g.uploads) });
+    }
+    return out;
+  }
+
+  async getRepoToken(repo: string): Promise<string | null> {
+    const rows = await this.sql<Array<{ token: string }>>`
+      SELECT token FROM repo_tokens WHERE repo = ${repo}`;
+    return rows[0]?.token ?? null;
+  }
+
+  async setRepoToken(repo: string, token: string): Promise<void> {
+    await this.sql`
+      INSERT INTO repo_tokens (repo, token) VALUES (${repo}, ${token})
+      ON CONFLICT (repo) DO UPDATE SET token = EXCLUDED.token`;
   }
 
   async getMeta(key: string): Promise<string | null> {

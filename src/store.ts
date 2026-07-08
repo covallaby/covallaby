@@ -38,6 +38,12 @@ export interface RecordUploadInput {
  * The storage interface both drivers implement. Async throughout — SQLite is
  * synchronous underneath, Postgres isn't, and callers shouldn't care.
  */
+export interface PROverview {
+  pr: number;
+  latest: UploadRow;
+  uploads: number;
+}
+
 export interface Store {
   recordUpload(input: RecordUploadInput): Promise<UploadRow>;
   listRepos(trendPoints: number): Promise<RepoOverview[]>;
@@ -53,6 +59,10 @@ export interface Store {
   branches(repo: string): Promise<string[]>;
   getUpload(id: number): Promise<{ row: UploadRow; report: CoverageReport } | null>;
   latest(repo: string, branch?: string): Promise<UploadRow | null>;
+  /** PRs that have uploads, most recently active first. */
+  listPRs(repo: string, limit: number): Promise<PROverview[]>;
+  getRepoToken(repo: string): Promise<string | null>;
+  setRepoToken(repo: string, token: string): Promise<void>;
   getMeta(key: string): Promise<string | null>;
   setMeta(key: string, value: string): Promise<void>;
   close(): Promise<void>;

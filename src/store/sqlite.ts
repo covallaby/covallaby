@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  type PROverview,
   type RecordUploadInput,
   type RepoOverview,
   type Store,
@@ -27,6 +28,8 @@ CREATE TABLE IF NOT EXISTS uploads (
 CREATE INDEX IF NOT EXISTS idx_uploads_repo_branch_time
   ON uploads(repo, branch, created_at DESC);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS repo_tokens (repo TEXT PRIMARY KEY, token TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_uploads_repo_pr ON uploads(repo, pr) WHERE pr IS NOT NULL;
 `;
 
 interface RawRow {
@@ -174,6 +177,36 @@ export class SqliteStore implements Store {
           .prepare(`SELECT ${ROW_COLUMNS} FROM uploads WHERE repo = ? ORDER BY id DESC LIMIT 1`)
           .get(repo)) as unknown as RawRow | undefined;
     return raw ? toRow(raw) : null;
+  }
+
+  async listPRs(repo: string, limit: number): Promise<PROverview[]> {
+    const groups = this.db
+      .prepare(
+        `SELECT pr, MAX(id) AS latest_id, COUNT(*) AS uploads FROM uploads
+         WHERE repo = ? AND pr IS NOT NULL GROUP BY pr ORDER BY latest_id DESC LIMIT ?`,
+      )
+      .all(repo, limit) as unknown as Array<{ pr: number; latest_id: number; uploads: number }>;
+    return groups.map((g) => {
+      const raw = this.db
+        .prepare(`SELECT ${ROW_COLUMNS} FROM uploads WHERE id = ?`)
+        .get(g.latest_id) as unknown as RawRow;
+      return { pr: g.pr, latest: toRow(raw), uploads: g.uploads };
+    });
+  }
+
+  async getRepoToken(repo: string): Promise<string | null> {
+    const row = this.db.prepare("SELECT token FROM repo_tokens WHERE repo = ?").get(repo) as
+      | { token: string }
+      | undefined;
+    return row?.token ?? null;
+  }
+
+  async setRepoToken(repo: string, token: string): Promise<void> {
+    this.db
+      .prepare(
+        "INSERT INTO repo_tokens (repo, token) VALUES (?, ?) ON CONFLICT(repo) DO UPDATE SET token = excluded.token",
+      )
+      .run(repo, token);
   }
 
   async getMeta(key: string): Promise<string | null> {
