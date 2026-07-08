@@ -1,31 +1,28 @@
 import { useMemo, useState } from "react";
 import { formatPercent, severity } from "../api.js";
-import type { Child } from "./explorer.js";
+import type { TreeNode } from "./explorer.js";
 
 /**
- * Squarified treemap: cell area = coverable lines, fill = coverage severity.
- * Shows where the *mass* of uncovered code lives — the thing tables can't.
+ * Nested squarified treemap: the whole tree at once. Top-level children of
+ * the current node are labeled regions; their children pack inside. Cell
+ * area = coverable lines, color = severity. Click a region to zoom.
  */
 
-interface Cell {
-  item: Child;
+interface Rect {
   x: number;
   y: number;
   w: number;
   h: number;
 }
 
-function squarify(items0: Child[], width: number, height: number): Cell[] {
-  const total = items0.reduce((n, f) => n + f.total, 0);
-  if (total === 0) return [];
-  const scale = (width * height) / total;
-  const items = items0.map((f) => ({ item: f, area: f.total * scale }));
+function squarify(nodes: TreeNode[], rect: Rect): Array<{ node: TreeNode } & Rect> {
+  const total = nodes.reduce((n, f) => n + f.total, 0);
+  if (total === 0 || rect.w <= 0 || rect.h <= 0) return [];
+  const scale = (rect.w * rect.h) / total;
+  const items = nodes.filter((n) => n.total > 0).map((n) => ({ node: n, area: n.total * scale }));
 
-  const cells: Cell[] = [];
-  let x = 0;
-  let y = 0;
-  let w = width;
-  let h = height;
+  const cells: Array<{ node: TreeNode } & Rect> = [];
+  let { x, y, w, h } = rect;
   let row: typeof items = [];
   let i = 0;
 
@@ -50,11 +47,8 @@ function squarify(items0: Child[], width: number, height: number): Cell[] {
     let offset = 0;
     for (const it of r) {
       const length = it.area / thickness;
-      if (horizontal) {
-        cells.push({ item: it.item, x, y: y + offset, w: thickness, h: length });
-      } else {
-        cells.push({ item: it.item, x: x + offset, y, w: length, h: thickness });
-      }
+      if (horizontal) cells.push({ node: it.node, x, y: y + offset, w: thickness, h: length });
+      else cells.push({ node: it.node, x: x + offset, y, w: length, h: thickness });
       offset += length;
     }
     if (horizontal) {
@@ -89,72 +83,129 @@ const FILL: Record<string, string> = {
   muted: "var(--muted)",
 };
 
+function findNode(root: TreeNode, path: string): TreeNode {
+  if (path === "") return root;
+  let node = root;
+  for (;;) {
+    const next = node.children.find((c) => path === c.path || path.startsWith(`${c.path}/`));
+    if (!next) return node;
+    node = next;
+    if (node.path === path) return node;
+  }
+}
+
 export function Treemap({
-  items,
+  root,
+  path,
   onNavigate,
 }: {
-  items: Child[];
+  root: TreeNode;
+  path: string;
   onNavigate: (path: string) => void;
 }) {
   const W = 960;
-  const H = 420;
-  const [hover, setHover] = useState<Cell | null>(null);
-  const cells = useMemo(
-    () => squarify([...items].sort((a, b) => b.total - a.total).slice(0, 80), W, H),
-    [items],
-  );
-  if (cells.length === 0) {
+  const H = 480;
+  const PAD = 4;
+  const LABEL = 20;
+  const [hover, setHover] = useState<TreeNode | null>(null);
+
+  const current = useMemo(() => findNode(root, path), [root, path]);
+  const regions = useMemo(() => squarify(current.children, { x: 0, y: 0, w: W, h: H }), [current]);
+
+  if (regions.length === 0) {
     return <p className="px-5 pb-4 text-sm text-(--muted)">Nothing coverable to map.</p>;
   }
+
   return (
     <div className="relative px-3 pb-3">
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="coverage treemap">
-        {cells.map((c) => {
-          const name = c.item.isDir ? `${c.item.name}/` : c.item.name;
-          const showLabel = c.w > 76 && c.h > 30;
+        {regions.map((region) => {
+          const isDir = region.node.file === null;
+          const percent =
+            region.node.total === 0 ? null : (region.node.covered / region.node.total) * 100;
+          const inner: Rect = {
+            x: region.x + PAD,
+            y: region.y + PAD + (isDir ? LABEL : 0),
+            w: region.w - PAD * 2,
+            h: region.h - PAD * 2 - (isDir ? LABEL : 0),
+          };
+          const showChildren = isDir && region.w > 90 && region.h > 64;
+          const kids = showChildren ? squarify(region.node.children, inner) : [];
           return (
-            // biome-ignore lint/a11y/useKeyWithMouseEvents: hover detail is supplementary; keyboard path is the Explorer tab
-            // biome-ignore lint/a11y/useKeyWithClickEvents: same navigation is keyboard-reachable via the Explorer tab
+            // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard path is the Tree tab
+            // biome-ignore lint/a11y/useKeyWithMouseEvents: hover detail is supplementary
             <g
-              key={c.item.path}
-              onMouseEnter={() => setHover(c)}
+              key={region.node.path}
+              onClick={() => isDir && onNavigate(region.node.path)}
+              onMouseEnter={() => setHover(region.node)}
               onMouseLeave={() => setHover(null)}
-              onClick={() => c.item.isDir && onNavigate(c.item.path)}
-              style={{ cursor: c.item.isDir ? "pointer" : "default" }}
+              style={{ cursor: isDir ? "pointer" : "default" }}
             >
               <rect
-                x={c.x + 1.5}
-                y={c.y + 1.5}
-                width={Math.max(0, c.w - 3)}
-                height={Math.max(0, c.h - 3)}
-                rx={5}
-                fill={FILL[severity(c.item.percent)]}
-                opacity={hover?.item.path === c.item.path ? 0.5 : 0.28}
-                stroke={FILL[severity(c.item.percent)]}
-                strokeOpacity={0.55}
+                x={region.x + 1.5}
+                y={region.y + 1.5}
+                width={Math.max(0, region.w - 3)}
+                height={Math.max(0, region.h - 3)}
+                rx={6}
+                fill={FILL[severity(percent)]}
+                opacity={hover?.path === region.node.path ? 0.34 : 0.16}
+                stroke={FILL[severity(percent)]}
+                strokeOpacity={0.5}
               />
-              {showLabel && (
-                <>
-                  <text
-                    x={c.x + 9}
-                    y={c.y + 17}
-                    fontSize={10.5}
-                    fontFamily="ui-monospace, Menlo, monospace"
-                    fill="var(--ink)"
-                  >
-                    {name.length > c.w / 7 ? `${name.slice(0, Math.floor(c.w / 7))}…` : name}
-                  </text>
-                  <text
-                    x={c.x + 9}
-                    y={c.y + 31}
-                    fontSize={10}
-                    fill="var(--ink-2)"
-                    className="tabular-nums"
-                  >
-                    {formatPercent(c.item.percent)}
-                  </text>
-                </>
+              {region.w > 70 && region.h > 26 && (
+                <text
+                  x={region.x + 9}
+                  y={region.y + 16}
+                  fontSize={11}
+                  fontWeight={600}
+                  fontFamily="ui-monospace, Menlo, monospace"
+                  fill="var(--ink)"
+                >
+                  {`${region.node.name}${isDir ? "/" : ""}`.slice(0, Math.floor(region.w / 7))}
+                  <tspan fill="var(--ink-2)" fontWeight={400}>
+                    {region.w > 150 ? `  ${formatPercent(percent)}` : ""}
+                  </tspan>
+                </text>
               )}
+              {kids.map((cell) => {
+                const cellPct =
+                  cell.node.total === 0 ? null : (cell.node.covered / cell.node.total) * 100;
+                return (
+                  // biome-ignore lint/a11y/useKeyWithMouseEvents: hover detail is supplementary
+                  <g
+                    key={cell.node.path}
+                    onMouseEnter={(e) => {
+                      e.stopPropagation();
+                      setHover(cell.node);
+                    }}
+                    onMouseLeave={() => setHover(region.node)}
+                  >
+                    <rect
+                      x={cell.x + 1}
+                      y={cell.y + 1}
+                      width={Math.max(0, cell.w - 2)}
+                      height={Math.max(0, cell.h - 2)}
+                      rx={4}
+                      fill={FILL[severity(cellPct)]}
+                      opacity={hover?.path === cell.node.path ? 0.55 : 0.32}
+                    />
+                    {cell.w > 66 && cell.h > 20 && (
+                      <text
+                        x={cell.x + 6}
+                        y={cell.y + 14}
+                        fontSize={9.5}
+                        fontFamily="ui-monospace, Menlo, monospace"
+                        fill="var(--ink)"
+                      >
+                        {`${cell.node.name}${cell.node.file === null ? "/" : ""}`.slice(
+                          0,
+                          Math.floor(cell.w / 6.5),
+                        )}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
             </g>
           );
         })}
@@ -162,20 +213,22 @@ export function Treemap({
       {hover && (
         <div className="pointer-events-none absolute top-3 left-1/2 z-10 -translate-x-1/2 rounded-lg border border-(--border) bg-(--surface) px-3 py-1.5 text-xs shadow-lg">
           <span className="font-mono">
-            {hover.item.path}
-            {hover.item.isDir ? "/" : ""}
+            {hover.path}
+            {hover.file === null ? "/" : ""}
           </span>
           <span className="mx-2 text-(--muted)">·</span>
-          <span className="font-semibold tabular-nums">{formatPercent(hover.item.percent)}</span>
+          <span className="font-semibold tabular-nums">
+            {formatPercent(hover.total === 0 ? null : (hover.covered / hover.total) * 100)}
+          </span>
           <span className="ml-1.5 text-(--muted)">
-            ({hover.item.covered.toLocaleString()}/{hover.item.total.toLocaleString()} lines
-            {hover.item.isDir ? ` · ${hover.item.fileCount} files` : ""})
+            ({(hover.total - hover.covered).toLocaleString()} missed
+            {hover.file === null ? ` · ${hover.fileCount.toLocaleString()} files` : ""})
           </span>
         </div>
       )}
       <p className="mt-2 px-2 text-[11.5px] text-(--muted)">
-        Cell size = coverable lines · color = coverage · click a directory to zoom in. Big warm
-        cells are where tests pay off most.
+        Area = coverable lines · color = coverage · click a directory to zoom in. Big warm blocks
+        are where tests pay off most.
       </p>
     </div>
   );
