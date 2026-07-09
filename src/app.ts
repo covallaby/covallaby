@@ -11,6 +11,7 @@ import {
 } from "./policy.js";
 import type { Store, UploadRow } from "./store.js";
 import { renderBadge } from "./vendor/badge.js";
+import { ignorePaths } from "./vendor/ignore.js";
 import {
   type CoverageReport,
   formatRanges,
@@ -373,10 +374,18 @@ export function createApp({
 
     try {
       const format = c.req.query("format");
-      const report = parseCoverage(body, {
-        ...(format && { format: format as never }),
-        ...(c.req.query("strip-prefix") && { stripPrefix: c.req.query("strip-prefix")! }),
-      });
+      // Exclude generated/vendored/test paths: ?ignore=<newline/comma globs>.
+      const ignore = (c.req.query("ignore") ?? "")
+        .split(/[\n,]/)
+        .map((p) => p.trim())
+        .filter((p) => p !== "");
+      const report = ignorePaths(
+        parseCoverage(body, {
+          ...(format && { format: format as never }),
+          ...(c.req.query("strip-prefix") && { stripPrefix: c.req.query("strip-prefix")! }),
+        }),
+        ignore,
+      );
       // Opt-in merge: sharded CI jobs each POST their partial coverage with
       // ?merge=1; we accumulate them into one upload for the commit instead of
       // last-write-wins. Without it, every upload is its own snapshot as before.

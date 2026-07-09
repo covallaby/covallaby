@@ -349,3 +349,21 @@ describe("sharded upload merge", () => {
     expect(b.id).not.toBe(a.id); // two separate uploads, as before
   });
 });
+
+describe("ignore paths on upload", () => {
+  it("excludes files matching ?ignore globs before recording", async () => {
+    const body =
+      "SF:src/a.ts\nDA:1,1\nDA:2,0\nend_of_record\n" + // kept: 1/2
+      "SF:src/a.test.ts\nDA:1,1\nend_of_record\n" + // ignored
+      "SF:node_modules/dep.ts\nDA:1,0\nend_of_record\n"; // ignored
+    const ig = encodeURIComponent("*.test.ts,node_modules");
+    const res = await app.request(
+      `/api/v1/upload?repo=ig/app&branch=main&commit=ig1&ignore=${ig}`,
+      { method: "POST", headers: { authorization: "Bearer sekret" }, body },
+    );
+    const id = (await res.json()).id;
+    const detail = await (await app.request(`/api/v1/uploads/${id}`)).json();
+    expect(detail.files.map((f: { path: string }) => f.path)).toEqual(["src/a.ts"]);
+    expect(detail.totals.lines.total).toBe(2); // only src/a.ts counted
+  });
+});
