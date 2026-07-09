@@ -206,6 +206,20 @@ export interface OwnerGroup {
   percent: number | null;
 }
 
+/**
+ * Repo name for display, minus the redundant owner prefix. Many orgs name every
+ * repo `<org>-<thing>` (mostly-good-metrics-swift-sdk), so under the org header
+ * the prefix just repeats and truncates the useful part — drop it
+ * (mostly-good-metrics-swift-sdk → swift-sdk; covallaby/covallaby → covallaby).
+ */
+export function shortRepoName(repo: string): string {
+  const [owner, name = repo] = repo.split("/");
+  const prefix = `${(owner ?? "").toLowerCase()}-`;
+  return name.toLowerCase().startsWith(prefix) && name.length > prefix.length
+    ? name.slice(prefix.length)
+    : name;
+}
+
 /** Group repos by their GitHub owner (org/user), each with a coverage roll-up, owners A→Z. */
 export function groupReposByOwner(repos: RepoOverview[]): OwnerGroup[] {
   const groups = new Map<string, RepoOverview[]>();

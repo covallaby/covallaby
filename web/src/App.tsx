@@ -10,6 +10,7 @@ import {
   formatPercent,
   groupReposByOwner,
   severity,
+  shortRepoName,
 } from "./api.js";
 import { Meter, OwnerAvatar, inkFor } from "./components/ui.js";
 import { CompareBranches, PullRequest } from "./pages/Compare.js";
@@ -109,7 +110,7 @@ function RepoNavItem({ r, pathname }: { r: RepoOverview; pathname: string }) {
       >
         <div className="flex items-center justify-between gap-2">
           <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-(--ink-2)">
-            {r.repo}
+            {shortRepoName(r.repo)}
           </span>
           <span
             className={`text-[11px] font-semibold tabular-nums ${inkFor[severity(r.latest.percent)]}`}

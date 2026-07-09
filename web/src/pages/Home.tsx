@@ -8,6 +8,7 @@ import {
   formatPercent,
   groupReposByOwner,
   severity,
+  shortRepoName,
 } from "../api.js";
 import mascotUrl from "../assets/mascot.png";
 import { Sparkline } from "../components/charts.js";
@@ -39,7 +40,7 @@ function RepoCard({ r }: { r: RepoOverview }) {
     <Link to={`/r/${r.repo}`} className="group">
       <Card className="p-5 transition-all duration-150 group-hover:-translate-y-0.5 group-hover:border-(--muted)">
         <div className="mb-4 flex items-center justify-between font-mono text-[13px] text-(--ink-2)">
-          <span className="min-w-0 truncate">{r.repo.split("/")[1] ?? r.repo}</span>
+          <span className="min-w-0 truncate">{shortRepoName(r.repo)}</span>
           <span className="text-(--muted)">{r.latest.branch}</span>
         </div>
         <div className="flex items-end justify-between gap-3">
@@ -186,7 +187,7 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
           value={
             <Link to={`/r/${worst.repo}`} className="hover:underline">
               <span className={`font-mono text-[17px] ${inkFor[severity(worst.latest.percent)]}`}>
-                {worst.repo.split("/")[1]}
+                {shortRepoName(worst.repo)}
               </span>
             </Link>
           }

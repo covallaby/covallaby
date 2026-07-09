@@ -8,6 +8,7 @@ import {
   type UploadRow,
   formatPercent,
   severity,
+  shortRepoName,
 } from "../api.js";
 
 /**
@@ -37,7 +38,7 @@ export function RiskQuadrant({ repos }: { repos: RepoOverview[] }) {
   const pts = repos
     .filter((r) => r.latest.linesTotal > 0)
     .map((r) => ({
-      name: r.repo.split("/")[1] ?? r.repo,
+      name: shortRepoName(r.repo),
       full: r.repo,
       kloc: r.latest.linesTotal / 1000,
       pct: r.latest.percent ?? 0,
