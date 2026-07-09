@@ -26,7 +26,11 @@ const sevVar: Record<Severity, string> = {
 const sv = (p: number | null): string => sevVar[severity(p)];
 
 function Empty({ children }: { children: ReactNode }) {
-  return <p className="px-5 pb-4 text-sm text-(--muted)">{children}</p>;
+  return (
+    <p className="mx-auto max-w-md px-5 py-8 text-center text-[13px] leading-relaxed text-(--muted)">
+      {children}
+    </p>
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -44,7 +48,16 @@ export function RiskQuadrant({ repos }: { repos: RepoOverview[] }) {
       // Uncovered in thousands of lines — bubble area scales with that.
       uncovered: (r.latest.linesTotal - r.latest.linesCovered) / 1000,
     }));
-  if (pts.length < 2) return <Empty>Two repositories with coverage will draw this. 🦘</Empty>;
+  if (pts.length < 3)
+    return (
+      <Empty>
+        The risk map plots each repo's <b className="font-medium text-(--ink-2)">coverage</b>{" "}
+        against its <b className="font-medium text-(--ink-2)">size</b>, so big, under-tested repos
+        stand out. It needs at least <b className="font-medium text-(--ink-2)">3 repositories</b> to
+        be worth plotting — you have {pts.length}. It'll draw itself once another starts uploading.
+        🦘
+      </Empty>
+    );
 
   const W = 760;
   const H = 340;
@@ -190,7 +203,14 @@ export function RiskQuadrant({ repos }: { repos: RepoOverview[] }) {
 export function CoverageDebt({ trends }: { trends: PortfolioTrends }) {
   const s = trends.series;
   if (s.length < 2)
-    return <Empty>Coverage debt appears once there are a couple of days of uploads.</Empty>;
+    return (
+      <Empty>
+        Coverage debt tracks <b className="font-medium text-(--ink-2)">covered vs. total lines</b>{" "}
+        across all your repos over time. It fills in after a{" "}
+        <b className="font-medium text-(--ink-2)">couple of days of uploads</b>, once there's a
+        trend to plot. 🦘
+      </Empty>
+    );
   const W = 720;
   const H = 220;
   const L = 44;

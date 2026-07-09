@@ -199,7 +199,7 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
         />
       </div>
 
-      {shown.length >= 2 && (
+      {shown.length >= 1 && (
         <div className="mt-4 grid grid-cols-1 gap-4">
           <Card>
             <CardHeader
