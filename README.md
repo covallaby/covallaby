@@ -5,7 +5,8 @@
 <p align="center">
   <a href="https://covallaby.com"><b>covallaby.com</b></a> &nbsp;·&nbsp;
   <a href="https://covallaby.com/demo/">Live dashboard demo</a> &nbsp;·&nbsp;
-  <a href="https://github.com/covallaby/covallaby/actions/workflows/ci.yml"><img src="https://github.com/covallaby/covallaby/actions/workflows/ci.yml/badge.svg" alt="CI" valign="middle"></a>
+  <a href="https://github.com/covallaby/covallaby/actions/workflows/ci.yml"><img src="https://github.com/covallaby/covallaby/actions/workflows/ci.yml/badge.svg" alt="CI" valign="middle"></a> &nbsp;·&nbsp;
+  <a href="https://app.covallaby.com/r/covallaby/covallaby"><img src="https://app.covallaby.com/badge/covallaby/covallaby.svg" alt="coverage" valign="middle"></a>
 </p>
 
 **Self-hosted coverage history, dashboards, and live badges — one tiny
