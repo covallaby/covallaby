@@ -67,6 +67,28 @@ That's it. The dashboard fills in:
     SERVER: https://coverage.example.com
 ```
 
+### Coverage split across parallel jobs
+
+If your test suite is **sharded across parallel CI jobs** — each producing a
+partial coverage file on a different runner — add `&merge=1` to the upload.
+Covallaby accumulates every shard into **one** upload for the commit (merging
+file and line coverage) instead of last-write-wins:
+
+```yaml
+# in each shard job — same commit, &merge=1
+- run: |
+    curl -sf -X POST "$SERVER/api/v1/upload?repo=${{ github.repository }}&commit=${{ github.sha }}&merge=1" \
+      -H "Authorization: Bearer ${{ secrets.COVALLABY_TOKEN }}" \
+      --data-binary @coverage/lcov.info
+```
+
+Each response says whether it created the upload or merged into an existing one
+(`"merged": true`). Without `&merge=1`, every upload is its own snapshot (the
+default). If your partials instead all land together in one job, just merge
+client-side and upload once — the [CLI](https://github.com/covallaby/action)
+and Action take multiple coverage files (newline- or comma-separated) and merge
+them for you.
+
 ## Configuration
 
 Everything is optional:
@@ -84,7 +106,7 @@ Everything is optional:
 
 | Route | What |
 |---|---|
-| `POST /api/v1/upload?repo=o/n&branch=&commit=&pr=&format=&strip-prefix=` | raw coverage file as the body; Bearer auth |
+| `POST /api/v1/upload?repo=o/n&branch=&commit=&pr=&format=&strip-prefix=&merge=1` | raw coverage file as the body; Bearer auth. `merge=1` accumulates sharded uploads into one per commit |
 | `GET /api/v1/repos` | repos with latest coverage + trend |
 | `GET /api/v1/repos/:owner/:name/history?branch=` | upload history |
 | `GET /api/v1/repos/:owner/:name/prs` | PRs with uploads, latest first |
