@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   type PortfolioTrends,
   type RepoOverview,
@@ -84,6 +84,7 @@ function Tile({ label, value, sub }: { label: string; value: React.ReactNode; su
 
 export function Home({ repos }: { repos: RepoOverview[] | null }) {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const [activity, setActivity] = useState<UploadRow[] | null>(null);
   const [trends, setTrends] = useState<PortfolioTrends | null>(null);
   useEffect(() => {
@@ -135,23 +136,51 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
     );
   }
 
-  const totalCovered = repos.reduce((n, r) => n + r.latest.linesCovered, 0);
-  const totalLines = repos.reduce((n, r) => n + r.latest.linesTotal, 0);
+  const orgFilter = params.get("org");
+  const shown = orgFilter ? repos.filter((r) => r.repo.split("/")[0] === orgFilter) : repos;
+  const shownActivity = orgFilter
+    ? (activity ?? []).filter((u) => u.repo.split("/")[0] === orgFilter)
+    : (activity ?? []);
+
+  if (orgFilter && shown.length === 0) {
+    return (
+      <p className="text-sm text-(--muted)">
+        No repositories under <span className="font-mono text-(--ink-2)">{orgFilter}</span> yet.{" "}
+        <Link to="/" className="text-(--ink-2) hover:underline">
+          Show all orgs
+        </Link>
+      </p>
+    );
+  }
+
+  const totalCovered = shown.reduce((n, r) => n + r.latest.linesCovered, 0);
+  const totalLines = shown.reduce((n, r) => n + r.latest.linesTotal, 0);
   const overall = totalLines === 0 ? null : (totalCovered / totalLines) * 100;
-  const worst = [...repos].sort(
+  const worst = [...shown].sort(
     (a, b) => (a.latest.percent ?? 101) - (b.latest.percent ?? 101),
   )[0]!;
-  const lastUpload = activity?.[0];
+  const lastUpload = shownActivity[0];
 
   return (
     <div>
+      {orgFilter && (
+        <div className="mb-4 flex items-center gap-2 text-[13px] text-(--muted)">
+          Showing{" "}
+          <span className="font-medium text-(--ink)">
+            {orgFilter}/ ({shown.length})
+          </span>
+          <Link to="/" className="hover:text-(--ink) hover:underline">
+            · show all orgs
+          </Link>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Tile
           label="Overall coverage"
           value={<span className={inkFor[severity(overall)]}>{formatPercent(overall)}</span>}
           sub={`${totalCovered.toLocaleString()} of ${totalLines.toLocaleString()} lines`}
         />
-        <Tile label="Repositories" value={repos.length} />
+        <Tile label="Repositories" value={shown.length} />
         <Tile
           label="Needs some love"
           value={
@@ -170,7 +199,7 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
         />
       </div>
 
-      {repos.length >= 2 && (
+      {shown.length >= 2 && (
         <div className="mt-4 grid grid-cols-1 gap-4">
           <Card>
             <CardHeader
@@ -178,22 +207,28 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
               description="Coverage vs. codebase size — big and under-tested lands in the danger zone"
             />
             <div className="px-4 pb-4">
-              <RiskQuadrant repos={repos} />
+              <RiskQuadrant repos={shown} />
             </div>
           </Card>
-          <Card>
-            <CardHeader
-              title="Coverage debt"
-              description="Covered vs. total lines across every repository"
-            />
-            <div className="px-2 pb-3">
-              {trends ? <CoverageDebt trends={trends} /> : <Skeleton className="mx-3 my-6 h-40" />}
-            </div>
-          </Card>
+          {!orgFilter && (
+            <Card>
+              <CardHeader
+                title="Coverage debt"
+                description="Covered vs. total lines across every repository"
+              />
+              <div className="px-2 pb-3">
+                {trends ? (
+                  <CoverageDebt trends={trends} />
+                ) : (
+                  <Skeleton className="mx-3 my-6 h-40" />
+                )}
+              </div>
+            </Card>
+          )}
         </div>
       )}
 
-      {groupReposByOwner(repos).map((group) => (
+      {groupReposByOwner(shown).map((group) => (
         <section key={group.owner} className="mt-6">
           <div className="mb-3 flex items-center gap-2.5">
             <OwnerAvatar owner={group.owner} size={22} />
@@ -229,7 +264,7 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
               </tr>
             </thead>
             <tbody>
-              {(activity ?? []).map((u) => (
+              {shownActivity.map((u) => (
                 <tr key={u.id} className="transition-colors hover:bg-(--surface-2)">
                   <Td>
                     <Link to={`/r/${u.repo}`} className="font-mono text-[12.5px] hover:underline">
@@ -252,7 +287,7 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
                   </Td>
                 </tr>
               ))}
-              {activity?.length === 0 && (
+              {shownActivity.length === 0 && (
                 <tr>
                   <Td className="text-(--muted)">
                     Quiet in here — uploads from CI will hop in soon. 🦘

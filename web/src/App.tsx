@@ -1,6 +1,6 @@
 import { ChevronDown, Github, LayoutDashboard, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
   IS_DEMO,
   type Me,
@@ -298,6 +298,67 @@ function tailLabel(rest: string): string | null {
   return null;
 }
 
+/** Header dropdown to scope the Overview to a single org (or all). */
+function OrgSwitcher({ repos }: { repos: RepoOverview[] }) {
+  const owners = groupReposByOwner(repos).map((g) => g.owner);
+  const navigate = useNavigate();
+  const { search } = useLocation();
+  const current = new URLSearchParams(search).get("org");
+  const [open, setOpen] = useState(false);
+  if (owners.length < 2) return null;
+
+  const pick = (org: string | null) => {
+    setOpen(false);
+    navigate(org ? `/?org=${encodeURIComponent(org)}` : "/");
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 rounded-lg border border-(--border) bg-(--surface) px-2.5 py-1.5 text-[12.5px] text-(--ink-2) transition-colors hover:border-(--muted)"
+      >
+        {current ? (
+          <>
+            <OwnerAvatar owner={current} size={15} />
+            <span className="max-w-[120px] truncate">{current}</span>
+          </>
+        ) : (
+          <span>All orgs</span>
+        )}
+        <ChevronDown size={13} className="text-(--muted)" />
+      </button>
+      {open && (
+        <>
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: click-away backdrop; Esc/Tab still work on the menu items */}
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} aria-hidden="true" />
+          <div className="absolute right-0 z-40 mt-1 max-h-80 w-52 overflow-y-auto rounded-xl border border-(--border) bg-(--surface) p-1 shadow-[var(--shadow,0_10px_30px_-12px_rgba(0,0,0,.3))]">
+            <button
+              type="button"
+              onClick={() => pick(null)}
+              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] transition-colors hover:bg-(--surface-2) ${current === null ? "font-medium text-(--ink)" : "text-(--ink-2)"}`}
+            >
+              All orgs
+            </button>
+            {owners.map((o) => (
+              <button
+                key={o}
+                type="button"
+                onClick={() => pick(o)}
+                className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] transition-colors hover:bg-(--surface-2) ${current === o ? "font-medium text-(--ink)" : "text-(--ink-2)"}`}
+              >
+                <OwnerAvatar owner={o} size={16} />
+                <span className="min-w-0 truncate">{o}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Crumbs() {
   const { pathname } = useLocation();
   const match = /^\/r\/([^/]+)\/([^/]+)(?:\/(.*))?$/.exec(pathname);
@@ -373,18 +434,21 @@ export function App() {
         <header className="sticky top-0 z-10 border-b border-(--hairline) bg-(--page)/80 backdrop-blur-md">
           <div className="flex items-center justify-between gap-4 px-6 py-2.5">
             <Crumbs />
-            <button
-              type="button"
-              onClick={toggleTheme}
-              aria-label="Toggle theme"
-              className="rounded-lg border border-(--border) bg-(--surface) p-1.5 text-(--ink-2) transition-colors hover:text-(--ink)"
-            >
-              {theme === "dark" ? (
-                <Sun size={15} strokeWidth={1.75} />
-              ) : (
-                <Moon size={15} strokeWidth={1.75} />
-              )}
-            </button>
+            <div className="flex items-center gap-3">
+              {pathname === "/" && repos && repos.length > 0 && <OrgSwitcher repos={repos} />}
+              <button
+                type="button"
+                onClick={toggleTheme}
+                aria-label="Toggle theme"
+                className="rounded-lg border border-(--border) bg-(--surface) p-1.5 text-(--ink-2) transition-colors hover:text-(--ink)"
+              >
+                {theme === "dark" ? (
+                  <Sun size={15} strokeWidth={1.75} />
+                ) : (
+                  <Moon size={15} strokeWidth={1.75} />
+                )}
+              </button>
+            </div>
           </div>
         </header>
         <main className="px-6 py-7 motion-safe:animate-[rise_.3s_cubic-bezier(.21,1.02,.73,1)]">

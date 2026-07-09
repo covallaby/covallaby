@@ -21,6 +21,18 @@ comparisons, and a badge URL for your README.
 - **Runs nearly anywhere.** A $4 VPS, Fly.io's smallest machine, a Raspberry
   Pi, `docker run`. Zero native dependencies.
 
+## ☁️ Don't want to run it? Use the hosted version
+
+Covallaby is hosted at **[covallaby.com](https://covallaby.com)** — sign in with
+GitHub at **[app.covallaby.com](https://app.covallaby.com)**, point your CI's
+coverage upload at it, and get history, dashboards, and badges with nothing to
+operate. Repos organize automatically under your GitHub orgs; you only see the
+orgs you belong to.
+
+Everything below is for **self-hosting** the exact same server yourself — it's
+the identical open-source build. (The hosted tier adds only GitHub sign-in,
+per-account scoping, and billing on top.)
+
 ## Quick start
 
 ```bash
