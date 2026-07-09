@@ -45,10 +45,18 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Test (SQLite + Postgres)
-        run: pnpm test
+      - name: Test + coverage (SQLite + Postgres)
+        run: pnpm test:coverage
         env:
           TEST_DATABASE_URL: postgres://covallaby:covallaby@localhost:5432/covallaby
+
+      # Dogfood: upload our own coverage to the hosted Covallaby (covallaby.com).
+      - name: Upload coverage to Covallaby
+        if: github.event_name == 'push'
+        run: |
+          curl -sf -X POST "https://app.covallaby.com/api/v1/upload?repo=${{ github.repository }}&branch=${{ github.ref_name }}&commit=${{ github.sha }}" \
+            -H "Authorization: Bearer ${{ secrets.COVALLABY_TOKEN }}" \
+            --data-binary @coverage/lcov.info
 
       - name: Docker image builds
         run: docker build -t covallaby-server .
