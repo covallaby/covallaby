@@ -1,7 +1,7 @@
 import { Github, LayoutDashboard, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, Route, Routes, useLocation } from "react-router-dom";
-import { IS_DEMO, type RepoOverview, api, formatPercent, severity } from "./api.js";
+import { IS_DEMO, type Me, type RepoOverview, api, formatPercent, severity } from "./api.js";
 import { Meter, inkFor } from "./components/ui.js";
 import { CompareBranches, PullRequest } from "./pages/Compare.js";
 import { Home } from "./pages/Home.js";
@@ -136,7 +136,16 @@ function RepoNavItem({ r, pathname }: { r: RepoOverview; pathname: string }) {
   );
 }
 
-function Sidebar({ repos }: { repos: RepoOverview[] | null }) {
+async function signOut() {
+  try {
+    await fetch("/auth/logout", { method: "POST" });
+  } catch {
+    // ignore — we redirect regardless
+  }
+  window.location.href = "/";
+}
+
+function Sidebar({ repos, me }: { repos: RepoOverview[] | null; me: Me | null }) {
   const { pathname } = useLocation();
   return (
     <aside className="fixed inset-y-0 left-0 z-20 hidden w-60 flex-col border-r border-(--hairline) bg-(--surface) md:flex">
@@ -173,7 +182,22 @@ function Sidebar({ repos }: { repos: RepoOverview[] | null }) {
           </div>
         </div>
       </nav>
-      <div className="border-t border-(--hairline) px-3 py-3">
+      <div className="space-y-1 border-t border-(--hairline) px-3 py-3">
+        {me?.authenticated && me.login && (
+          <div className="flex items-center justify-between gap-2 px-2.5 py-1 text-[12.5px]">
+            <span className="min-w-0 truncate text-(--ink-2)">
+              <span className="text-(--muted)">@</span>
+              {me.login}
+            </span>
+            <button
+              type="button"
+              onClick={signOut}
+              className="shrink-0 text-[12px] text-(--muted) transition-colors hover:text-(--ink)"
+            >
+              Sign out
+            </button>
+          </div>
+        )}
         <a
           href="https://github.com/covallaby/action"
           className="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] text-(--ink-2) transition-colors hover:bg-(--surface-2) hover:text-(--ink)"
@@ -182,6 +206,40 @@ function Sidebar({ repos }: { repos: RepoOverview[] | null }) {
         </a>
       </div>
     </aside>
+  );
+}
+
+/** The signed-out landing for the hosted tier: sign in with GitHub. */
+function SignIn({ theme, toggleTheme }: { theme: Theme; toggleTheme: () => void }) {
+  return (
+    <div className="relative flex min-h-screen items-center justify-center bg-(--page) px-6">
+      <button
+        type="button"
+        onClick={toggleTheme}
+        aria-label="Toggle theme"
+        className="absolute top-4 right-4 rounded-lg border border-(--border) bg-(--surface) p-1.5 text-(--ink-2) transition-colors hover:text-(--ink)"
+      >
+        {theme === "dark" ? (
+          <Sun size={15} strokeWidth={1.75} />
+        ) : (
+          <Moon size={15} strokeWidth={1.75} />
+        )}
+      </button>
+      <div className="w-full max-w-sm rounded-2xl border border-(--border) bg-(--surface) p-8 text-center shadow-[0_1px_2px_rgba(0,0,0,.05),0_24px_60px_-34px_rgba(0,0,0,.45)]">
+        <img src={logoUrl} width={56} height={56} alt="" className="mx-auto mb-4" />
+        <h1 className="text-xl font-semibold tracking-tight">Covallaby</h1>
+        <p className="mt-2 text-sm text-(--ink-2)">
+          Coverage history, dashboards, and merge gates for your repositories.
+        </p>
+        <a
+          href="/auth/github/login"
+          className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-(--ink) px-4 py-2.5 text-sm font-medium text-(--surface) transition-opacity hover:opacity-90"
+        >
+          <Github size={16} strokeWidth={2} /> Sign in with GitHub
+        </a>
+        <p className="mt-4 text-[11px] text-(--muted)">You're covered. 🦘</p>
+      </div>
+    </div>
   );
 }
 
@@ -236,14 +294,29 @@ function Crumbs() {
 export function App() {
   const [theme, toggleTheme] = useTheme();
   const [repos, setRepos] = useState<RepoOverview[] | null>(null);
+  const [me, setMe] = useState<Me | null | undefined>(undefined); // undefined = still loading
   const { pathname } = useLocation();
+
+  useEffect(() => {
+    api
+      .me()
+      .then(setMe)
+      .catch(() => setMe(null));
+  }, []);
+
+  const signedOut = me?.authenticated === false;
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: refetch on navigation keeps sidebar percentages fresh
   useEffect(() => {
+    if (me === undefined || signedOut) return; // don't fetch coverage until we know we're allowed
     api
       .repos()
       .then((d) => setRepos(d.repos))
       .catch(() => setRepos([]));
-  }, [pathname]);
+  }, [pathname, me, signedOut]);
+
+  if (me === undefined) return <div className="min-h-screen bg-(--page)" />; // brief, while auth resolves
+  if (signedOut) return <SignIn theme={theme} toggleTheme={toggleTheme} />;
 
   return (
     <div className="min-h-screen">
@@ -255,7 +328,7 @@ export function App() {
           </a>
         </div>
       )}
-      <Sidebar repos={repos} />
+      <Sidebar repos={repos} me={me} />
       <div className="md:pl-60">
         <header className="sticky top-0 z-10 border-b border-(--hairline) bg-(--page)/80 backdrop-blur-md">
           <div className="flex items-center justify-between gap-4 px-6 py-2.5">

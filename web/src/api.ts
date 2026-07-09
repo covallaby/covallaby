@@ -117,6 +117,29 @@ async function get<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** Hosted-mode auth state. */
+export interface Me {
+  authenticated: boolean;
+  login?: string;
+  name?: string | null;
+  accounts?: string[];
+}
+
+/**
+ * The signed-in user, or `null` when the server isn't in hosted mode (the
+ * self-hosted server has no auth layer, so `/api/v1/me` 404s). Never throws.
+ */
+async function fetchMe(): Promise<Me | null> {
+  try {
+    const res = await fetch("/api/v1/me");
+    if (res.status === 404) return null; // self-hosted: public dashboard, no gate
+    if (!res.ok) return { authenticated: false };
+    return (await res.json()) as Me;
+  } catch {
+    return null;
+  }
+}
+
 const liveApi = {
   repos: () => get<{ repos: RepoOverview[] }>("/api/v1/repos"),
   activity: () => get<{ uploads: UploadRow[] }>("/api/v1/activity"),
@@ -125,6 +148,7 @@ const liveApi = {
       `/api/v1/repos/${repo}/history${branch ? `?branch=${encodeURIComponent(branch)}` : ""}`,
     ),
   upload: (id: string) => get<UploadDetail>(`/api/v1/uploads/${id}`),
+  me: fetchMe,
   trends: () => get<PortfolioTrends>("/api/v1/trends"),
   dirTrends: (repo: string, branch?: string) =>
     get<DirTrends>(
@@ -154,6 +178,7 @@ export const api: typeof liveApi = IS_DEMO
       activity: (...a) => load().then((d) => d.activity(...a)),
       history: (...a) => load().then((d) => d.history(...a)),
       upload: (...a) => load().then((d) => d.upload(...a)),
+      me: () => Promise.resolve<Me | null>(null), // the static demo is always "public"
       trends: (...a) => load().then((d) => d.trends(...a)),
       dirTrends: (...a) => load().then((d) => d.dirTrends(...a)),
       prs: (...a) => load().then((d) => d.prs(...a)),
