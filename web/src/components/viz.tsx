@@ -52,11 +52,14 @@ export function RiskQuadrant({ repos }: { repos: RepoOverview[] }) {
   const R = 20;
   const T = 18;
   const B = 42;
-  const maxK = Math.max(10, ...pts.map((p) => p.kloc)) * 1.12;
-  const x = (k: number) => L + (k / maxK) * (W - L - R);
+  // Scale the x-axis to the actual data (with headroom) so a handful of small
+  // repos spread across the plot instead of bunching against the y-axis.
+  const maxK = (Math.max(...pts.map((p) => p.kloc)) || 1) * 1.35;
+  // Give both edges breathing room: map [0, maxK] into the inner 8%–100% band.
+  const x = (k: number) => L + (0.08 + (k / maxK) * 0.92) * (W - L - R);
   const y = (p: number) => H - B - (p / 100) * (H - T - B);
   const rOf = (u: number) => Math.max(7, Math.min(46, Math.sqrt(u) * 7));
-  const sizeMid = maxK * 0.42;
+  const sizeMid = maxK * 0.5;
 
   return (
     <svg
@@ -141,9 +144,10 @@ export function RiskQuadrant({ repos }: { repos: RepoOverview[] }) {
           const r = rOf(d.uncovered);
           const left = cx > (L + W - R) / 2;
           const lx = left ? cx - r - 6 : cx + r + 6;
+          // Each label is two lines (~26px tall); clear that when they'd overlap.
           let dy = 0;
-          while (anchors.some((a) => Math.abs(a.lx - lx) < 70 && Math.abs(a.ly - (cy + dy)) < 15)) {
-            dy += 17;
+          while (anchors.some((a) => Math.abs(a.lx - lx) < 80 && Math.abs(a.ly - (cy + dy)) < 26)) {
+            dy += 27;
           }
           anchors.push({ lx, ly: cy + dy });
           return (
