@@ -1,8 +1,5 @@
-import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
-import type { BillingClient } from "../src/hosted/billing.js";
-import { planFor, verifyStripeSignature } from "../src/hosted/billing.js";
 import type { HostedConfig } from "../src/hosted/config.js";
 import type { GitHubClient } from "../src/hosted/github.js";
 import { decodeSession, encodeSession } from "../src/hosted/session.js";
@@ -14,7 +11,6 @@ const config: HostedConfig = {
   baseUrl: "http://localhost:8080",
   sessionSecret: "test-secret",
   github: { clientId: "id", clientSecret: "sec", apiBase: "https://api.github.com" },
-  stripe: { secretKey: "sk_test", webhookSecret: "whsec", priceId: "price_x" },
 };
 
 // A fake GitHub that signs in "alice" with access to accounts alice + acme.
@@ -44,49 +40,13 @@ describe("sessions", () => {
   });
 });
 
-describe("Stripe signature", () => {
-  it("verifies the t=,v1= HMAC scheme and rejects bad ones", () => {
-    const body = '{"type":"x"}';
-    const t = "1700000000";
-    const v1 = createHmac("sha256", "whsec").update(`${t}.${body}`).digest("hex");
-    expect(verifyStripeSignature(body, `t=${t},v1=${v1}`, "whsec")).toBe(true);
-    expect(verifyStripeSignature(body, `t=${t},v1=deadbeef`, "whsec")).toBe(false);
-    expect(verifyStripeSignature(body, undefined, "whsec")).toBe(false);
-  });
-});
-
-describe("planFor", () => {
-  it("is free without a subscription, pro when active", async () => {
-    const store = new SqliteStore(":memory:");
-    expect(await planFor(store, "acme")).toBe("free");
-    await store.setSubscription({
-      account: "acme",
-      plan: "pro",
-      status: "active",
-      stripeCustomer: "cus_1",
-      currentPeriodEnd: null,
-    });
-    expect(await planFor(store, "acme")).toBe("pro");
-    await store.setSubscription({
-      account: "acme",
-      plan: "pro",
-      status: "canceled",
-      stripeCustomer: "cus_1",
-      currentPeriodEnd: null,
-    });
-    expect(await planFor(store, "acme")).toBe("free");
-    await store.close();
-  });
-});
-
 describe("hosted mode: auth + tenancy scoping", () => {
   const store = new SqliteStore(":memory:");
-  const noBilling: BillingClient | null = null;
   const app = createApp({
     store,
     uploadToken: "up",
     hosted: config,
-    hostedDeps: { github: fakeGitHub, billing: noBilling },
+    hostedDeps: { github: fakeGitHub },
   });
 
   const upload = (repo: string, commit: string) =>

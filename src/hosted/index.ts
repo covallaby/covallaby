@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
 import type { Store } from "../store.js";
 import { authRoutes, currentSession } from "./auth.js";
-import { type BillingClient, billingRoutes, createStripeClient } from "./billing.js";
+import { billingRoutes } from "./billing.js";
 import type { HostedConfig } from "./config.js";
 import { type GitHubClient, createGitHubClient } from "./github.js";
 
@@ -13,14 +13,13 @@ export type AppEnv = { Variables: { accounts?: string[] } };
 // re-exported for AppOptions typing
 export interface HostedDeps {
   github?: GitHubClient; // injectable for tests
-  billing?: BillingClient | null;
 }
 
 /**
  * Mount the hosted tier onto the app. Called only when a HostedConfig exists,
  * so the self-hosted server never touches any of this. Adds:
  *  - Sign in with GitHub (+ /api/v1/me)
- *  - Stripe billing routes
+ *  - Billing routes (OSS ships a free-only stub; the hosted tier overlays Stripe)
  *  - a read gate: cross-repo/read endpoints require a session and are scoped to
  *    the signed-in user's GitHub accounts. Uploads (token-authed) are untouched.
  */
@@ -31,15 +30,9 @@ export function mountHosted(
   deps: HostedDeps = {},
 ): void {
   const github = deps.github ?? createGitHubClient(config);
-  const billing =
-    deps.billing !== undefined
-      ? deps.billing
-      : config.stripe
-        ? createStripeClient(config.stripe)
-        : null;
 
   app.route("/", authRoutes(config, github));
-  app.route("/", billingRoutes(config, store, billing));
+  app.route("/", billingRoutes(config, store));
 
   // Read gate: browsing endpoints require a session; scope them to the user's
   // accounts. Uploads, badges, health, auth, and the SPA shell are exempt.

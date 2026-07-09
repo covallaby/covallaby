@@ -25,9 +25,7 @@ console.log(
   `   storage: ${process.env.DATABASE_URL ? "postgres" : `sqlite (${process.env.COVALLABY_DB ?? "data/covallaby.db"})`}`,
 );
 if (hosted) {
-  console.log(
-    `   mode:    hosted (GitHub sign-in${hosted.stripe ? " + Stripe billing" : ", billing disabled"})`,
-  );
+  console.log("   mode:    hosted (GitHub sign-in; billing via the hosted overlay, if present)");
 }
 if (!process.env.COVALLABY_TOKEN) {
   // A generated admin secret: to stderr with a nudge, not into stdout logs.

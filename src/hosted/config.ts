@@ -12,12 +12,6 @@ export interface HostedConfig {
     /** api.github.com by default; a GHES base for self-hosted GitHub. */
     apiBase: string;
   };
-  /** Billing is optional even in hosted mode; without it, everything is `free`. */
-  stripe: {
-    secretKey: string;
-    webhookSecret: string;
-    priceId: string;
-  } | null;
 }
 
 export function loadHostedConfig(env: NodeJS.ProcessEnv = process.env): HostedConfig | null {
@@ -33,15 +27,6 @@ export function loadHostedConfig(env: NodeJS.ProcessEnv = process.env): HostedCo
     return value;
   };
 
-  const stripeKey = env.STRIPE_SECRET_KEY?.trim();
-  const stripe = stripeKey
-    ? {
-        secretKey: stripeKey,
-        webhookSecret: need("STRIPE_WEBHOOK_SECRET"),
-        priceId: need("STRIPE_PRICE_ID"),
-      }
-    : null;
-
   return {
     baseUrl: (env.COVALLABY_BASE_URL ?? "http://localhost:8080").replace(/\/$/, ""),
     sessionSecret: need("COVALLABY_SESSION_SECRET"),
@@ -50,6 +35,5 @@ export function loadHostedConfig(env: NodeJS.ProcessEnv = process.env): HostedCo
       clientSecret: need("GITHUB_CLIENT_SECRET"),
       apiBase: (env.GITHUB_API_BASE ?? "https://api.github.com").replace(/\/$/, ""),
     },
-    stripe,
   };
 }
