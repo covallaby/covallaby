@@ -7,6 +7,7 @@ import {
   type RepoOverview,
   type Store,
   type Subscription,
+  type UpdateReportInput,
   type UploadRow,
   accountOf,
   packReport,
@@ -182,6 +183,30 @@ export class SqliteStore implements Store {
       .get(id) as unknown as (RawRow & { report: Uint8Array }) | undefined;
     if (!raw) return null;
     return { row: toRow(raw), report: unpackReport(raw.report) };
+  }
+
+  async findByCommit(repo: string, commit: string) {
+    const raw = this.db
+      .prepare(
+        `SELECT ${ROW_COLUMNS}, report FROM uploads
+         WHERE repo = ? AND commit_sha = ? ORDER BY id DESC LIMIT 1`,
+      )
+      .get(repo, commit) as unknown as (RawRow & { report: Uint8Array }) | undefined;
+    if (!raw) return null;
+    return { row: toRow(raw), report: unpackReport(raw.report) };
+  }
+
+  async updateReport(id: number, patch: UpdateReportInput): Promise<UploadRow> {
+    this.db
+      .prepare(
+        `UPDATE uploads SET report = ?, lines_covered = ?, lines_total = ?, files = ?
+         WHERE id = ?`,
+      )
+      .run(packReport(patch.report), patch.linesCovered, patch.linesTotal, patch.files, id);
+    const raw = this.db
+      .prepare(`SELECT ${ROW_COLUMNS} FROM uploads WHERE id = ?`)
+      .get(id) as unknown as RawRow;
+    return toRow(raw);
   }
 
   async latest(repo: string, branch?: string): Promise<UploadRow | null> {

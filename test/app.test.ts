@@ -312,3 +312,40 @@ describe("visualization data endpoints", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("sharded upload merge", () => {
+  const post = (query: string, body: string) =>
+    app.request(`/api/v1/upload?${query}`, {
+      method: "POST",
+      headers: { authorization: "Bearer sekret" },
+      body,
+    });
+
+  it("merges shards for the same commit with ?merge=1", async () => {
+    const shardA = "SF:src/a.ts\nDA:1,1\nDA:2,0\nend_of_record\n"; // a.ts 1/2
+    const shardB = "SF:src/b.ts\nDA:1,1\nDA:2,1\nend_of_record\n"; // b.ts 2/2
+    const q = "repo=shard/app&branch=main&commit=deadbeef&merge=1";
+    const j1 = await (await post(q, shardA)).json();
+    expect(j1.merged).toBe(false); // first shard creates the upload
+    const j2 = await (await post(q, shardB)).json();
+    expect(j2.merged).toBe(true); // second shard accumulates into it
+    expect(j2.id).toBe(j1.id); // same row, not a new snapshot
+
+    const detail = await (await app.request(`/api/v1/uploads/${j1.id}`)).json();
+    expect(detail.totals.lines.covered).toBe(3); // 1 + 2
+    expect(detail.totals.lines.total).toBe(4); // 2 + 2
+    expect(detail.files.map((f: { path: string }) => f.path).sort()).toEqual([
+      "src/a.ts",
+      "src/b.ts",
+    ]);
+  });
+
+  it("keeps distinct snapshots for the same commit without ?merge", async () => {
+    const q = "repo=nomerge/app&branch=main&commit=c1";
+    const body = "SF:x.ts\nDA:1,1\nend_of_record\n";
+    const a = await (await post(q, body)).json();
+    const b = await (await post(q, body)).json();
+    expect(b.merged).toBe(false);
+    expect(b.id).not.toBe(a.id); // two separate uploads, as before
+  });
+});

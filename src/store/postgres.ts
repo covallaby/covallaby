@@ -5,6 +5,7 @@ import {
   type RepoOverview,
   type Store,
   type Subscription,
+  type UpdateReportInput,
   type UploadRow,
   accountOf,
   packReport,
@@ -154,6 +155,25 @@ export class PostgresStore implements Store {
       FROM uploads WHERE id = ${id}`;
     if (!raw) return null;
     return { row: toRow(raw), report: unpackReport(raw.report) };
+  }
+
+  async findByCommit(repo: string, commit: string) {
+    const [raw] = await this.sql<Array<RawRow & { report: Buffer }>>`
+      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at, report
+      FROM uploads WHERE repo = ${repo} AND commit_sha = ${commit}
+      ORDER BY id DESC LIMIT 1`;
+    if (!raw) return null;
+    return { row: toRow(raw), report: unpackReport(raw.report) };
+  }
+
+  async updateReport(id: number, patch: UpdateReportInput): Promise<UploadRow> {
+    const [raw] = await this.sql<RawRow[]>`
+      UPDATE uploads SET report = ${Buffer.from(packReport(patch.report))},
+        lines_covered = ${patch.linesCovered}, lines_total = ${patch.linesTotal},
+        files = ${patch.files}
+      WHERE id = ${id}
+      RETURNING id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at`;
+    return toRow(raw!);
   }
 
   async latest(repo: string, branch?: string): Promise<UploadRow | null> {

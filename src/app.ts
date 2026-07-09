@@ -14,6 +14,7 @@ import { renderBadge } from "./vendor/badge.js";
 import {
   type CoverageReport,
   formatRanges,
+  mergeReports,
   rollupByDirectory,
   summarize,
   uncoveredRanges,
@@ -376,17 +377,23 @@ export function createApp({
         ...(format && { format: format as never }),
         ...(c.req.query("strip-prefix") && { stripPrefix: c.req.query("strip-prefix")! }),
       });
-      const summary = summarize(report);
-      const row = await store.recordUpload({
-        repo,
-        branch,
-        commit,
-        pr,
-        report,
+      // Opt-in merge: sharded CI jobs each POST their partial coverage with
+      // ?merge=1; we accumulate them into one upload for the commit instead of
+      // last-write-wins. Without it, every upload is its own snapshot as before.
+      const wantMerge = /^(1|true)$/i.test(c.req.query("merge") ?? "");
+      const existing = wantMerge ? await store.findByCommit(repo, commit) : null;
+
+      const finalReport = existing ? mergeReports([existing.report, report]) : report;
+      const summary = summarize(finalReport);
+      const counts = {
+        report: finalReport,
         linesCovered: summary.lines.covered,
         linesTotal: summary.lines.total,
         files: summary.totalFiles,
-      });
+      };
+      const row = existing
+        ? await store.updateReport(existing.row.id, counts)
+        : await store.recordUpload({ repo, branch, commit, pr, ...counts });
       return c.json({
         ok: true,
         id: row.id,
@@ -394,6 +401,7 @@ export function createApp({
         branch: row.branch,
         commit: row.commit,
         percent: row.percent,
+        merged: existing !== null,
         url: `/r/${row.repo}/u/${row.id}`,
       });
     } catch (error) {

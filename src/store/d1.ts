@@ -4,6 +4,7 @@ import {
   type RepoOverview,
   type Store,
   type Subscription,
+  type UpdateReportInput,
   type UploadRow,
   accountOf,
   packReport,
@@ -222,6 +223,35 @@ export class D1Store implements Store {
       .first<RawRow & { report: ArrayBuffer }>();
     if (!raw) return null;
     return { row: toRow(raw), report: asReport(raw.report) };
+  }
+
+  async findByCommit(repo: string, commit: string) {
+    await this.ensure();
+    const raw = await this.db
+      .prepare(
+        `SELECT ${ROW_COLUMNS}, report FROM uploads
+         WHERE repo = ? AND commit_sha = ? ORDER BY id DESC LIMIT 1`,
+      )
+      .bind(repo, commit)
+      .first<RawRow & { report: ArrayBuffer }>();
+    if (!raw) return null;
+    return { row: toRow(raw), report: asReport(raw.report) };
+  }
+
+  async updateReport(id: number, patch: UpdateReportInput): Promise<UploadRow> {
+    await this.ensure();
+    await this.db
+      .prepare(
+        `UPDATE uploads SET report = ?, lines_covered = ?, lines_total = ?, files = ?
+         WHERE id = ?`,
+      )
+      .bind(packReport(patch.report), patch.linesCovered, patch.linesTotal, patch.files, id)
+      .run();
+    const raw = await this.db
+      .prepare(`SELECT ${ROW_COLUMNS} FROM uploads WHERE id = ?`)
+      .bind(id)
+      .first<RawRow>();
+    return toRow(raw!);
   }
 
   async latest(repo: string, branch?: string): Promise<UploadRow | null> {

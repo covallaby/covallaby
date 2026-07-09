@@ -34,6 +34,14 @@ export interface RecordUploadInput {
   files: number;
 }
 
+/** The report + recomputed counters written back when merging sharded uploads. */
+export interface UpdateReportInput {
+  report: CoverageReport;
+  linesCovered: number;
+  linesTotal: number;
+  files: number;
+}
+
 /**
  * The storage interface both drivers implement. Async throughout — SQLite is
  * synchronous underneath, Postgres isn't, and callers shouldn't care.
@@ -61,6 +69,13 @@ export interface Subscription {
 
 export interface Store {
   recordUpload(input: RecordUploadInput): Promise<UploadRow>;
+  /** The latest upload for an exact repo+commit, with its report — the merge target. */
+  findByCommit(
+    repo: string,
+    commit: string,
+  ): Promise<{ row: UploadRow; report: CoverageReport } | null>;
+  /** Replace an upload's report + counters in place (sharded-upload accumulation). */
+  updateReport(id: number, patch: UpdateReportInput): Promise<UploadRow>;
   /**
    * Cross-repo overview. `accounts` (hosted mode) scopes to those owners;
    * omit for the self-hosted single-tenant view (all repos).
