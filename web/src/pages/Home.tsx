@@ -6,6 +6,7 @@ import {
   type UploadRow,
   api,
   formatPercent,
+  groupReposByOwner,
   severity,
 } from "../api.js";
 import mascotUrl from "../assets/mascot.png";
@@ -17,6 +18,7 @@ import {
   CardHeader,
   DeltaChip,
   Meter,
+  OwnerAvatar,
   Pct,
   Td,
   Th,
@@ -28,6 +30,36 @@ import { CoverageDebt, RiskQuadrant } from "../components/viz.js";
 function momentum(r: RepoOverview): number {
   const pts = r.trend.filter((p): p is number => p !== null);
   return pts.length >= 2 ? Math.abs(pts[pts.length - 1]! - pts[0]!) : 0;
+}
+
+/** One repository card in an org group — shows just the repo name (owner is the section header). */
+function RepoCard({ r }: { r: RepoOverview }) {
+  const prev = r.trend.length > 1 ? r.trend[r.trend.length - 2] : null;
+  return (
+    <Link to={`/r/${r.repo}`} className="group">
+      <Card className="p-5 transition-all duration-150 group-hover:-translate-y-0.5 group-hover:border-(--muted)">
+        <div className="mb-4 flex items-center justify-between font-mono text-[13px] text-(--ink-2)">
+          <span className="min-w-0 truncate">{r.repo.split("/")[1] ?? r.repo}</span>
+          <span className="text-(--muted)">{r.latest.branch}</span>
+        </div>
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <div
+              className={`text-[34px] leading-none font-semibold tracking-tight ${inkFor[severity(r.latest.percent)]}`}
+            >
+              {formatPercent(r.latest.percent)}
+            </div>
+            <div className="mt-2 flex items-center gap-2 text-xs whitespace-nowrap text-(--muted)">
+              {r.latest.linesCovered.toLocaleString()} of {r.latest.linesTotal.toLocaleString()}{" "}
+              lines <DeltaChip current={r.latest.percent} previous={prev} />
+            </div>
+          </div>
+          <Sparkline points={r.trend} />
+        </div>
+        <Meter percent={r.latest.percent} className="mt-4" />
+      </Card>
+    </Link>
+  );
 }
 
 function ago(iso: string): string {
@@ -161,40 +193,27 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
         </div>
       )}
 
-      <h2 className="mt-6 mb-3 text-[13.5px] font-semibold tracking-tight">Repositories</h2>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {[...repos]
-          .sort((a, b) => momentum(b) - momentum(a))
-          .map((r) => {
-            const prev = r.trend.length > 1 ? r.trend[r.trend.length - 2] : null;
-            return (
-              <Link key={r.repo} to={`/r/${r.repo}`} className="group">
-                <Card className="p-5 transition-all duration-150 group-hover:-translate-y-0.5 group-hover:border-(--muted)">
-                  <div className="mb-4 flex items-center justify-between font-mono text-[13px] text-(--ink-2)">
-                    <span>{r.repo}</span>
-                    <span className="text-(--muted)">{r.latest.branch}</span>
-                  </div>
-                  <div className="flex items-end justify-between gap-3">
-                    <div>
-                      <div
-                        className={`text-[34px] leading-none font-semibold tracking-tight ${inkFor[severity(r.latest.percent)]}`}
-                      >
-                        {formatPercent(r.latest.percent)}
-                      </div>
-                      <div className="mt-2 flex items-center gap-2 text-xs whitespace-nowrap text-(--muted)">
-                        {r.latest.linesCovered.toLocaleString()} of{" "}
-                        {r.latest.linesTotal.toLocaleString()} lines{" "}
-                        <DeltaChip current={r.latest.percent} previous={prev} />
-                      </div>
-                    </div>
-                    <Sparkline points={r.trend} />
-                  </div>
-                  <Meter percent={r.latest.percent} className="mt-4" />
-                </Card>
-              </Link>
-            );
-          })}
-      </div>
+      {groupReposByOwner(repos).map((group) => (
+        <section key={group.owner} className="mt-6">
+          <div className="mb-3 flex items-center gap-2.5">
+            <OwnerAvatar owner={group.owner} size={22} />
+            <h2 className="text-[14px] font-semibold tracking-tight">{group.owner}</h2>
+            <span className="text-xs text-(--muted)">
+              {group.repos.length} {group.repos.length === 1 ? "repo" : "repos"} ·{" "}
+              <span className={inkFor[severity(group.percent)]}>
+                {formatPercent(group.percent)}
+              </span>
+            </span>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {[...group.repos]
+              .sort((a, b) => momentum(b) - momentum(a))
+              .map((r) => (
+                <RepoCard key={r.repo} r={r} />
+              ))}
+          </div>
+        </section>
+      ))}
 
       <Card className="mt-4">
         <CardHeader title="Recent activity" description="Latest uploads across every repository" />

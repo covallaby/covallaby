@@ -1,8 +1,17 @@
-import { Github, LayoutDashboard, Moon, Sun } from "lucide-react";
+import { ChevronDown, Github, LayoutDashboard, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, Route, Routes, useLocation } from "react-router-dom";
-import { IS_DEMO, type Me, type RepoOverview, api, formatPercent, severity } from "./api.js";
-import { Meter, inkFor } from "./components/ui.js";
+import {
+  IS_DEMO,
+  type Me,
+  type OwnerGroup,
+  type RepoOverview,
+  api,
+  formatPercent,
+  groupReposByOwner,
+  severity,
+} from "./api.js";
+import { Meter, OwnerAvatar, inkFor } from "./components/ui.js";
 import { CompareBranches, PullRequest } from "./pages/Compare.js";
 import { Home } from "./pages/Home.js";
 import { Policy } from "./pages/Policy.js";
@@ -145,6 +154,35 @@ async function signOut() {
   window.location.href = "/";
 }
 
+/** A collapsible org/owner section in the rail: avatar + name + repo count. */
+function OrgSection({ group, pathname }: { group: OwnerGroup; pathname: string }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="mt-1.5 first:mt-0">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-(--surface-2)"
+      >
+        <OwnerAvatar owner={group.owner} size={16} />
+        <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{group.owner}</span>
+        <span className="text-[10.5px] tabular-nums text-(--muted)">{group.repos.length}</span>
+        <ChevronDown
+          size={13}
+          className={`shrink-0 text-(--muted) transition-transform ${open ? "" : "-rotate-90"}`}
+        />
+      </button>
+      {open && (
+        <div className="mt-0.5 space-y-0.5 pl-1">
+          {group.repos.map((r) => (
+            <RepoNavItem key={r.repo} r={r} pathname={pathname} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Sidebar({ repos, me }: { repos: RepoOverview[] | null; me: Me | null }) {
   const { pathname } = useLocation();
   return (
@@ -173,9 +211,11 @@ function Sidebar({ repos, me }: { repos: RepoOverview[] | null; me: Me | null })
                 <div className="h-8 animate-pulse rounded bg-(--surface-2)" />
               </div>
             )}
-            {repos?.map((r) => (
-              <RepoNavItem key={r.repo} r={r} pathname={pathname} />
-            ))}
+            {repos?.length
+              ? groupReposByOwner(repos).map((group) => (
+                  <OrgSection key={group.owner} group={group} pathname={pathname} />
+                ))
+              : null}
             {repos?.length === 0 && (
               <p className="px-2.5 py-1 text-[12px] text-(--muted)">Nothing uploaded yet.</p>
             )}

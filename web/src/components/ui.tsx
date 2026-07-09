@@ -1,5 +1,32 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { type Severity, formatPercent, severity } from "../api.js";
+
+/** A GitHub org/user avatar (github.com/:owner.png), with a monogram fallback. */
+export function OwnerAvatar({ owner, size = 20 }: { owner: string; size?: number }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <span
+        className="inline-flex shrink-0 items-center justify-center rounded-full bg-(--surface-2) font-semibold text-(--muted)"
+        style={{ width: size, height: size, fontSize: size * 0.48 }}
+        aria-hidden="true"
+      >
+        {owner.charAt(0).toUpperCase()}
+      </span>
+    );
+  }
+  return (
+    <img
+      src={`https://github.com/${owner}.png?size=${size * 2}`}
+      width={size}
+      height={size}
+      alt=""
+      aria-hidden="true"
+      className="shrink-0 rounded-full"
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (

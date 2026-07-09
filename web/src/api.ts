@@ -198,6 +198,38 @@ export function formatPercent(value: number | null): string {
   return `${(Math.floor(value * 10 + 1e-9) / 10).toFixed(1)}%`;
 }
 
+export interface OwnerGroup {
+  owner: string;
+  repos: RepoOverview[];
+  linesCovered: number;
+  linesTotal: number;
+  percent: number | null;
+}
+
+/** Group repos by their GitHub owner (org/user), each with a coverage roll-up, owners A→Z. */
+export function groupReposByOwner(repos: RepoOverview[]): OwnerGroup[] {
+  const groups = new Map<string, RepoOverview[]>();
+  for (const r of repos) {
+    const owner = r.repo.split("/")[0] ?? r.repo;
+    const list = groups.get(owner);
+    if (list) list.push(r);
+    else groups.set(owner, [r]);
+  }
+  return [...groups.entries()]
+    .map(([owner, rs]) => {
+      const linesCovered = rs.reduce((n, r) => n + r.latest.linesCovered, 0);
+      const linesTotal = rs.reduce((n, r) => n + r.latest.linesTotal, 0);
+      return {
+        owner,
+        repos: rs,
+        linesCovered,
+        linesTotal,
+        percent: linesTotal === 0 ? null : (linesCovered / linesTotal) * 100,
+      };
+    })
+    .sort((a, b) => a.owner.localeCompare(b.owner));
+}
+
 export type Severity = "good" | "ok" | "warn" | "bad" | "muted";
 
 export function severity(percent: number | null): Severity {
