@@ -8,9 +8,8 @@ primary_region = "iad"
 
 [env]
   PORT = "8080"
-  COVALLABY_DB = "/data/covallaby.db"
   COVALLABY_HOSTED = "1"
-  COVALLABY_BASE_URL = "https://covallaby.fly.dev"
+  COVALLABY_BASE_URL = "https://app.covallaby.com"
 
 [http_service]
   internal_port = 8080
@@ -25,14 +24,9 @@ primary_region = "iad"
     interval = "15s"
     timeout = "2s"
 
-# Persist the SQLite database:  fly volumes create covallaby_data --size 1
-[mounts]
-  source = "covallaby_data"
-  destination = "/data"
-
 [[vm]]
   size = "shared-cpu-1x"
   memory = "256mb"
 
-# Set your upload token once:  fly secrets set COVALLABY_TOKEN=...
-# Or attach Fly Postgres and:  fly secrets set DATABASE_URL=postgres://...
+# Storage is Managed Postgres (DATABASE_URL secret, set via `fly mpg attach`);
+# no volume needed. Uploads authenticate with the COVALLABY_TOKEN secret.
