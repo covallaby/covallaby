@@ -160,19 +160,28 @@ function OrgSection({ group, pathname }: { group: OwnerGroup; pathname: string }
   const [open, setOpen] = useState(true);
   return (
     <div className="mt-1.5 first:mt-0">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-(--surface-2)"
-      >
-        <OwnerAvatar owner={group.owner} size={16} />
-        <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{group.owner}</span>
-        <span className="text-[10.5px] tabular-nums text-(--muted)">{group.repos.length}</span>
-        <ChevronDown
-          size={13}
-          className={`shrink-0 text-(--muted) transition-transform ${open ? "" : "-rotate-90"}`}
-        />
-      </button>
+      <div className="flex items-center gap-1">
+        <Link
+          to={`/?org=${encodeURIComponent(group.owner)}`}
+          title={`${group.owner} overview`}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-(--surface-2)"
+        >
+          <OwnerAvatar owner={group.owner} size={16} />
+          <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{group.owner}</span>
+          <span className="text-[10.5px] tabular-nums text-(--muted)">{group.repos.length}</span>
+        </Link>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-label={open ? "Collapse" : "Expand"}
+          className="shrink-0 rounded-lg p-1.5 transition-colors hover:bg-(--surface-2)"
+        >
+          <ChevronDown
+            size={13}
+            className={`text-(--muted) transition-transform ${open ? "" : "-rotate-90"}`}
+          />
+        </button>
+      </div>
       {open && (
         <div className="mt-0.5 ml-[15px] space-y-0.5 border-l border-(--hairline) pl-2">
           {group.repos.map((r) => (

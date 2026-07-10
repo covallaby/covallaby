@@ -165,14 +165,18 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
   return (
     <div>
       {orgFilter && (
-        <div className="mb-4 flex items-center gap-2 text-[13px] text-(--muted)">
-          Showing{" "}
-          <span className="font-medium text-(--ink)">
-            {orgFilter}/ ({shown.length})
-          </span>
-          <Link to="/" className="hover:text-(--ink) hover:underline">
-            · show all orgs
+        <div className="mb-4 flex items-center gap-3">
+          <Link
+            to="/"
+            className="text-[13px] text-(--muted) transition-colors hover:text-(--ink) hover:underline"
+          >
+            ← all orgs
           </Link>
+          <div className="flex items-center gap-2">
+            <OwnerAvatar owner={orgFilter} size={20} />
+            <h1 className="text-[15px] font-semibold tracking-tight">{orgFilter}</h1>
+            <span className="text-xs text-(--muted)">overview · {shown.length}</span>
+          </div>
         </div>
       )}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -232,8 +236,14 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
       {groupReposByOwner(shown).map((group) => (
         <section key={group.owner} className="mt-6">
           <div className="mb-3 flex items-center gap-2.5">
-            <OwnerAvatar owner={group.owner} size={22} />
-            <h2 className="text-[14px] font-semibold tracking-tight">{group.owner}</h2>
+            <Link
+              to={`/?org=${encodeURIComponent(group.owner)}`}
+              className="flex items-center gap-2.5 transition-opacity hover:opacity-75"
+              title={`${group.owner} overview`}
+            >
+              <OwnerAvatar owner={group.owner} size={22} />
+              <h2 className="text-[14px] font-semibold tracking-tight">{group.owner}</h2>
+            </Link>
             <span className="text-xs text-(--muted)">
               {group.repos.length} {group.repos.length === 1 ? "repo" : "repos"} ·{" "}
               <span className={inkFor[severity(group.percent)]}>
