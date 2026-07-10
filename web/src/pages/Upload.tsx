@@ -60,7 +60,11 @@ export function Upload() {
   if (!data) return <PageSkeleton />;
 
   const { row, totals, changes } = data;
-  const shown = files.slice(0, 200);
+  const [showAll, setShowAll] = useState(false);
+  // No hard cap — just don't render thousands of rows unprompted. Default to the
+  // worst 200 (they're sorted worst-first); "Show all" reveals the rest.
+  const CAP = 200;
+  const shown = showAll ? files : files.slice(0, CAP);
   const missed = totals.lines.total - totals.lines.covered;
 
   return (
@@ -347,10 +351,18 @@ export function Upload() {
                       </Td>
                     </tr>
                   ))}
-                  {files.length > shown.length && (
+                  {!showAll && files.length > shown.length && (
                     <tr>
                       <Td className="text-(--muted)">
-                        …and {files.length - shown.length} more — narrow the filter.
+                        Showing the worst {shown.length} of {files.length}.{" "}
+                        <button
+                          type="button"
+                          onClick={() => setShowAll(true)}
+                          className="font-medium text-(--ink-2) hover:text-(--ink) hover:underline"
+                        >
+                          Show all {files.length}
+                        </button>{" "}
+                        — or filter.
                       </Td>
                       <Td />
                       <Td />
