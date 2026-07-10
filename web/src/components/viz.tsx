@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import {
   type DirTrends,
   type PortfolioTrends,
@@ -35,6 +35,7 @@ function Empty({ children }: { children: ReactNode }) {
 /* ------------------------------------------------------------------ */
 
 export function RiskQuadrant({ repos }: { repos: RepoOverview[] }) {
+  const [hover, setHover] = useState<number | null>(null);
   const pts = repos
     .filter((r) => r.latest.linesTotal > 0)
     .map((r) => ({
@@ -156,7 +157,7 @@ export function RiskQuadrant({ repos }: { repos: RepoOverview[] }) {
         // a cluster instead of all stacking downward onto other points.
         const anchors: Array<{ lx: number; ly: number }> = [];
         const offsets = [0, 18, -18, 34, -34, 50, -50, 66, -66];
-        return pts.map((d) => {
+        return pts.map((d, i) => {
           const cx = x(d.kloc);
           const cy = y(d.pct);
           const r = rOf(d.uncovered);
@@ -169,10 +170,25 @@ export function RiskQuadrant({ repos }: { repos: RepoOverview[] }) {
                 !anchors.some((a) => Math.abs(a.lx - lx) < 78 && Math.abs(a.ly - (cy + o)) < 24),
             ) ?? 0;
           anchors.push({ lx, ly: cy + dy });
+          const on = hover === i;
           return (
-            <g key={d.full}>
-              <circle cx={cx} cy={cy} r={r} fill={sv(d.pct)} opacity={0.22} />
-              <circle cx={cx} cy={cy} r={r} fill="none" stroke={sv(d.pct)} strokeWidth={1.6} />
+            <g
+              key={d.full}
+              onMouseEnter={() => setHover(i)}
+              onMouseLeave={() => setHover(null)}
+              style={{ cursor: "pointer" }}
+            >
+              {/* enlarged invisible hit target so small bubbles are easy to hover */}
+              <circle cx={cx} cy={cy} r={Math.max(r, 16)} fill="transparent" />
+              <circle cx={cx} cy={cy} r={r} fill={sv(d.pct)} opacity={on ? 0.34 : 0.22} />
+              <circle
+                cx={cx}
+                cy={cy}
+                r={r}
+                fill="none"
+                stroke={sv(d.pct)}
+                strokeWidth={on ? 2.6 : 1.6}
+              />
               <circle cx={cx} cy={cy} r={2.2} fill={sv(d.pct)} />
               <text
                 x={lx}
@@ -198,6 +214,63 @@ export function RiskQuadrant({ repos }: { repos: RepoOverview[] }) {
           );
         });
       })()}
+      {hover !== null &&
+        (() => {
+          const d = pts[hover];
+          if (!d) return null;
+          const cx = x(d.kloc);
+          const cy = y(d.pct);
+          const danger = d.kloc >= sizeMid && d.pct < 75;
+          const sizeWord = d.kloc >= sizeMid ? "larger" : "smaller";
+          const covWord = d.pct >= 75 ? "well-tested" : d.pct >= 50 ? "middling" : "under-tested";
+          const rows: Array<{ t: string; mono?: boolean; bad?: boolean }> = [
+            { t: `${formatPercent(d.pct)} covered` },
+            {
+              t: `${Math.round(d.kloc * 1000).toLocaleString()} lines · ${Math.round(
+                d.uncovered * 1000,
+              ).toLocaleString()} uncovered`,
+              mono: true,
+            },
+            danger
+              ? { t: "⚠ large & under-tested — danger zone", bad: true }
+              : { t: `${sizeWord} codebase · ${covWord}` },
+          ];
+          const boxW = 210;
+          const boxH = 22 + rows.length * 15 + 6;
+          let bx = cx + 14;
+          let by = cy - boxH - 6;
+          if (bx + boxW > W - 2) bx = cx - boxW - 14;
+          if (bx < 2) bx = 2;
+          if (by < T) by = cy + 16;
+          return (
+            <g pointerEvents="none">
+              <rect
+                x={bx}
+                y={by}
+                width={boxW}
+                height={boxH}
+                rx={8}
+                fill="var(--surface)"
+                stroke="var(--hairline)"
+              />
+              <text x={bx + 11} y={by + 18} fontSize={12} fontWeight={600} fill="var(--ink)">
+                {d.name}
+              </text>
+              {rows.map((row, i) => (
+                <text
+                  key={row.t}
+                  x={bx + 11}
+                  y={by + 36 + i * 15}
+                  fontSize={10.5}
+                  fontFamily={row.mono ? "var(--font-mono)" : undefined}
+                  fill={row.bad ? "var(--bad)" : "var(--muted)"}
+                >
+                  {row.t}
+                </text>
+              ))}
+            </g>
+          );
+        })()}
     </svg>
   );
 }
