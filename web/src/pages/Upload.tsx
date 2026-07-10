@@ -67,10 +67,28 @@ export function Upload() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-6">
         <div>
-          <div className="text-xs text-(--muted)">
-            Coverage at <span className="font-mono">{row.commit.slice(0, 10)}</span> on{" "}
-            <span className="font-mono">{row.branch}</span>
-            {row.pr ? <> · PR #{row.pr}</> : null}
+          <div className="flex items-center gap-2 text-xs text-(--muted)">
+            <span>Coverage at</span>
+            <span className="font-mono text-(--ink-2)">{row.commit.slice(0, 10)}</span>
+            {(() => {
+              const isDefault = !row.pr && (row.branch === "main" || row.branch === "master");
+              return (
+                <span
+                  className={`rounded-full border px-2 py-0.5 font-mono text-[11px] ${
+                    isDefault
+                      ? "border-(--hairline) bg-(--surface-2) text-(--ink-2)"
+                      : "border-(--warn) text-(--warn)"
+                  }`}
+                  title={isDefault ? "Default branch" : "Not the default branch"}
+                >
+                  {row.pr
+                    ? `PR #${row.pr} · ${row.branch}`
+                    : isDefault
+                      ? `${row.branch} · default`
+                      : row.branch}
+                </span>
+              );
+            })()}
           </div>
           <div
             className={`mt-1 flex items-center gap-3 text-[44px] leading-none font-semibold tracking-tighter ${inkFor[severity(row.percent)]}`}
