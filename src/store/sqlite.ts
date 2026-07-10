@@ -117,7 +117,13 @@ export class SqliteStore implements Store {
     const latest = this.db
       .prepare(
         `SELECT ${ROW_COLUMNS} FROM uploads
-         WHERE id IN (SELECT MAX(id) FROM uploads ${scope.sub} GROUP BY repo)
+         WHERE id IN (
+           SELECT id FROM (
+             SELECT id, ROW_NUMBER() OVER (
+               PARTITION BY repo ORDER BY (branch IN ('main', 'master')) DESC, id DESC
+             ) AS rn FROM uploads ${scope.sub}
+           ) WHERE rn = 1
+         )
          ORDER BY repo`,
       )
       .all(...scope.params) as unknown as RawRow[];

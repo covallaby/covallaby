@@ -14,6 +14,7 @@ import mascotUrl from "../assets/mascot.png";
 import { Sparkline } from "../components/charts.js";
 import { Skeleton } from "../components/skeleton.js";
 import {
+  BranchTag,
   Card,
   CardFooter,
   CardHeader,
@@ -291,7 +292,9 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
                     </Link>
                     {u.pr ? <span className="ml-1.5 text-(--muted)">#{u.pr}</span> : null}
                   </Td>
-                  <Td className="text-(--muted)">{u.branch}</Td>
+                  <Td>
+                    <BranchTag branch={u.branch} pr={u.pr} />
+                  </Td>
                   <Td className="text-(--muted)">{ago(u.createdAt)}</Td>
                   <Td className="text-right">
                     <Pct percent={u.percent} />

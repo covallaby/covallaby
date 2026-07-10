@@ -149,7 +149,13 @@ export class D1Store implements Store {
     const { results: latest } = await this.db
       .prepare(
         `SELECT ${ROW_COLUMNS} FROM uploads
-         WHERE id IN (SELECT MAX(id) FROM uploads ${scope.sql} GROUP BY repo)
+         WHERE id IN (
+           SELECT id FROM (
+             SELECT id, ROW_NUMBER() OVER (
+               PARTITION BY repo ORDER BY (branch IN ('main', 'master')) DESC, id DESC
+             ) AS rn FROM uploads ${scope.sql}
+           ) WHERE rn = 1
+         )
          ORDER BY repo`,
       )
       .bind(...scope.params)

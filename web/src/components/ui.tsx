@@ -187,3 +187,23 @@ export function Td({
 }) {
   return <td className={`border-t border-(--hairline) px-4 py-2.5 ${className}`}>{children}</td>;
 }
+
+/**
+ * A branch/PR pill. The default branch (main/master) reads neutral; a PR or any
+ * other branch reads amber — so "is this main?" is answerable at a glance.
+ */
+export function BranchTag({ branch, pr }: { branch: string; pr?: number | null }) {
+  const isDefault = !pr && (branch === "main" || branch === "master");
+  return (
+    <span
+      title={isDefault ? "Default branch" : "Not the default branch"}
+      className={`inline-block max-w-full truncate rounded-full border px-2 py-0.5 align-middle font-mono text-[11px] ${
+        isDefault
+          ? "border-(--hairline) bg-(--surface-2) text-(--ink-2)"
+          : "border-(--warn) text-(--warn)"
+      }`}
+    >
+      {pr ? `PR #${pr}` : branch}
+    </span>
+  );
+}

@@ -97,7 +97,10 @@ export class PostgresStore implements Store {
           : this.sql`WHERE account = ANY(${accounts})`;
     const latest = await this.sql<RawRow[]>`
       SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at
-      FROM uploads WHERE id IN (SELECT MAX(id) FROM uploads ${sub} GROUP BY repo)
+      FROM uploads WHERE id IN (
+        SELECT DISTINCT ON (repo) id FROM uploads ${sub}
+        ORDER BY repo, (branch IN ('main', 'master')) DESC, id DESC
+      )
       ORDER BY repo`;
     const overviews: RepoOverview[] = [];
     for (const raw of latest) {

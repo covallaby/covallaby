@@ -4,7 +4,17 @@ import { type UploadDetail, api, formatPercent, severity } from "../api.js";
 import { Breadcrumb, Hotspots, TreeOutline, buildTree } from "../components/explorer.js";
 import { PageSkeleton } from "../components/skeleton.js";
 import { Treemap } from "../components/treemap.js";
-import { Card, CardHeader, DeltaChip, Meter, Pct, Td, Th, inkFor } from "../components/ui.js";
+import {
+  BranchTag,
+  Card,
+  CardHeader,
+  DeltaChip,
+  Meter,
+  Pct,
+  Td,
+  Th,
+  inkFor,
+} from "../components/ui.js";
 import { CoverageBarcode } from "../components/viz.js";
 
 const VIEWS = [
@@ -55,12 +65,12 @@ export function Upload() {
   }, [data, query]);
   // biome-ignore lint/correctness/useHookAtTopLevel: guarded returns below never skip this hook
   const tree = useMemo(() => (data ? buildTree(data.files) : null), [data]);
+  const [showAll, setShowAll] = useState(false);
 
   if (error) return <p className="text-sm text-(--bad)">{error}</p>;
   if (!data) return <PageSkeleton />;
 
   const { row, totals, changes } = data;
-  const [showAll, setShowAll] = useState(false);
   // No hard cap — just don't render thousands of rows unprompted. Default to the
   // worst 200 (they're sorted worst-first); "Show all" reveals the rest.
   const CAP = 200;
@@ -74,25 +84,7 @@ export function Upload() {
           <div className="flex items-center gap-2 text-xs text-(--muted)">
             <span>Coverage at</span>
             <span className="font-mono text-(--ink-2)">{row.commit.slice(0, 10)}</span>
-            {(() => {
-              const isDefault = !row.pr && (row.branch === "main" || row.branch === "master");
-              return (
-                <span
-                  className={`rounded-full border px-2 py-0.5 font-mono text-[11px] ${
-                    isDefault
-                      ? "border-(--hairline) bg-(--surface-2) text-(--ink-2)"
-                      : "border-(--warn) text-(--warn)"
-                  }`}
-                  title={isDefault ? "Default branch" : "Not the default branch"}
-                >
-                  {row.pr
-                    ? `PR #${row.pr} · ${row.branch}`
-                    : isDefault
-                      ? `${row.branch} · default`
-                      : row.branch}
-                </span>
-              );
-            })()}
+            <BranchTag branch={row.branch} pr={row.pr} />
           </div>
           <div
             className={`mt-1 flex items-center gap-3 text-[44px] leading-none font-semibold tracking-tighter ${inkFor[severity(row.percent)]}`}
