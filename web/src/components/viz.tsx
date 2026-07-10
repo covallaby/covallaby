@@ -85,18 +85,18 @@ export function RiskQuadrant({ repos }: { repos: RepoOverview[] }) {
       className="overflow-visible"
     >
       <title>Coverage vs. codebase size</title>
-      {/* danger zone: large and under-tested */}
+      {/* danger zone: large codebase AND low coverage — the bottom-right corner */}
       <rect
         x={x(sizeMid)}
-        y={T}
+        y={y(75)}
         width={W - R - x(sizeMid)}
-        height={y(75) - T}
+        height={H - B - y(75)}
         fill="var(--bad)"
         opacity={0.06}
       />
       <text
         x={W - R - 6}
-        y={T + 14}
+        y={H - B - 8}
         textAnchor="end"
         fontSize={10}
         fontFamily="var(--font-mono)"
