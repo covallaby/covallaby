@@ -174,7 +174,7 @@ function OrgSection({ group, pathname }: { group: OwnerGroup; pathname: string }
         />
       </button>
       {open && (
-        <div className="mt-0.5 space-y-0.5 pl-1">
+        <div className="mt-0.5 ml-[15px] space-y-0.5 border-l border-(--hairline) pl-2">
           {group.repos.map((r) => (
             <RepoNavItem key={r.repo} r={r} pathname={pathname} />
           ))}

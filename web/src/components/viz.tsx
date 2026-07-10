@@ -59,14 +59,22 @@ export function RiskQuadrant({ repos }: { repos: RepoOverview[] }) {
   const R = 20;
   const T = 18;
   const B = 42;
-  // Scale the x-axis to the actual data (with headroom) so a handful of small
-  // repos spread across the plot instead of bunching against the y-axis.
-  const maxK = (Math.max(...pts.map((p) => p.kloc)) || 1) * 1.35;
-  // Give both edges breathing room: map [0, maxK] into the inner 8%–100% band.
-  const x = (k: number) => L + (0.08 + (k / maxK) * 0.92) * (W - L - R);
+  // Codebase size spans orders of magnitude (tiny SDKs → a big umbrella app),
+  // so a linear x-axis crushes the small repos against the y-axis. A log scale
+  // spreads them out and stops the one large repo from dominating the width.
+  const ks = pts.map((p) => Math.max(p.kloc, 0.1));
+  const kMin = Math.min(...ks);
+  const kMax = Math.max(...ks);
+  const lo = Math.log10(kMin) - 0.12;
+  const hi = Math.log10(kMax) + 0.12;
+  const span = hi - lo || 1;
+  // Map log10(size) into the inner 5%–100% band (both edges get breathing room).
+  const x = (k: number) =>
+    L + (0.05 + ((Math.log10(Math.max(k, 0.1)) - lo) / span) * 0.95) * (W - L - R);
   const y = (p: number) => H - B - (p / 100) * (H - T - B);
-  const rOf = (u: number) => Math.max(7, Math.min(46, Math.sqrt(u) * 7));
-  const sizeMid = maxK * 0.5;
+  const rOf = (u: number) => Math.max(6, Math.min(32, Math.sqrt(u) * 6));
+  // "Large codebase" boundary: the geometric mean of the sizes (the log midpoint).
+  const sizeMid = Math.sqrt(kMin * kMax);
 
   return (
     <svg
@@ -144,18 +152,22 @@ export function RiskQuadrant({ repos }: { repos: RepoOverview[] }) {
       </text>
       {(() => {
         // Lay out labels, nudging any that would collide with an earlier one.
+        // Try small alternating offsets (down, then up) so labels fan out around
+        // a cluster instead of all stacking downward onto other points.
         const anchors: Array<{ lx: number; ly: number }> = [];
+        const offsets = [0, 18, -18, 34, -34, 50, -50, 66, -66];
         return pts.map((d) => {
           const cx = x(d.kloc);
           const cy = y(d.pct);
           const r = rOf(d.uncovered);
           const left = cx > (L + W - R) / 2;
           const lx = left ? cx - r - 6 : cx + r + 6;
-          // Each label is two lines (~26px tall); clear that when they'd overlap.
-          let dy = 0;
-          while (anchors.some((a) => Math.abs(a.lx - lx) < 80 && Math.abs(a.ly - (cy + dy)) < 26)) {
-            dy += 27;
-          }
+          // Each label is two lines (~24px tall); clear that when they'd overlap.
+          const dy =
+            offsets.find(
+              (o) =>
+                !anchors.some((a) => Math.abs(a.lx - lx) < 78 && Math.abs(a.ly - (cy + o)) < 24),
+            ) ?? 0;
           anchors.push({ lx, ly: cy + dy });
           return (
             <g key={d.full}>
