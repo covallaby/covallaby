@@ -64,57 +64,84 @@ export function StorybookPreviews() {
           one.
         </p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[680px] text-[13.5px]">
-            <thead>
-              <tr>
-                <Th>Preview</Th>
-                <Th>Commit</Th>
-                <Th>Branch</Th>
-                <Th>Published</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {previews.map((preview) => (
-                <tr key={preview.id} className="hover:bg-(--surface-2)">
-                  <Td>
-                    <Link
-                      className="font-medium hover:underline"
-                      to={`/r/${repo}/storybook-previews/${preview.id}`}
-                    >
-                      <BookOpen className="mr-2 inline text-(--accent)" size={16} />
-                      {preview.pr ? `PR #${preview.pr} preview` : `${preview.branch} preview`}
-                    </Link>
-                  </Td>
-                  <Td>
-                    <span className="font-mono text-xs">{preview.commit.slice(0, 10)}</span>
-                    <a
-                      className="ml-2 inline-flex text-(--muted) hover:text-(--ink)"
-                      href={`https://github.com/${repo}/commit/${preview.commit}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      aria-label="Open commit on GitHub"
-                    >
-                      <GitCommit size={14} />
-                    </a>
-                    {preview.pr ? (
+        <>
+          <div className="space-y-2 px-3 pb-3 md:hidden">
+            {previews.map((preview) => (
+              <Link
+                key={preview.id}
+                to={`/r/${repo}/storybook-previews/${preview.id}`}
+                className="flex items-start gap-3 rounded-xl border border-(--border) bg-(--surface-2)/45 p-3.5 active:bg-(--surface-2)"
+              >
+                <BookOpen className="mt-0.5 shrink-0 text-(--accent)" size={18} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="min-w-0 truncate text-sm font-medium">
+                      {preview.pr ? `PR #${preview.pr}` : preview.branch}
+                    </span>
+                    <span className="shrink-0 rounded-full bg-(--accent-wash) px-2 py-0.5 text-[10px] font-medium text-(--accent)">
+                      {preview.status === "complete" ? "Ready" : "Publishing"}
+                    </span>
+                  </div>
+                  <p className="mt-1 truncate font-mono text-[11px] text-(--muted)">
+                    {preview.commit.slice(0, 10)}
+                  </p>
+                  <p className="mt-2 text-xs text-(--muted)">{when(preview.createdAt)}</p>
+                </div>
+              </Link>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[680px] text-[13.5px]">
+              <thead>
+                <tr>
+                  <Th>Preview</Th>
+                  <Th>Commit</Th>
+                  <Th>Branch</Th>
+                  <Th>Published</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {previews.map((preview) => (
+                  <tr key={preview.id} className="hover:bg-(--surface-2)">
+                    <Td>
+                      <Link
+                        className="font-medium hover:underline"
+                        to={`/r/${repo}/storybook-previews/${preview.id}`}
+                      >
+                        <BookOpen className="mr-2 inline text-(--accent)" size={16} />
+                        {preview.pr ? `PR #${preview.pr} preview` : `${preview.branch} preview`}
+                      </Link>
+                    </Td>
+                    <Td>
+                      <span className="font-mono text-xs">{preview.commit.slice(0, 10)}</span>
                       <a
-                        className="ml-2 inline-flex items-center gap-1 text-(--muted) hover:text-(--ink)"
-                        href={`https://github.com/${repo}/pull/${preview.pr}`}
+                        className="ml-2 inline-flex text-(--muted) hover:text-(--ink)"
+                        href={`https://github.com/${repo}/commit/${preview.commit}`}
                         target="_blank"
                         rel="noreferrer"
+                        aria-label="Open commit on GitHub"
                       >
-                        <GitPullRequest size={14} />#{preview.pr}
+                        <GitCommit size={14} />
                       </a>
-                    ) : null}
-                  </Td>
-                  <Td className="text-(--muted)">{preview.branch}</Td>
-                  <Td className="text-(--muted)">{when(preview.createdAt)}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                      {preview.pr ? (
+                        <a
+                          className="ml-2 inline-flex items-center gap-1 text-(--muted) hover:text-(--ink)"
+                          href={`https://github.com/${repo}/pull/${preview.pr}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <GitPullRequest size={14} />#{preview.pr}
+                        </a>
+                      ) : null}
+                    </Td>
+                    <Td className="text-(--muted)">{preview.branch}</Td>
+                    <Td className="text-(--muted)">{when(preview.createdAt)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </Card>
   );
@@ -153,7 +180,7 @@ export function StorybookPreviewDetail() {
   if (!data) return <p className="text-sm text-(--muted)">Loading Storybook preview…</p>;
   return (
     <div className="space-y-4">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <Link
             to={`/r/${data.run.repo}/storybook-previews`}

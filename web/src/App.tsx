@@ -1,4 +1,4 @@
-import { ChevronDown, Github, LayoutDashboard, Moon, Sun } from "lucide-react";
+import { ChevronDown, Github, LayoutDashboard, Menu, Moon, Sun, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -217,16 +217,35 @@ function Sidebar({
   repos,
   me,
   githubApp,
-}: { repos: RepoOverview[] | null; me: Me | null; githubApp: GitHubAppStatus | null }) {
+  mobileOpen,
+  onClose,
+}: {
+  repos: RepoOverview[] | null;
+  me: Me | null;
+  githubApp: GitHubAppStatus | null;
+  mobileOpen: boolean;
+  onClose: () => void;
+}) {
   const { pathname } = useLocation();
   return (
-    <aside className="fixed inset-y-0 left-0 z-20 hidden w-60 flex-col border-r border-(--hairline) bg-(--surface) md:flex">
+    <aside
+      aria-label="Dashboard navigation"
+      className={`fixed inset-y-0 left-0 z-40 flex w-[min(20rem,86vw)] flex-col border-r border-(--hairline) bg-(--surface) shadow-2xl transition-transform duration-200 md:z-20 md:w-60 md:translate-x-0 md:shadow-none ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
+    >
       <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
         <Mark />
         <div>
           <div className="text-[14px] leading-tight font-semibold tracking-tight">Covallaby</div>
           <div className="text-[11px] text-(--muted)">you’re covered 🌿</div>
         </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close navigation"
+          className="ml-auto rounded-lg border border-(--border) p-1.5 text-(--muted) md:hidden"
+        >
+          <X size={16} />
+        </button>
       </div>
       <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-3">
         <div className="space-y-0.5">
@@ -416,15 +435,12 @@ function Crumbs() {
   const tail = match ? tailLabel(match[3] ?? "") : null;
   return (
     <div className="flex min-w-0 items-center gap-1.5 text-[13px] text-(--muted)">
-      <Link to="/" className="flex items-center gap-2 hover:text-(--ink) md:hidden">
-        <Mark size={20} />
-      </Link>
-      <Link to="/" className="hover:text-(--ink)">
+      <Link to="/" className="hidden shrink-0 hover:text-(--ink) sm:block">
         Overview
       </Link>
       {match && (
         <>
-          <span>/</span>
+          <span className="hidden sm:inline">/</span>
           <Link
             to={`/r/${match[1]}/${match[2]}`}
             className="truncate font-mono text-[12.5px] hover:text-(--ink)"
@@ -434,7 +450,7 @@ function Crumbs() {
           {tail && (
             <>
               <span>/</span>
-              <span className="text-[12.5px] text-(--ink-2)">{tail}</span>
+              <span className="truncate text-[12.5px] text-(--ink-2)">{tail}</span>
             </>
           )}
         </>
@@ -448,7 +464,13 @@ export function App() {
   const [repos, setRepos] = useState<RepoOverview[] | null>(null);
   const [me, setMe] = useState<Me | null | undefined>(undefined); // undefined = still loading
   const [githubApp, setGitHubApp] = useState<GitHubAppStatus | null>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { pathname } = useLocation();
+
+  useEffect(() => {
+    void pathname;
+    setMobileNavOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     api
@@ -489,11 +511,35 @@ export function App() {
           </a>
         </div>
       )}
-      <Sidebar repos={repos} me={me} githubApp={githubApp} />
+      {mobileNavOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          onClick={() => setMobileNavOpen(false)}
+          className="fixed inset-0 z-30 bg-black/45 backdrop-blur-[1px] md:hidden"
+        />
+      )}
+      <Sidebar
+        repos={repos}
+        me={me}
+        githubApp={githubApp}
+        mobileOpen={mobileNavOpen}
+        onClose={() => setMobileNavOpen(false)}
+      />
       <div className="md:pl-60">
         <header className="sticky top-0 z-10 border-b border-(--hairline) bg-(--page)/80 backdrop-blur-md">
-          <div className="flex items-center justify-between gap-4 px-6 py-2.5">
-            <Crumbs />
+          <div className="flex items-center justify-between gap-2 px-4 py-2.5 sm:gap-4 sm:px-6">
+            <div className="flex min-w-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(true)}
+                aria-label="Open navigation"
+                className="shrink-0 rounded-lg border border-(--border) bg-(--surface) p-1.5 text-(--ink-2) md:hidden"
+              >
+                <Menu size={17} />
+              </button>
+              <Crumbs />
+            </div>
             <div className="flex items-center gap-3">
               {pathname === "/" && repos && repos.length > 0 && <OrgSwitcher repos={repos} />}
               <button
@@ -511,7 +557,7 @@ export function App() {
             </div>
           </div>
         </header>
-        <main className="px-6 py-7 motion-safe:animate-[rise_.3s_cubic-bezier(.21,1.02,.73,1)]">
+        <main className="px-4 py-5 motion-safe:animate-[rise_.3s_cubic-bezier(.21,1.02,.73,1)] sm:px-6 sm:py-7">
           <style>{"@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1}}"}</style>
           <div className="mx-auto max-w-5xl">
             <Routes>

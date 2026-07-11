@@ -72,70 +72,111 @@ export function Playbacks() {
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-[13.5px]">
-            <thead>
-              <tr>
-                <Th>Run</Th>
-                <Th>Commit</Th>
-                <Th>When</Th>
-                <Th right>Tests</Th>
-                <Th right>Duration</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((run) => (
-                <tr key={run.id} className="hover:bg-(--surface-2)">
-                  <Td>
-                    <Link
-                      className="font-medium hover:underline"
-                      to={`/r/${repo}/test-runs/${run.id}`}
-                    >
+        <>
+          <div className="space-y-2 px-3 pb-3 md:hidden">
+            {runs.map((run) => (
+              <Link
+                key={run.id}
+                to={`/r/${repo}/test-runs/${run.id}`}
+                className="block rounded-xl border border-(--border) bg-(--surface-2)/45 p-3.5 active:bg-(--surface-2)"
+              >
+                <div className="flex items-start gap-2.5">
+                  {run.testsFailed ? (
+                    <XCircle className="mt-0.5 shrink-0 text-(--bad)" size={18} />
+                  ) : (
+                    <CirclePlay className="mt-0.5 shrink-0 text-(--good)" size={18} />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="min-w-0 truncate text-sm font-medium">
+                        {run.pr ? `PR #${run.pr}` : run.branch}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-(--muted)">
+                        {duration(run.durationMs)}
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate font-mono text-[11px] text-(--muted)">
+                      {run.commit.slice(0, 10)} · {when(run.createdAt)}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                      <span className="text-(--good)">{run.testsPassed} passed</span>
                       {run.testsFailed ? (
-                        <XCircle className="mr-2 inline text-(--bad)" size={16} />
-                      ) : (
-                        <CirclePlay className="mr-2 inline text-(--good)" size={16} />
-                      )}
-                      {run.pr ? `PR #${run.pr} browser run` : `${run.branch} browser run`}
-                    </Link>
-                  </Td>
-                  <Td>
-                    <span className="font-mono text-xs">{run.commit.slice(0, 10)}</span>
-                    <a
-                      className="ml-2 inline-flex text-(--muted) hover:text-(--ink)"
-                      href={`https://github.com/${repo}/commit/${run.commit}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      aria-label="Open commit on GitHub"
-                    >
-                      <GitCommit size={14} />
-                    </a>
-                    {run.pr ? (
+                        <span className="text-(--bad)">{run.testsFailed} failed</span>
+                      ) : null}
+                      {run.testsSkipped ? (
+                        <span className="text-(--muted)">{run.testsSkipped} skipped</span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[760px] text-[13.5px]">
+              <thead>
+                <tr>
+                  <Th>Run</Th>
+                  <Th>Commit</Th>
+                  <Th>When</Th>
+                  <Th right>Tests</Th>
+                  <Th right>Duration</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {runs.map((run) => (
+                  <tr key={run.id} className="hover:bg-(--surface-2)">
+                    <Td>
+                      <Link
+                        className="font-medium hover:underline"
+                        to={`/r/${repo}/test-runs/${run.id}`}
+                      >
+                        {run.testsFailed ? (
+                          <XCircle className="mr-2 inline text-(--bad)" size={16} />
+                        ) : (
+                          <CirclePlay className="mr-2 inline text-(--good)" size={16} />
+                        )}
+                        {run.pr ? `PR #${run.pr} browser run` : `${run.branch} browser run`}
+                      </Link>
+                    </Td>
+                    <Td>
+                      <span className="font-mono text-xs">{run.commit.slice(0, 10)}</span>
                       <a
-                        className="ml-2 inline-flex items-center gap-1 text-(--muted) hover:text-(--ink)"
-                        href={`https://github.com/${repo}/pull/${run.pr}`}
+                        className="ml-2 inline-flex text-(--muted) hover:text-(--ink)"
+                        href={`https://github.com/${repo}/commit/${run.commit}`}
                         target="_blank"
                         rel="noreferrer"
+                        aria-label="Open commit on GitHub"
                       >
-                        <GitPullRequest size={14} />#{run.pr}
+                        <GitCommit size={14} />
                       </a>
-                    ) : null}
-                  </Td>
-                  <Td className="text-(--muted)">{when(run.createdAt)}</Td>
-                  <Td className="text-right">
-                    <span className="text-(--good)">{run.testsPassed} passed</span>
-                    {run.testsFailed ? (
-                      <span className="ml-2 text-(--bad)">{run.testsFailed} failed</span>
-                    ) : null}
-                  </Td>
-                  <Td className="text-right tabular-nums text-(--muted)">
-                    {duration(run.durationMs)}
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                      {run.pr ? (
+                        <a
+                          className="ml-2 inline-flex items-center gap-1 text-(--muted) hover:text-(--ink)"
+                          href={`https://github.com/${repo}/pull/${run.pr}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <GitPullRequest size={14} />#{run.pr}
+                        </a>
+                      ) : null}
+                    </Td>
+                    <Td className="text-(--muted)">{when(run.createdAt)}</Td>
+                    <Td className="text-right">
+                      <span className="text-(--good)">{run.testsPassed} passed</span>
+                      {run.testsFailed ? (
+                        <span className="ml-2 text-(--bad)">{run.testsFailed} failed</span>
+                      ) : null}
+                    </Td>
+                    <Td className="text-right tabular-nums text-(--muted)">
+                      {duration(run.durationMs)}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </Card>
   );
