@@ -59,11 +59,10 @@ jobs:
         env:
           TEST_DATABASE_URL: postgres://covallaby:covallaby@localhost:5432/covallaby
 
-      # Dogfood both coverage and component previews. This stacked PR skips the
-      # upload until it is retargeted to main, after the preview API is deployed.
+      # Dogfood both coverage and component previews on main and pull requests.
       - name: Upload coverage and Storybook to Covallaby
         if: ${{ !cancelled() && (github.event_name == 'push' || github.base_ref == 'main') }}
-        uses: covallaby/action@agent/storybook-previews
+        uses: covallaby/action@main
         with:
           files: coverage/lcov.info
           server-url: https://app.covallaby.com
