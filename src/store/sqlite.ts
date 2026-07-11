@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS test_artifacts (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_test_artifacts_run ON test_artifacts(run_id);
+CREATE INDEX IF NOT EXISTS idx_test_artifacts_run_name ON test_artifacts(run_id, name);
 `;
 
 interface RawRow {
@@ -490,6 +491,20 @@ export class SqliteStore implements Store {
       .prepare("SELECT * FROM test_artifacts WHERE run_id = ? ORDER BY id")
       .all(id) as unknown as RawArtifact[];
     return { run: toTestRun(raw), artifacts: artifacts.map(toArtifact) };
+  }
+
+  async getTestRunRow(id: number): Promise<TestRunRow | null> {
+    const raw = this.db
+      .prepare(`SELECT ${TEST_RUN_COLUMNS} FROM test_runs WHERE id = ?`)
+      .get(id) as unknown as RawTestRun | undefined;
+    return raw ? toTestRun(raw) : null;
+  }
+
+  async getTestArtifactByName(runId: number, name: string): Promise<TestArtifactRow | null> {
+    const raw = this.db
+      .prepare("SELECT * FROM test_artifacts WHERE run_id = ? AND name = ? LIMIT 1")
+      .get(runId, name) as unknown as RawArtifact | undefined;
+    return raw ? toArtifact(raw) : null;
   }
 
   async listTestRuns(repo: string, limit: number): Promise<TestRunRow[]> {

@@ -79,11 +79,23 @@ export async function cleanupRepoArtifacts(
       : runs.some((r) => r.branch === "master")
         ? "master"
         : (runs.find((r) => r.pr === null)?.branch ?? "main"));
-  const latestDefault = runs.find((r) => r.status === "complete" && r.branch === defaultBranch)?.id;
-  const latestByPR = new Map<number, TestRunRow>();
+  const latestDefault = new Set<number>();
+  const defaultFrameworks = new Set<string>();
   for (const run of runs) {
-    if (run.pr !== null && run.status === "complete" && !latestByPR.has(run.pr)) {
-      latestByPR.set(run.pr, run);
+    if (
+      run.status === "complete" &&
+      run.branch === defaultBranch &&
+      !defaultFrameworks.has(run.framework)
+    ) {
+      defaultFrameworks.add(run.framework);
+      latestDefault.add(run.id);
+    }
+  }
+  const latestByPR = new Map<string, TestRunRow>();
+  for (const run of runs) {
+    const key = `${run.pr}:${run.framework}`;
+    if (run.pr !== null && run.status === "complete" && !latestByPR.has(key)) {
+      latestByPR.set(key, run);
     }
   }
 
@@ -92,8 +104,8 @@ export async function cleanupRepoArtifacts(
   let deleted = 0;
   for (const run of runs) {
     if (Date.parse(run.createdAt) >= cutoff) continue;
-    if (config.keepLatestDefaultBranch && run.id === latestDefault) continue;
-    if (run.pr !== null && latestByPR.get(run.pr)?.id === run.id) {
+    if (config.keepLatestDefaultBranch && latestDefault.has(run.id)) continue;
+    if (run.pr !== null && latestByPR.get(`${run.pr}:${run.framework}`)?.id === run.id) {
       const state = parse<PRState>(await store.getMeta(prRetentionKey(repo, run.pr)));
       if (state?.open || (!state && config.keepLatestUnknownPR)) continue;
       if (state?.closedAt && Date.parse(state.closedAt) + retentionMs >= now.getTime()) continue;

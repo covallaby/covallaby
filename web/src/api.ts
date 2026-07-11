@@ -114,6 +114,8 @@ export interface TestArtifact {
   url: string;
 }
 
+export interface StorybookPreview extends TestRun {}
+
 /** A repo's merge policy — the "can I merge?" gate. */
 export interface RepoPolicy {
   minProject?: number;
@@ -196,6 +198,10 @@ const liveApi = {
   testRuns: (repo: string) => get<{ runs: TestRun[] }>(`/api/v1/repos/${repo}/test-runs`),
   testRun: (id: string) =>
     get<{ run: TestRun; artifacts: TestArtifact[] }>(`/api/v1/test-runs/${id}`),
+  storybookPreviews: (repo: string) =>
+    get<{ previews: StorybookPreview[] }>(`/api/v1/repos/${repo}/storybook-previews`),
+  storybookPreview: (id: string) =>
+    get<{ run: StorybookPreview; previewUrl: string }>(`/api/v1/storybook-previews/${id}`),
   compare: (repo: string, q: { pr?: number; head?: string; base?: string }) => {
     const params = new URLSearchParams();
     if (q.pr !== undefined) params.set("pr", String(q.pr));
@@ -225,6 +231,9 @@ export const api: typeof liveApi = IS_DEMO
       status: (...a) => load().then((d) => d.status(...a)),
       testRuns: () => Promise.resolve({ runs: [] }),
       testRun: () => Promise.reject(new Error("Playbacks are not included in the static demo.")),
+      storybookPreviews: () => Promise.resolve({ previews: [] }),
+      storybookPreview: () =>
+        Promise.reject(new Error("Storybook previews are not included in the static demo.")),
       compare: (...a) => load().then((d) => d.compare(...a)),
     }
   : liveApi;

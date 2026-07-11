@@ -120,6 +120,8 @@ Everything is optional:
 | `COVALLABY_ARTIFACT_RETENTION_DAYS` | Days to retain ordinary browser runs and closed-PR runs. | `30` |
 | `COVALLABY_KEEP_LATEST_DEFAULT_BRANCH` | Always preserve the latest completed run on the repository default branch. | `true` |
 | `COVALLABY_KEEP_LATEST_UNKNOWN_PRS` | Preserve the latest run for PRs whose state is unavailable. | `true` |
+| `COVALLABY_PREVIEW_BASE_URL` | Separate origin used to serve executable Storybook previews, such as `https://previews.example.com`. | unset (previews disabled) |
+| `COVALLABY_PREVIEW_SECRET` | Secret used to sign short-lived preview access. | upload token |
 | `COVALLABY_HOSTED` | `1` turns on the multi-tenant hosted tier (GitHub sign-in + per-account scoping). Requires the GitHub OAuth + session env below. | unset (single-tenant) |
 
 ## API
@@ -188,6 +190,28 @@ export default defineConfig({
 Self-hosters get the same feature with local disk by default. For production,
 configure any private S3-compatible bucket; CI uploads large files directly to
 the bucket, so they do not pass through the Covallaby process.
+
+## Storybook preview hosting
+
+Storybook builds use the same private object storage and retention rules as
+browser recordings. Build Storybook in CI and upload its static directory:
+
+```yaml
+- run: npm run build-storybook
+- uses: covallaby/action@main
+  with:
+    files: coverage/lcov.info
+    server-url: https://app.covallaby.com
+    server-token: ${{ secrets.COVALLABY_TOKEN }}
+    storybook-dir: storybook-static
+```
+
+Set `COVALLABY_PREVIEW_BASE_URL` to a separate origin routed to the same
+Covallaby server. For example, the dashboard can use `app.example.com` while
+previews use `previews.example.com`. Covallaby requires this separation in
+hosted mode because Storybook builds contain repository-controlled JavaScript.
+Preview access is signed, stored in a path-scoped HTTP-only cookie, and embedded
+in a sandboxed dashboard viewer.
 
 ### Artifact retention
 

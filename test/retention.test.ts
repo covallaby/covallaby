@@ -15,13 +15,14 @@ const run = (
   branch: string,
   ageDays: number,
   pr: number | null = null,
+  framework = "playwright",
 ): TestRunRow => ({
   id,
   repo: "acme/app",
   branch,
   commit: `c${id}`,
   pr,
-  framework: "playwright",
+  framework,
   status: "complete",
   testsPassed: 1,
   testsFailed: 0,
@@ -159,5 +160,25 @@ describe("artifact retention", () => {
       ),
     ).toBe(1);
     expect(await expire.store.getMeta(prRetentionKey("acme/app", 9))).toBeNull();
+  });
+
+  it("retains the latest run for each artifact framework", async () => {
+    const f = fixtures([
+      run(4, "main", 40, null, "storybook"),
+      run(3, "main", 40, null, "playwright"),
+      run(2, "feature", 40, 10, "storybook"),
+      run(1, "feature", 40, 10, "playwright"),
+    ]);
+    await recordRepoRetentionState(f.store, "acme/app", "main");
+    await recordPRRetentionState(f.store, "acme/app", 10, true, null);
+    expect(
+      await cleanupRepoArtifacts(
+        f.store,
+        f.storage,
+        "acme/app",
+        { days: 30, keepLatestDefaultBranch: true, keepLatestUnknownPR: true },
+        now,
+      ),
+    ).toBe(0);
   });
 });

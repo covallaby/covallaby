@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS test_artifacts (
   object_key TEXT NOT NULL UNIQUE, test_name TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_test_artifacts_run ON test_artifacts(run_id);
+CREATE INDEX IF NOT EXISTS idx_test_artifacts_run_name ON test_artifacts(run_id, name);
 `;
 
 interface RawRow {
@@ -388,6 +389,17 @@ export class PostgresStore implements Store {
       RawArtifact[]
     >`SELECT * FROM test_artifacts WHERE run_id = ${id} ORDER BY id`;
     return { run: toTestRun(raw), artifacts: artifacts.map(toArtifact) };
+  }
+
+  async getTestRunRow(id: number): Promise<TestRunRow | null> {
+    const [raw] = await this.sql<RawTestRun[]>`SELECT * FROM test_runs WHERE id = ${id}`;
+    return raw ? toTestRun(raw) : null;
+  }
+
+  async getTestArtifactByName(runId: number, name: string): Promise<TestArtifactRow | null> {
+    const [raw] = await this.sql<RawArtifact[]>`
+      SELECT * FROM test_artifacts WHERE run_id = ${runId} AND name = ${name} LIMIT 1`;
+    return raw ? toArtifact(raw) : null;
   }
 
   async listTestRuns(repo: string, limit: number): Promise<TestRunRow[]> {

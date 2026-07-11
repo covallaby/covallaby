@@ -23,6 +23,7 @@ import { Insights } from "./pages/RepoInsights.js";
 import { PullRequests } from "./pages/RepoPulls.js";
 import { Summary } from "./pages/RepoSummary.js";
 import { Uploads } from "./pages/RepoUploads.js";
+import { StorybookPreviewDetail, StorybookPreviews } from "./pages/StorybookPreviews.js";
 import { Upload } from "./pages/Upload.js";
 
 import logoUrl from "./assets/logo.png";
@@ -140,6 +141,12 @@ function RepoNavItem({ r, pathname }: { r: RepoOverview; pathname: string }) {
             }
           >
             Playbacks
+          </SubLink>
+          <SubLink
+            to={`${base}/storybook-previews`}
+            active={pathname.startsWith(`${base}/storybook-previews`)}
+          >
+            Storybook
           </SubLink>
           <SubLink
             to={`${base}/pulls`}
@@ -324,6 +331,9 @@ function tailLabel(rest: string): string | null {
   if (rest.startsWith("insights")) return "Insights";
   if (rest.startsWith("uploads")) return "Uploads";
   if (rest.startsWith("playbacks")) return "Playbacks";
+  if (rest === "storybook-previews") return "Storybook previews";
+  const preview = /^storybook-previews\/(\d+)/.exec(rest);
+  if (preview) return `Storybook preview ${preview[1]}`;
   const run = /^test-runs\/(\d+)/.exec(rest);
   if (run) return `browser run ${run[1]}`;
   if (rest.startsWith("pulls")) return "Pull requests";
@@ -508,6 +518,7 @@ export function App() {
                 <Route path="insights" element={<Insights />} />
                 <Route path="uploads" element={<Uploads />} />
                 <Route path="playbacks" element={<Playbacks />} />
+                <Route path="storybook-previews" element={<StorybookPreviews />} />
                 <Route path="pulls" element={<PullRequests />} />
                 <Route path="policy" element={<Policy />} />
               </Route>
@@ -515,6 +526,10 @@ export function App() {
               <Route path="/r/:owner/:name/compare" element={<CompareBranches />} />
               <Route path="/r/:owner/:name/u/:id" element={<Upload />} />
               <Route path="/r/:owner/:name/test-runs/:id" element={<PlaybackDetail />} />
+              <Route
+                path="/r/:owner/:name/storybook-previews/:id"
+                element={<StorybookPreviewDetail />}
+              />
             </Routes>
           </div>
         </main>
