@@ -1,6 +1,8 @@
 import { serve } from "@hono/node-server";
 import { createApp, ensureUploadToken } from "./app.js";
+import { openArtifactStorage } from "./artifacts.js";
 import { loadHostedConfig } from "./hosted/index.js";
+import { loadArtifactRetention } from "./retention.js";
 import { attachDashboard } from "./static-node.js";
 import { openStore } from "./store.js";
 
@@ -8,10 +10,14 @@ const store = await openStore();
 const uploadToken = await ensureUploadToken(store, process.env.COVALLABY_TOKEN);
 const viewToken = process.env.COVALLABY_VIEW_TOKEN?.trim();
 const hosted = loadHostedConfig(); // null unless COVALLABY_HOSTED=1
+const artifactStorage = openArtifactStorage();
+const artifactRetention = loadArtifactRetention();
 
 const app = createApp({
   store,
   uploadToken,
+  artifactStorage,
+  artifactRetention,
   ...(viewToken && { viewToken }),
   ...(hosted && { hosted }),
 });
@@ -23,6 +29,9 @@ serve({ fetch: app.fetch, port, hostname: "0.0.0.0" });
 console.log(`🦘 Covallaby server listening on :${port}`);
 console.log(
   `   storage: ${process.env.DATABASE_URL ? "postgres" : `sqlite (${process.env.COVALLABY_DB ?? "data/covallaby.db"})`}`,
+);
+console.log(
+  `   artifacts: ${artifactStorage.kind === "s3" ? "s3-compatible object storage" : `local (${process.env.COVALLABY_ARTIFACTS_DIR ?? "data/artifacts"})`}`,
 );
 if (hosted) {
   console.log("   mode:    hosted (GitHub sign-in; billing via the hosted overlay, if present)");

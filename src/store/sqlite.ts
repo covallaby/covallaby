@@ -2,11 +2,15 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  type CreateTestArtifactInput,
+  type CreateTestRunInput,
   type PROverview,
   type RecordUploadInput,
   type RepoOverview,
   type Store,
   type Subscription,
+  type TestArtifactRow,
+  type TestRunRow,
   type UpdateReportInput,
   type UploadRow,
   accountOf,
@@ -39,6 +43,21 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   stripe_customer TEXT, current_period_end TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_repo_pr ON uploads(repo, pr) WHERE pr IS NOT NULL;
+CREATE TABLE IF NOT EXISTS test_runs (
+  id INTEGER PRIMARY KEY, repo TEXT NOT NULL, branch TEXT NOT NULL, commit_sha TEXT NOT NULL,
+  pr INTEGER, framework TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'uploading',
+  tests_passed INTEGER NOT NULL DEFAULT 0, tests_failed INTEGER NOT NULL DEFAULT 0,
+  tests_skipped INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_test_runs_repo_time ON test_runs(repo, created_at DESC);
+CREATE TABLE IF NOT EXISTS test_artifacts (
+  id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, kind TEXT NOT NULL, content_type TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+  object_key TEXT NOT NULL UNIQUE, test_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_test_artifacts_run ON test_artifacts(run_id);
 `;
 
 interface RawRow {
@@ -70,6 +89,69 @@ function toRow(raw: RawRow): UploadRow {
 
 const ROW_COLUMNS =
   "id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at";
+
+const TEST_RUN_COLUMNS =
+  "id, repo, branch, commit_sha, pr, framework, status, tests_passed, tests_failed, tests_skipped, duration_ms, created_at, completed_at";
+
+type RawTestRun = {
+  id: number;
+  repo: string;
+  branch: string;
+  commit_sha: string;
+  pr: number | null;
+  framework: string;
+  status: TestRunRow["status"];
+  tests_passed: number;
+  tests_failed: number;
+  tests_skipped: number;
+  duration_ms: number;
+  created_at: string;
+  completed_at: string | null;
+};
+
+type RawArtifact = {
+  id: number;
+  run_id: number;
+  name: string;
+  kind: TestArtifactRow["kind"];
+  content_type: string;
+  size_bytes: number;
+  object_key: string;
+  test_name: string | null;
+  created_at: string;
+};
+
+function toTestRun(r: RawTestRun): TestRunRow {
+  return {
+    id: r.id,
+    repo: r.repo,
+    branch: r.branch,
+    commit: r.commit_sha,
+    pr: r.pr,
+    framework: r.framework,
+    status: r.status,
+    testsPassed: r.tests_passed,
+    testsFailed: r.tests_failed,
+    testsSkipped: r.tests_skipped,
+    durationMs: r.duration_ms,
+    createdAt: r.created_at,
+    completedAt: r.completed_at,
+  };
+}
+
+function toArtifact(r: RawArtifact): TestArtifactRow {
+  return {
+    id: r.id,
+    runId: r.run_id,
+    name: r.name,
+    kind: r.kind,
+    contentType: r.content_type,
+    sizeBytes: r.size_bytes,
+    objectKey: r.object_key,
+    testName: r.test_name,
+    createdAt: r.created_at,
+  };
+}
 
 /** Optional account scope for cross-repo queries (hosted multi-tenancy). */
 function accountFilter(accounts?: string[]): { sub: string; params: string[] } {
@@ -333,6 +415,93 @@ export class SqliteStore implements Store {
         "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
       )
       .run(key, value);
+  }
+
+  async createTestRun(input: CreateTestRunInput): Promise<TestRunRow> {
+    const result = this.db
+      .prepare(
+        `INSERT INTO test_runs (repo, branch, commit_sha, pr, framework, tests_passed, tests_failed, tests_skipped, duration_ms)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.repo,
+        input.branch,
+        input.commit,
+        input.pr,
+        input.framework,
+        input.testsPassed,
+        input.testsFailed,
+        input.testsSkipped,
+        input.durationMs,
+      );
+    const row = this.db
+      .prepare(`SELECT ${TEST_RUN_COLUMNS} FROM test_runs WHERE id = ?`)
+      .get(Number(result.lastInsertRowid)) as unknown as RawTestRun;
+    return toTestRun(row);
+  }
+
+  async createTestArtifact(input: CreateTestArtifactInput): Promise<TestArtifactRow> {
+    const result = this.db
+      .prepare(
+        `INSERT INTO test_artifacts (run_id, name, kind, content_type, size_bytes, object_key, test_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.runId,
+        input.name,
+        input.kind,
+        input.contentType,
+        input.sizeBytes,
+        input.objectKey,
+        input.testName,
+      );
+    const row = this.db
+      .prepare("SELECT * FROM test_artifacts WHERE id = ?")
+      .get(Number(result.lastInsertRowid)) as unknown as RawArtifact;
+    return toArtifact(row);
+  }
+
+  async completeTestRun(id: number): Promise<TestRunRow | null> {
+    this.db
+      .prepare(
+        "UPDATE test_runs SET status = 'complete', completed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
+      )
+      .run(id);
+    const row = this.db
+      .prepare(`SELECT ${TEST_RUN_COLUMNS} FROM test_runs WHERE id = ?`)
+      .get(id) as unknown as RawTestRun | undefined;
+    return row ? toTestRun(row) : null;
+  }
+
+  async failTestRun(id: number): Promise<void> {
+    this.db
+      .prepare(
+        "UPDATE test_runs SET status = 'failed', completed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
+      )
+      .run(id);
+  }
+
+  async getTestRun(id: number) {
+    const raw = this.db
+      .prepare(`SELECT ${TEST_RUN_COLUMNS} FROM test_runs WHERE id = ?`)
+      .get(id) as unknown as RawTestRun | undefined;
+    if (!raw) return null;
+    const artifacts = this.db
+      .prepare("SELECT * FROM test_artifacts WHERE run_id = ? ORDER BY id")
+      .all(id) as unknown as RawArtifact[];
+    return { run: toTestRun(raw), artifacts: artifacts.map(toArtifact) };
+  }
+
+  async listTestRuns(repo: string, limit: number): Promise<TestRunRow[]> {
+    const rows = this.db
+      .prepare(`SELECT ${TEST_RUN_COLUMNS} FROM test_runs WHERE repo = ? ORDER BY id DESC LIMIT ?`)
+      .all(repo, limit) as unknown as RawTestRun[];
+    return rows.map(toTestRun);
+  }
+
+  async deleteTestRun(id: number): Promise<void> {
+    this.db.prepare("DELETE FROM test_artifacts WHERE run_id = ?").run(id);
+    this.db.prepare("DELETE FROM test_runs WHERE id = ?").run(id);
   }
 
   async close(): Promise<void> {

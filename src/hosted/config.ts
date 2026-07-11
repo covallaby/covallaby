@@ -11,6 +11,14 @@ export interface HostedConfig {
     clientSecret: string;
     /** api.github.com by default; a GHES base for self-hosted GitHub. */
     apiBase: string;
+    /** GitHub organization/App webhook secret. Enables PR-aware artifact retention. */
+    webhookSecret?: string;
+  };
+  githubApp?: {
+    appId: string;
+    slug: string;
+    privateKey: string;
+    bootstrapInstallationIds: number[];
   };
 }
 
@@ -27,6 +35,20 @@ export function loadHostedConfig(env: NodeJS.ProcessEnv = process.env): HostedCo
     return value;
   };
 
+  const appId = env.GITHUB_APP_ID?.trim();
+  const appSlug = env.GITHUB_APP_SLUG?.trim();
+  const appPrivateKey = env.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, "\n").trim();
+  const webhookSecret = env.GITHUB_WEBHOOK_SECRET?.trim();
+  const anyApp = Boolean(appId || appSlug || appPrivateKey);
+  if (anyApp && (!appId || !appSlug || !appPrivateKey)) {
+    throw new Error(
+      "GitHub App integration requires GITHUB_APP_ID, GITHUB_APP_SLUG, and GITHUB_APP_PRIVATE_KEY together.",
+    );
+  }
+  if (anyApp && !webhookSecret) {
+    throw new Error("GitHub App integration requires GITHUB_WEBHOOK_SECRET.");
+  }
+
   return {
     baseUrl: (env.COVALLABY_BASE_URL ?? "http://localhost:8080").replace(/\/$/, ""),
     sessionSecret: need("COVALLABY_SESSION_SECRET"),
@@ -34,6 +56,20 @@ export function loadHostedConfig(env: NodeJS.ProcessEnv = process.env): HostedCo
       clientId: need("GITHUB_CLIENT_ID"),
       clientSecret: need("GITHUB_CLIENT_SECRET"),
       apiBase: (env.GITHUB_API_BASE ?? "https://api.github.com").replace(/\/$/, ""),
+      ...(webhookSecret && { webhookSecret }),
     },
+    ...(appId &&
+      appSlug &&
+      appPrivateKey && {
+        githubApp: {
+          appId,
+          slug: appSlug,
+          privateKey: appPrivateKey,
+          bootstrapInstallationIds: (env.GITHUB_APP_BOOTSTRAP_INSTALLATION_IDS ?? "")
+            .split(",")
+            .map((value) => Number(value.trim()))
+            .filter((value) => Number.isSafeInteger(value) && value > 0),
+        },
+      }),
   };
 }

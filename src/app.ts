@@ -1,5 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
+import { type ArtifactStorage, artifactObjectKey } from "./artifacts.js";
 import { type AppEnv, type HostedConfig, type HostedDeps, mountHosted } from "./hosted/index.js";
 import {
   type PolicyInput,
@@ -9,7 +10,9 @@ import {
   parsePolicy,
   renderStatusBadge,
 } from "./policy.js";
+import { type ArtifactRetentionConfig, cleanupRepoArtifacts } from "./retention.js";
 import type { Store, UploadRow } from "./store.js";
+import type { TestArtifactKind } from "./store.js";
 import { renderBadge } from "./vendor/badge.js";
 import { ignorePaths } from "./vendor/ignore.js";
 import {
@@ -32,10 +35,23 @@ export interface AppOptions {
   /** Present → mount the hosted tier (OAuth, billing, per-account scoping). */
   hosted?: HostedConfig;
   hostedDeps?: HostedDeps;
+  /** Binary storage for Playwright videos, traces, screenshots, and reports. */
+  artifactStorage?: ArtifactStorage;
+  artifactRetention?: ArtifactRetentionConfig;
 }
 
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const MAX_ARTIFACT_BYTES = 500 * 1024 * 1024;
+const MAX_RUN_BYTES = 2 * 1024 * 1024 * 1024;
+const ARTIFACT_KINDS = new Set<TestArtifactKind>([
+  "video",
+  "screenshot",
+  "trace",
+  "report",
+  "results",
+  "other",
+]);
 
 function tokenEquals(a: string, b: string): boolean {
   const ba = Buffer.from(a);
@@ -279,6 +295,8 @@ export function createApp({
   uploadsPerMinute = 30,
   hosted,
   hostedDeps,
+  artifactStorage,
+  artifactRetention,
 }: AppOptions): Hono<AppEnv> {
   // Sliding-window upload rate limit, keyed by presented token.
   const uploadWindows = new Map<string, number[]>();
@@ -311,7 +329,8 @@ export function createApp({
     if (!viewToken) return next();
     const path = c.req.path;
     // Exact match — startsWith would leak /api/v1/uploads/:id past the gate.
-    if (path === "/healthz" || path === "/api/v1/upload") return next();
+    const artifactWrite = c.req.method !== "GET" && path.startsWith("/api/v1/test-runs");
+    if (path === "/healthz" || path === "/api/v1/upload" || artifactWrite) return next();
     const provided =
       bearer(c.req.header("authorization")) ??
       c.req.query("token") ??
@@ -419,6 +438,235 @@ export function createApp({
       }
       throw error;
     }
+  });
+
+  const artifactReady = () =>
+    artifactStorage &&
+    store.createTestRun &&
+    store.createTestArtifact &&
+    store.completeTestRun &&
+    store.getTestRun &&
+    store.listTestRuns;
+  const uploadAuthorized = async (repo: string, token: string | null): Promise<boolean> => {
+    if (!token) return false;
+    const repoToken = await store.getRepoToken(repo);
+    return tokenEquals(token, uploadToken) || (repoToken !== null && tokenEquals(token, repoToken));
+  };
+
+  app.post("/api/v1/test-runs", async (c) => {
+    if (!artifactReady())
+      return c.json(
+        { ok: false, error: "Test artifact storage is not available in this runtime." },
+        503,
+      );
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ ok: false, error: "Body must be a JSON run manifest." }, 400);
+    }
+    const repo = typeof body.repo === "string" ? body.repo : "";
+    if (!REPO_RE.test(repo)) return c.json({ ok: false, error: "Pass repo as owner/name." }, 400);
+    if (!(await uploadAuthorized(repo, bearer(c.req.header("authorization"))))) {
+      return c.json({ ok: false, error: "Invalid upload token for this repository." }, 401);
+    }
+    const rawArtifacts = Array.isArray(body.artifacts) ? body.artifacts : [];
+    if (rawArtifacts.length === 0 || rawArtifacts.length > 200) {
+      return c.json({ ok: false, error: "A run must contain 1–200 artifacts." }, 400);
+    }
+    const parsed: Array<{
+      name: string;
+      kind: TestArtifactKind;
+      contentType: string;
+      sizeBytes: number;
+      testName: string | null;
+    }> = [];
+    let totalBytes = 0;
+    for (const item of rawArtifacts) {
+      if (!item || typeof item !== "object")
+        return c.json({ ok: false, error: "Every artifact must be an object." }, 400);
+      const a = item as Record<string, unknown>;
+      const name = typeof a.name === "string" ? a.name.trim().slice(0, 240) : "";
+      const kind =
+        typeof a.kind === "string" && ARTIFACT_KINDS.has(a.kind as TestArtifactKind)
+          ? (a.kind as TestArtifactKind)
+          : null;
+      const contentType =
+        typeof a.contentType === "string" ? a.contentType.trim().slice(0, 120) : "";
+      const sizeBytes = Number(a.sizeBytes);
+      if (
+        !name ||
+        !kind ||
+        !contentType ||
+        !Number.isSafeInteger(sizeBytes) ||
+        sizeBytes < 0 ||
+        sizeBytes > MAX_ARTIFACT_BYTES
+      ) {
+        return c.json(
+          {
+            ok: false,
+            error: "Artifact name, kind, contentType, or sizeBytes is invalid (500 MB max each).",
+          },
+          400,
+        );
+      }
+      totalBytes += sizeBytes;
+      parsed.push({
+        name,
+        kind,
+        contentType,
+        sizeBytes,
+        testName: typeof a.testName === "string" ? a.testName.slice(0, 500) : null,
+      });
+    }
+    if (totalBytes > MAX_RUN_BYTES)
+      return c.json({ ok: false, error: "Run artifacts exceed the 2 GB limit." }, 413);
+    const count = (name: string) =>
+      Number.isSafeInteger(Number(body[name])) && Number(body[name]) >= 0 ? Number(body[name]) : 0;
+    const run = await store.createTestRun!({
+      repo,
+      branch: typeof body.branch === "string" ? body.branch.slice(0, 200) : "main",
+      commit: typeof body.commit === "string" ? body.commit.slice(0, 64) : "unknown",
+      pr: Number.isSafeInteger(Number(body.pr)) && Number(body.pr) > 0 ? Number(body.pr) : null,
+      framework: typeof body.framework === "string" ? body.framework.slice(0, 80) : "playwright",
+      testsPassed: count("testsPassed"),
+      testsFailed: count("testsFailed"),
+      testsSkipped: count("testsSkipped"),
+      durationMs: count("durationMs"),
+    });
+    const origin = new URL(c.req.url).origin;
+    const artifacts = [];
+    for (const item of parsed) {
+      const objectKey = artifactObjectKey(repo, run.id, item.name);
+      const artifact = await store.createTestArtifact!({ runId: run.id, objectKey, ...item });
+      const signed = await artifactStorage!.createUploadUrl(objectKey, item.contentType);
+      artifacts.push({
+        ...artifact,
+        objectKey: undefined,
+        uploadUrl:
+          signed ?? `${origin}/api/v1/test-runs/${run.id}/artifacts/${artifact.id}/content`,
+      });
+    }
+    return c.json({ ok: true, run, artifacts, url: `/r/${repo}/test-runs/${run.id}` }, 201);
+  });
+
+  app.put("/api/v1/test-runs/:runId/artifacts/:artifactId/content", async (c) => {
+    if (!artifactReady() || artifactStorage!.kind !== "local")
+      return c.json({ ok: false, error: "Direct server uploads are disabled." }, 404);
+    const found = await store.getTestRun!(Number(c.req.param("runId")));
+    const artifact = found?.artifacts.find((a) => a.id === Number(c.req.param("artifactId")));
+    if (!found || !artifact) return c.json({ ok: false, error: "Unknown artifact." }, 404);
+    if (!(await uploadAuthorized(found.run.repo, bearer(c.req.header("authorization")))))
+      return c.json({ ok: false, error: "Invalid upload token." }, 401);
+    const stream = c.req.raw.body;
+    if (artifactStorage!.putStream && stream) {
+      const matches = await artifactStorage!.putStream(
+        artifact.objectKey,
+        stream,
+        artifact.sizeBytes,
+      );
+      if (!matches)
+        return c.json({ ok: false, error: "Artifact size does not match its manifest." }, 400);
+      return c.json({ ok: true });
+    }
+    const bytes = new Uint8Array(await c.req.arrayBuffer());
+    if (bytes.byteLength !== artifact.sizeBytes)
+      return c.json({ ok: false, error: "Artifact size does not match its manifest." }, 400);
+    await artifactStorage!.put(artifact.objectKey, bytes);
+    return c.json({ ok: true });
+  });
+
+  app.post("/api/v1/test-runs/:id/complete", async (c) => {
+    if (!artifactReady())
+      return c.json({ ok: false, error: "Test artifact storage is unavailable." }, 503);
+    const found = await store.getTestRun!(Number(c.req.param("id")));
+    if (!found) return c.json({ ok: false, error: "Unknown test run." }, 404);
+    if (!(await uploadAuthorized(found.run.repo, bearer(c.req.header("authorization")))))
+      return c.json({ ok: false, error: "Invalid upload token." }, 401);
+    const checks = await Promise.all(
+      found.artifacts.map((a) => artifactStorage!.exists(a.objectKey, a.sizeBytes)),
+    );
+    if (checks.some((ok) => !ok))
+      return c.json(
+        { ok: false, error: "One or more artifacts are missing or have the wrong size." },
+        409,
+      );
+    const run = await store.completeTestRun!(found.run.id);
+    if (artifactRetention && store.deleteTestRun) {
+      try {
+        await cleanupRepoArtifacts(store, artifactStorage!, found.run.repo, artifactRetention);
+      } catch (error) {
+        // Maintenance must never turn a successfully uploaded run into a CI failure.
+        console.error(`Artifact cleanup failed for ${found.run.repo}:`, error);
+      }
+    }
+    return c.json({ ok: true, run, url: `/r/${found.run.repo}/test-runs/${found.run.id}` });
+  });
+
+  app.get("/api/v1/repos/:owner/:name/test-runs", async (c) => {
+    if (!artifactReady()) return c.json({ runs: [] });
+    return c.json({
+      runs: await store.listTestRuns!(`${c.req.param("owner")}/${c.req.param("name")}`, 50),
+    });
+  });
+
+  app.get("/api/v1/test-runs/:id", async (c) => {
+    if (!artifactReady())
+      return c.json({ ok: false, error: "Test artifact storage is unavailable." }, 503);
+    const found = await store.getTestRun!(Number(c.req.param("id")));
+    if (!found) return c.json({ ok: false, error: "Unknown test run." }, 404);
+    return c.json({
+      run: found.run,
+      artifacts: found.artifacts.map(({ objectKey: _, ...a }) => ({
+        ...a,
+        url: `/api/v1/test-runs/${found.run.id}/artifacts/${a.id}/content`,
+      })),
+    });
+  });
+
+  app.get("/api/v1/test-runs/:runId/artifacts/:artifactId/content", async (c) => {
+    if (!artifactReady()) return c.notFound();
+    const id = Number(c.req.param("artifactId"));
+    const runId = Number(c.req.param("runId"));
+    const found = await store.getTestRun!(runId);
+    const artifact = found?.artifacts.find((a) => a.id === id);
+    if (!artifact) return c.notFound();
+    const signed = await artifactStorage!.createDownloadUrl(artifact.objectKey);
+    if (signed) return c.redirect(signed, 302);
+    const rangeHeader = c.req.header("range");
+    let range: { start: number; end: number } | undefined;
+    if (rangeHeader) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader);
+      if (!match) {
+        c.header("Content-Range", `bytes */${artifact.sizeBytes}`);
+        return c.body(null, 416);
+      }
+      const start = match[1]
+        ? Number(match[1])
+        : Math.max(0, artifact.sizeBytes - Number(match[2]));
+      const end = match[2] && match[1] ? Number(match[2]) : artifact.sizeBytes - 1;
+      if (
+        !Number.isSafeInteger(start) ||
+        !Number.isSafeInteger(end) ||
+        start < 0 ||
+        end < start ||
+        start >= artifact.sizeBytes
+      ) {
+        c.header("Content-Range", `bytes */${artifact.sizeBytes}`);
+        return c.body(null, 416);
+      }
+      range = { start, end: Math.min(end, artifact.sizeBytes - 1) };
+    }
+    const bytes = await artifactStorage!.get(artifact.objectKey, range);
+    c.header("Content-Type", artifact.contentType);
+    c.header("Content-Length", String(bytes.byteLength));
+    c.header("Accept-Ranges", "bytes");
+    c.header("Cache-Control", "private, max-age=300");
+    if (range) {
+      c.header("Content-Range", `bytes ${range.start}-${range.end}/${artifact.sizeBytes}`);
+      return c.body(bytes as Uint8Array<ArrayBuffer>, 206);
+    }
+    return c.body(bytes as Uint8Array<ArrayBuffer>);
   });
 
   app.get("/api/v1/repos", async (c) =>
