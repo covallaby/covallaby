@@ -86,6 +86,34 @@ export interface RepoHistory {
   history: UploadRow[];
 }
 
+export interface TestRun {
+  id: number;
+  repo: string;
+  branch: string;
+  commit: string;
+  pr: number | null;
+  framework: string;
+  status: "uploading" | "complete" | "failed";
+  testsPassed: number;
+  testsFailed: number;
+  testsSkipped: number;
+  durationMs: number;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface TestArtifact {
+  id: number;
+  runId: number;
+  name: string;
+  kind: "video" | "screenshot" | "trace" | "report" | "results" | "other";
+  contentType: string;
+  sizeBytes: number;
+  testName: string | null;
+  createdAt: string;
+  url: string;
+}
+
 /** A repo's merge policy — the "can I merge?" gate. */
 export interface RepoPolicy {
   minProject?: number;
@@ -158,6 +186,9 @@ const liveApi = {
   policy: (repo: string) =>
     get<{ repo: string; policy: RepoPolicy | null }>(`/api/v1/repos/${repo}/policy`),
   status: (repo: string) => get<PolicyStatus>(`/api/v1/repos/${repo}/status`),
+  testRuns: (repo: string) => get<{ runs: TestRun[] }>(`/api/v1/repos/${repo}/test-runs`),
+  testRun: (id: string) =>
+    get<{ run: TestRun; artifacts: TestArtifact[] }>(`/api/v1/test-runs/${id}`),
   compare: (repo: string, q: { pr?: number; head?: string; base?: string }) => {
     const params = new URLSearchParams();
     if (q.pr !== undefined) params.set("pr", String(q.pr));
@@ -184,6 +215,8 @@ export const api: typeof liveApi = IS_DEMO
       prs: (...a) => load().then((d) => d.prs(...a)),
       policy: (...a) => load().then((d) => d.policy(...a)),
       status: (...a) => load().then((d) => d.status(...a)),
+      testRuns: () => Promise.resolve({ runs: [] }),
+      testRun: () => Promise.reject(new Error("Playbacks are not included in the static demo.")),
       compare: (...a) => load().then((d) => d.compare(...a)),
     }
   : liveApi;

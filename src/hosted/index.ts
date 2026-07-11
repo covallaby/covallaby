@@ -38,8 +38,12 @@ export function mountHosted(
   // accounts. Uploads, badges, health, auth, and the SPA shell are exempt.
   app.use("/api/v1/*", async (c, next) => {
     const path = c.req.path;
+    const artifactWrite = c.req.method !== "GET" && path.startsWith("/api/v1/test-runs");
     const open =
-      path === "/api/v1/upload" || path.startsWith("/api/v1/billing/") || path === "/api/v1/me";
+      path === "/api/v1/upload" ||
+      artifactWrite ||
+      path.startsWith("/api/v1/billing/") ||
+      path === "/api/v1/me";
     if (open) return next();
 
     const session = currentSession(c.req.header("cookie"), config.sessionSecret);
@@ -54,6 +58,13 @@ export function mountHosted(
     if (uploadMatch) {
       const found = await store.getUpload(Number(uploadMatch[1]));
       if (found && !session.accounts.includes(found.row.repo.split("/")[0]!)) {
+        return c.json({ ok: false, error: "Not found." }, 404);
+      }
+    }
+    const runMatch = /^\/api\/v1\/test-runs\/(\d+)/.exec(path);
+    if (runMatch && store.getTestRun) {
+      const found = await store.getTestRun(Number(runMatch[1]));
+      if (found && !session.accounts.includes(found.run.repo.split("/")[0]!)) {
         return c.json({ ok: false, error: "Not found." }, 404);
       }
     }

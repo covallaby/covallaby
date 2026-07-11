@@ -1,10 +1,14 @@
 import postgres from "postgres";
 import {
+  type CreateTestArtifactInput,
+  type CreateTestRunInput,
   type PROverview,
   type RecordUploadInput,
   type RepoOverview,
   type Store,
   type Subscription,
+  type TestArtifactRow,
+  type TestRunRow,
   type UpdateReportInput,
   type UploadRow,
   accountOf,
@@ -37,6 +41,20 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   stripe_customer TEXT, current_period_end TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_repo_pr ON uploads(repo, pr) WHERE pr IS NOT NULL;
+CREATE TABLE IF NOT EXISTS test_runs (
+  id BIGSERIAL PRIMARY KEY, repo TEXT NOT NULL, branch TEXT NOT NULL, commit_sha TEXT NOT NULL,
+  pr INTEGER, framework TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'uploading',
+  tests_passed INTEGER NOT NULL DEFAULT 0, tests_failed INTEGER NOT NULL DEFAULT 0,
+  tests_skipped INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), completed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_test_runs_repo_time ON test_runs(repo, created_at DESC);
+CREATE TABLE IF NOT EXISTS test_artifacts (
+  id BIGSERIAL PRIMARY KEY, run_id BIGINT NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, kind TEXT NOT NULL, content_type TEXT NOT NULL, size_bytes BIGINT NOT NULL,
+  object_key TEXT NOT NULL UNIQUE, test_name TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_test_artifacts_run ON test_artifacts(run_id);
 `;
 
 interface RawRow {
@@ -65,6 +83,62 @@ function toRow(raw: RawRow): UploadRow {
     createdAt: raw.created_at instanceof Date ? raw.created_at.toISOString() : raw.created_at,
   };
 }
+
+interface RawTestRun {
+  id: string | number;
+  repo: string;
+  branch: string;
+  commit_sha: string;
+  pr: number | null;
+  framework: string;
+  status: TestRunRow["status"];
+  tests_passed: number;
+  tests_failed: number;
+  tests_skipped: number;
+  duration_ms: number;
+  created_at: Date | string;
+  completed_at: Date | string | null;
+}
+
+interface RawArtifact {
+  id: string | number;
+  run_id: string | number;
+  name: string;
+  kind: TestArtifactRow["kind"];
+  content_type: string;
+  size_bytes: string | number;
+  object_key: string;
+  test_name: string | null;
+  created_at: Date | string;
+}
+
+const iso = (value: Date | string): string => (value instanceof Date ? value.toISOString() : value);
+const toTestRun = (r: RawTestRun): TestRunRow => ({
+  id: Number(r.id),
+  repo: r.repo,
+  branch: r.branch,
+  commit: r.commit_sha,
+  pr: r.pr,
+  framework: r.framework,
+  status: r.status,
+  testsPassed: r.tests_passed,
+  testsFailed: r.tests_failed,
+  testsSkipped: r.tests_skipped,
+  durationMs: r.duration_ms,
+  createdAt: iso(r.created_at),
+  completedAt: r.completed_at ? iso(r.completed_at) : null,
+});
+const toArtifact = (r: RawArtifact): TestArtifactRow => ({
+  id: Number(r.id),
+  runId: Number(r.run_id),
+  name: r.name,
+  kind: r.kind,
+  contentType: r.content_type,
+  sizeBytes: Number(r.size_bytes),
+  objectKey: r.object_key,
+  testName: r.test_name,
+  createdAt: iso(r.created_at),
+});
 
 export class PostgresStore implements Store {
   private constructor(private readonly sql: postgres.Sql) {}
@@ -278,6 +352,49 @@ export class PostgresStore implements Store {
     await this.sql`
       INSERT INTO meta (key, value) VALUES (${key}, ${value})
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+  }
+
+  async createTestRun(input: CreateTestRunInput): Promise<TestRunRow> {
+    const [row] = await this.sql<RawTestRun[]>`
+      INSERT INTO test_runs (repo, branch, commit_sha, pr, framework, tests_passed, tests_failed, tests_skipped, duration_ms)
+      VALUES (${input.repo}, ${input.branch}, ${input.commit}, ${input.pr}, ${input.framework},
+        ${input.testsPassed}, ${input.testsFailed}, ${input.testsSkipped}, ${input.durationMs})
+      RETURNING *`;
+    return toTestRun(row!);
+  }
+
+  async createTestArtifact(input: CreateTestArtifactInput): Promise<TestArtifactRow> {
+    const [row] = await this.sql<RawArtifact[]>`
+      INSERT INTO test_artifacts (run_id, name, kind, content_type, size_bytes, object_key, test_name)
+      VALUES (${input.runId}, ${input.name}, ${input.kind}, ${input.contentType}, ${input.sizeBytes},
+        ${input.objectKey}, ${input.testName}) RETURNING *`;
+    return toArtifact(row!);
+  }
+
+  async completeTestRun(id: number): Promise<TestRunRow | null> {
+    const [row] = await this.sql<RawTestRun[]>`
+      UPDATE test_runs SET status = 'complete', completed_at = now() WHERE id = ${id} RETURNING *`;
+    return row ? toTestRun(row) : null;
+  }
+
+  async failTestRun(id: number): Promise<void> {
+    await this.sql`UPDATE test_runs SET status = 'failed', completed_at = now() WHERE id = ${id}`;
+  }
+
+  async getTestRun(id: number) {
+    const [raw] = await this.sql<RawTestRun[]>`SELECT * FROM test_runs WHERE id = ${id}`;
+    if (!raw) return null;
+    const artifacts = await this.sql<
+      RawArtifact[]
+    >`SELECT * FROM test_artifacts WHERE run_id = ${id} ORDER BY id`;
+    return { run: toTestRun(raw), artifacts: artifacts.map(toArtifact) };
+  }
+
+  async listTestRuns(repo: string, limit: number): Promise<TestRunRow[]> {
+    const rows = await this.sql<
+      RawTestRun[]
+    >`SELECT * FROM test_runs WHERE repo = ${repo} ORDER BY id DESC LIMIT ${limit}`;
+    return rows.map(toTestRun);
   }
 
   async close(): Promise<void> {

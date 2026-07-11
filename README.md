@@ -113,6 +113,10 @@ Everything is optional:
 | `COVALLABY_VIEW_TOKEN` | If set, the dashboard needs `?token=…` (or a Bearer header) to view | unset (public) |
 | `COVALLABY_DB` | SQLite file path | `data/covallaby.db` |
 | `DATABASE_URL` | `postgres://…` — switches storage to Postgres | unset (SQLite) |
+| `COVALLABY_ARTIFACT_BUCKET` | Private S3-compatible bucket for browser-test videos and traces. `BUCKET_NAME` is also recognized (Fly Tigris default). | unset (local disk) |
+| `COVALLABY_ARTIFACTS_DIR` | Local browser-artifact directory when no bucket is configured. Put this on a persistent volume. | `data/artifacts` |
+| `AWS_ENDPOINT_URL_S3` / `AWS_REGION` | S3-compatible endpoint and region (Tigris, R2, MinIO, AWS S3). | AWS defaults |
+| `COVALLABY_S3_PATH_STYLE` | Set `1` for providers such as MinIO that require path-style bucket URLs. | unset |
 | `COVALLABY_HOSTED` | `1` turns on the multi-tenant hosted tier (GitHub sign-in + per-account scoping). Requires the GitHub OAuth + session env below. | unset (single-tenant) |
 
 ## API
@@ -125,6 +129,8 @@ Everything is optional:
 | `GET /api/v1/repos/:owner/:name/prs` | PRs with uploads, latest first |
 | `GET /api/v1/repos/:owner/:name/compare?pr=N` or `?head=<branch>` (+`&base=`) | head vs base: delta + per-file changes |
 | `POST /api/v1/repos/:owner/:name/token` | mint/rotate a per-repo upload token (admin token required) |
+| `POST /api/v1/test-runs` · `POST /api/v1/test-runs/:id/complete` | create and finalize a browser-test run; returns direct upload URLs |
+| `GET /api/v1/repos/:owner/:name/test-runs` | recent Playwright runs and playback status |
 | `GET /badge/:owner/:name.svg?branch=&label=` | live SVG badge |
 | `GET /healthz` | liveness |
 
@@ -150,6 +156,35 @@ where the diff lives.
   code, no git credentials.
 - Set `COVALLABY_VIEW_TOKEN` to gate the dashboard; terminate TLS with your
   reverse proxy.
+- Browser artifacts never live in Postgres. Buckets must remain private;
+  Covallaby uses 15-minute upload URLs and one-hour playback URLs.
+
+## Playwright recordings and traces
+
+The Covallaby Action can attach Playwright's JSON reporter, videos,
+screenshots, and traces to the same repository dashboard:
+
+```ts
+// playwright.config.ts
+export default defineConfig({
+  reporter: [["json", { outputFile: "playwright-results.json" }], ["html"]],
+  use: { video: "on", trace: "retain-on-failure", screenshot: "only-on-failure" },
+});
+```
+
+```yaml
+- uses: covallaby/action@main
+  with:
+    files: coverage/lcov.info
+    server-url: https://app.covallaby.com
+    server-token: ${{ secrets.COVALLABY_TOKEN }}
+    playwright-results: playwright-results.json
+    playwright-artifacts: test-results
+```
+
+Self-hosters get the same feature with local disk by default. For production,
+configure any private S3-compatible bucket; CI uploads large files directly to
+the bucket, so they do not pass through the Covallaby process.
 
 ## Hosted / multi-tenant mode (optional)
 

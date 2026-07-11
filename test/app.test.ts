@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { createApp, ensureUploadToken } from "../src/app.js";
+import type { ArtifactStorage } from "../src/artifacts.js";
 import { attachDashboard } from "../src/static-node.js";
 import { SqliteStore } from "../src/store/sqlite.js";
 
@@ -44,6 +45,117 @@ describe("upload API", () => {
     });
     expect(res.status).toBe(422);
     expect((await res.json()).error).toContain("lcov");
+  });
+});
+
+describe("browser test artifacts", () => {
+  class MemoryArtifacts implements ArtifactStorage {
+    readonly kind = "local" as const;
+    objects = new Map<string, Uint8Array>();
+    async createUploadUrl() {
+      return null;
+    }
+    async createDownloadUrl() {
+      return null;
+    }
+    async put(key: string, body: Uint8Array) {
+      this.objects.set(key, body);
+    }
+    async get(key: string, range?: { start: number; end: number }) {
+      const bytes = this.objects.get(key)!;
+      return range ? bytes.subarray(range.start, range.end + 1) : bytes;
+    }
+    async exists(key: string, size: number) {
+      return this.objects.get(key)?.byteLength === size;
+    }
+  }
+  const artifactStore = new MemoryArtifacts();
+  const artifactDb = new SqliteStore(":memory:");
+  const artifactApp = createApp({
+    store: artifactDb,
+    uploadToken: "sekret",
+    artifactStorage: artifactStore,
+  });
+  const manifest = {
+    repo: "acme/app",
+    branch: "feature/playback",
+    commit: "feed123",
+    pr: 8,
+    framework: "playwright",
+    testsPassed: 5,
+    testsFailed: 1,
+    testsSkipped: 2,
+    durationMs: 4321,
+    artifacts: [
+      {
+        name: "checkout.webm",
+        kind: "video",
+        contentType: "video/webm",
+        sizeBytes: 4,
+        testName: "checkout › buys a plan",
+      },
+    ],
+  };
+
+  it("authenticates and validates run manifests", async () => {
+    const denied = await artifactApp.request("/api/v1/test-runs", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer wrong" },
+      body: JSON.stringify(manifest),
+    });
+    expect(denied.status).toBe(401);
+    const oversized = structuredClone(manifest);
+    oversized.artifacts[0]!.sizeBytes = 501 * 1024 * 1024;
+    const bad = await artifactApp.request("/api/v1/test-runs", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer sekret" },
+      body: JSON.stringify(oversized),
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it("uploads, verifies, completes, lists, and plays a run", async () => {
+    const created = await artifactApp.request("/api/v1/test-runs", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer sekret" },
+      body: JSON.stringify(manifest),
+    });
+    expect(created.status).toBe(201);
+    const data = await created.json();
+    expect(data.run.testsPassed).toBe(5);
+    expect(data.artifacts[0].objectKey).toBeUndefined();
+
+    const early = await artifactApp.request(`/api/v1/test-runs/${data.run.id}/complete`, {
+      method: "POST",
+      headers: { authorization: "Bearer sekret" },
+    });
+    expect(early.status).toBe(409);
+
+    const uploaded = await artifactApp.request(new URL(data.artifacts[0].uploadUrl).pathname, {
+      method: "PUT",
+      headers: { authorization: "Bearer sekret", "content-type": "video/webm" },
+      body: "1234",
+    });
+    expect(uploaded.status).toBe(200);
+    const completed = await artifactApp.request(`/api/v1/test-runs/${data.run.id}/complete`, {
+      method: "POST",
+      headers: { authorization: "Bearer sekret" },
+    });
+    expect(completed.status).toBe(200);
+
+    const listed = await (await artifactApp.request("/api/v1/repos/acme/app/test-runs")).json();
+    expect(listed.runs[0].status).toBe("complete");
+    const detail = await (await artifactApp.request(`/api/v1/test-runs/${data.run.id}`)).json();
+    expect(detail.artifacts[0].testName).toContain("checkout");
+    const media = await artifactApp.request(detail.artifacts[0].url);
+    expect(media.headers.get("content-type")).toContain("video/webm");
+    expect(await media.text()).toBe("1234");
+    const ranged = await artifactApp.request(detail.artifacts[0].url, {
+      headers: { range: "bytes=1-2" },
+    });
+    expect(ranged.status).toBe(206);
+    expect(ranged.headers.get("content-range")).toBe("bytes 1-2/4");
+    expect(await ranged.text()).toBe("23");
   });
 });
 

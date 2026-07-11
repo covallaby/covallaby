@@ -67,6 +67,59 @@ export interface Subscription {
   currentPeriodEnd: string | null;
 }
 
+export type TestRunStatus = "uploading" | "complete" | "failed";
+export type TestArtifactKind = "video" | "screenshot" | "trace" | "report" | "results" | "other";
+
+export interface TestRunRow {
+  id: number;
+  repo: string;
+  branch: string;
+  commit: string;
+  pr: number | null;
+  framework: string;
+  status: TestRunStatus;
+  testsPassed: number;
+  testsFailed: number;
+  testsSkipped: number;
+  durationMs: number;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface TestArtifactRow {
+  id: number;
+  runId: number;
+  name: string;
+  kind: TestArtifactKind;
+  contentType: string;
+  sizeBytes: number;
+  objectKey: string;
+  testName: string | null;
+  createdAt: string;
+}
+
+export interface CreateTestRunInput {
+  repo: string;
+  branch: string;
+  commit: string;
+  pr: number | null;
+  framework: string;
+  testsPassed: number;
+  testsFailed: number;
+  testsSkipped: number;
+  durationMs: number;
+}
+
+export interface CreateTestArtifactInput {
+  runId: number;
+  name: string;
+  kind: TestArtifactKind;
+  contentType: string;
+  sizeBytes: number;
+  objectKey: string;
+  testName: string | null;
+}
+
 export interface Store {
   recordUpload(input: RecordUploadInput): Promise<UploadRow>;
   /** The latest upload for an exact repo+commit, with its report — the merge target. */
@@ -103,6 +156,13 @@ export interface Store {
   findSubscriptionByCustomer(stripeCustomer: string): Promise<Subscription | null>;
   getMeta(key: string): Promise<string | null>;
   setMeta(key: string, value: string): Promise<void>;
+  /** Browser-test playback metadata. Optional for runtimes without object storage (currently D1). */
+  createTestRun?(input: CreateTestRunInput): Promise<TestRunRow>;
+  createTestArtifact?(input: CreateTestArtifactInput): Promise<TestArtifactRow>;
+  completeTestRun?(id: number): Promise<TestRunRow | null>;
+  failTestRun?(id: number): Promise<void>;
+  getTestRun?(id: number): Promise<{ run: TestRunRow; artifacts: TestArtifactRow[] } | null>;
+  listTestRuns?(repo: string, limit: number): Promise<TestRunRow[]>;
   close(): Promise<void>;
 }
 

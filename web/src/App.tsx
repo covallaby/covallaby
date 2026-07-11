@@ -15,6 +15,7 @@ import {
 import { Meter, OwnerAvatar, inkFor } from "./components/ui.js";
 import { CompareBranches, PullRequest } from "./pages/Compare.js";
 import { Home } from "./pages/Home.js";
+import { PlaybackDetail, Playbacks } from "./pages/Playbacks.js";
 import { Policy } from "./pages/Policy.js";
 import { RepoLayout } from "./pages/Repo.js";
 import { Insights } from "./pages/RepoInsights.js";
@@ -130,6 +131,14 @@ function RepoNavItem({ r, pathname }: { r: RepoOverview; pathname: string }) {
           </SubLink>
           <SubLink to={`${base}/uploads`} active={pathname.startsWith(`${base}/uploads`)}>
             Uploads
+          </SubLink>
+          <SubLink
+            to={`${base}/playbacks`}
+            active={
+              pathname.startsWith(`${base}/playbacks`) || pathname.startsWith(`${base}/test-runs/`)
+            }
+          >
+            Playbacks
           </SubLink>
           <SubLink
             to={`${base}/pulls`}
@@ -298,6 +307,9 @@ function tailLabel(rest: string): string | null {
   if (rest === "") return null;
   if (rest.startsWith("insights")) return "Insights";
   if (rest.startsWith("uploads")) return "Uploads";
+  if (rest.startsWith("playbacks")) return "Playbacks";
+  const run = /^test-runs\/(\d+)/.exec(rest);
+  if (run) return `browser run ${run[1]}`;
   if (rest.startsWith("pulls")) return "Pull requests";
   if (rest.startsWith("policy")) return "Policy";
   if (rest.startsWith("compare")) return "Compare";
@@ -470,12 +482,14 @@ export function App() {
                 <Route index element={<Summary />} />
                 <Route path="insights" element={<Insights />} />
                 <Route path="uploads" element={<Uploads />} />
+                <Route path="playbacks" element={<Playbacks />} />
                 <Route path="pulls" element={<PullRequests />} />
                 <Route path="policy" element={<Policy />} />
               </Route>
               <Route path="/r/:owner/:name/pr/:pr" element={<PullRequest />} />
               <Route path="/r/:owner/:name/compare" element={<CompareBranches />} />
               <Route path="/r/:owner/:name/u/:id" element={<Upload />} />
+              <Route path="/r/:owner/:name/test-runs/:id" element={<PlaybackDetail />} />
             </Routes>
           </div>
         </main>
