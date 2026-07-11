@@ -134,19 +134,22 @@ function RepoNavItem({ r, pathname }: { r: RepoOverview; pathname: string }) {
           <SubLink to={`${base}/uploads`} active={pathname.startsWith(`${base}/uploads`)}>
             Uploads
           </SubLink>
+          <div className="px-2.5 pt-2 pb-0.5 text-[9px] font-semibold tracking-widest text-(--muted) uppercase">
+            Visual testing
+          </div>
           <SubLink
             to={`${base}/playbacks`}
             active={
               pathname.startsWith(`${base}/playbacks`) || pathname.startsWith(`${base}/test-runs/`)
             }
           >
-            Playbacks
+            Browser runs
           </SubLink>
           <SubLink
             to={`${base}/storybook-previews`}
             active={pathname.startsWith(`${base}/storybook-previews`)}
           >
-            Storybook
+            Storybook previews
           </SubLink>
           <SubLink
             to={`${base}/pulls`}
@@ -330,7 +333,7 @@ function tailLabel(rest: string): string | null {
   if (rest === "") return null;
   if (rest.startsWith("insights")) return "Insights";
   if (rest.startsWith("uploads")) return "Uploads";
-  if (rest.startsWith("playbacks")) return "Playbacks";
+  if (rest.startsWith("playbacks")) return "Browser runs";
   if (rest === "storybook-previews") return "Storybook previews";
   const preview = /^storybook-previews\/(\d+)/.exec(rest);
   if (preview) return `Storybook preview ${preview[1]}`;

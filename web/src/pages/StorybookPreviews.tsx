@@ -1,4 +1,11 @@
-import { BookOpen, ExternalLink } from "lucide-react";
+import {
+  AlertCircle,
+  BookOpen,
+  ExternalLink,
+  GitCommit,
+  GitPullRequest,
+  RotateCw,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { type StorybookPreview, api } from "../api.js";
@@ -13,19 +20,43 @@ const when = (iso: string) =>
 export function StorybookPreviews() {
   const { repo } = useRepo();
   const [previews, setPreviews] = useState<StorybookPreview[] | null>(null);
+  const [error, setError] = useState(false);
+  const [request, setRequest] = useState(0);
   useEffect(() => {
+    void request;
+    setPreviews(null);
+    setError(false);
     api
       .storybookPreviews(repo)
       .then((result) => setPreviews(result.previews))
-      .catch(() => setPreviews([]));
-  }, [repo]);
+      .catch(() => setError(true));
+  }, [repo, request]);
   return (
     <Card>
       <CardHeader
         title="Storybook previews"
-        description="Explore the exact component library built by CI for each commit and pull request."
+        description="Review the exact component experience built by CI before it reaches production."
       />
-      {!previews ? (
+      {error ? (
+        <div className="mx-5 mb-5 flex items-start justify-between gap-4 rounded-xl border border-(--bad)/25 bg-(--bad)/5 p-4">
+          <div className="flex gap-3">
+            <AlertCircle className="mt-0.5 shrink-0 text-(--bad)" size={18} />
+            <div>
+              <p className="text-sm font-medium">We couldn't load Storybook previews.</p>
+              <p className="mt-1 text-xs text-(--muted)">
+                Your previews are still safe. Check the connection and try again.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setRequest((value) => value + 1)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-(--border) bg-(--surface) px-2.5 py-1.5 text-xs font-medium hover:border-(--muted)"
+          >
+            <RotateCw size={13} /> Retry
+          </button>
+        </div>
+      ) : !previews ? (
         <p className="px-5 pb-5 text-sm text-(--muted)">Loading previews…</p>
       ) : previews.length === 0 ? (
         <p className="px-5 pb-6 text-sm text-(--muted)">
@@ -33,39 +64,57 @@ export function StorybookPreviews() {
           one.
         </p>
       ) : (
-        <table className="w-full text-[13.5px]">
-          <thead>
-            <tr>
-              <Th>Preview</Th>
-              <Th>Commit</Th>
-              <Th>Branch</Th>
-              <Th>Published</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {previews.map((preview) => (
-              <tr key={preview.id} className="hover:bg-(--surface-2)">
-                <Td>
-                  <Link
-                    className="font-medium hover:underline"
-                    to={`/r/${repo}/storybook-previews/${preview.id}`}
-                  >
-                    <BookOpen className="mr-2 inline text-(--accent)" size={16} />
-                    Preview #{preview.id}
-                  </Link>
-                </Td>
-                <Td>
-                  <span className="font-mono text-xs">{preview.commit.slice(0, 10)}</span>
-                  {preview.pr ? (
-                    <span className="ml-2 text-(--muted)">PR #{preview.pr}</span>
-                  ) : null}
-                </Td>
-                <Td className="text-(--muted)">{preview.branch}</Td>
-                <Td className="text-(--muted)">{when(preview.createdAt)}</Td>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] text-[13.5px]">
+            <thead>
+              <tr>
+                <Th>Preview</Th>
+                <Th>Commit</Th>
+                <Th>Branch</Th>
+                <Th>Published</Th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {previews.map((preview) => (
+                <tr key={preview.id} className="hover:bg-(--surface-2)">
+                  <Td>
+                    <Link
+                      className="font-medium hover:underline"
+                      to={`/r/${repo}/storybook-previews/${preview.id}`}
+                    >
+                      <BookOpen className="mr-2 inline text-(--accent)" size={16} />
+                      {preview.pr ? `PR #${preview.pr} preview` : `${preview.branch} preview`}
+                    </Link>
+                  </Td>
+                  <Td>
+                    <span className="font-mono text-xs">{preview.commit.slice(0, 10)}</span>
+                    <a
+                      className="ml-2 inline-flex text-(--muted) hover:text-(--ink)"
+                      href={`https://github.com/${repo}/commit/${preview.commit}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="Open commit on GitHub"
+                    >
+                      <GitCommit size={14} />
+                    </a>
+                    {preview.pr ? (
+                      <a
+                        className="ml-2 inline-flex items-center gap-1 text-(--muted) hover:text-(--ink)"
+                        href={`https://github.com/${repo}/pull/${preview.pr}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <GitPullRequest size={14} />#{preview.pr}
+                      </a>
+                    ) : null}
+                  </Td>
+                  <Td className="text-(--muted)">{preview.branch}</Td>
+                  <Td className="text-(--muted)">{when(preview.createdAt)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </Card>
   );
@@ -75,13 +124,32 @@ export function StorybookPreviewDetail() {
   const { id } = useParams();
   const [data, setData] = useState<{ run: StorybookPreview; previewUrl: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [request, setRequest] = useState(0);
   useEffect(() => {
+    void request;
+    setData(null);
+    setError(null);
     api
       .storybookPreview(id!)
       .then(setData)
       .catch((reason) => setError(String(reason)));
-  }, [id]);
-  if (error) return <p className="text-sm text-(--bad)">{error}</p>;
+  }, [id, request]);
+  if (error)
+    return (
+      <div className="rounded-xl border border-(--bad)/25 bg-(--bad)/5 p-5">
+        <p className="text-sm font-medium text-(--bad)">This preview couldn't be opened.</p>
+        <p className="mt-1 text-xs text-(--muted)">
+          Its secure link may have expired, or the preview may no longer be retained.
+        </p>
+        <button
+          type="button"
+          onClick={() => setRequest((value) => value + 1)}
+          className="mt-4 inline-flex items-center gap-2 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-xs font-medium"
+        >
+          <RotateCw size={14} /> Request a fresh link
+        </button>
+      </div>
+    );
   if (!data) return <p className="text-sm text-(--muted)">Loading Storybook preview…</p>;
   return (
     <div className="space-y-4">
@@ -93,7 +161,9 @@ export function StorybookPreviewDetail() {
           >
             ← All Storybook previews
           </Link>
-          <h1 className="mt-2 text-xl font-semibold">Storybook preview #{data.run.id}</h1>
+          <h1 className="mt-2 text-xl font-semibold">
+            {data.run.pr ? `PR #${data.run.pr}` : data.run.branch} Storybook preview
+          </h1>
           <p className="mt-1 font-mono text-xs text-(--muted)">
             {data.run.commit} · {when(data.run.createdAt)}
           </p>

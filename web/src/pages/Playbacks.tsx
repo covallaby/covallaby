@@ -1,4 +1,15 @@
-import { Camera, CheckCircle2, CirclePlay, FileArchive, FlaskConical, XCircle } from "lucide-react";
+import {
+  AlertCircle,
+  Camera,
+  CheckCircle2,
+  CirclePlay,
+  FileArchive,
+  FlaskConical,
+  GitCommit,
+  GitPullRequest,
+  RotateCw,
+  XCircle,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { type TestArtifact, type TestRun, api } from "../api.js";
@@ -14,19 +25,43 @@ const duration = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixe
 export function Playbacks() {
   const { repo } = useRepo();
   const [runs, setRuns] = useState<TestRun[] | null>(null);
+  const [error, setError] = useState(false);
+  const [request, setRequest] = useState(0);
   useEffect(() => {
+    void request;
+    setRuns(null);
+    setError(false);
     api
       .testRuns(repo)
       .then((r) => setRuns(r.runs))
-      .catch(() => setRuns([]));
-  }, [repo]);
+      .catch(() => setError(true));
+  }, [repo, request]);
   return (
     <Card>
       <CardHeader
-        title="Playbacks"
+        title="Browser runs"
         description="Watch the browser flows CI exercised, with traces and screenshots beside them."
       />
-      {!runs ? (
+      {error ? (
+        <div className="mx-5 mb-5 flex items-start justify-between gap-4 rounded-xl border border-(--bad)/25 bg-(--bad)/5 p-4">
+          <div className="flex gap-3">
+            <AlertCircle className="mt-0.5 shrink-0 text-(--bad)" size={18} />
+            <div>
+              <p className="text-sm font-medium">We couldn't load browser runs.</p>
+              <p className="mt-1 text-xs text-(--muted)">
+                Your recordings are still safe. Check the connection and try again.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setRequest((value) => value + 1)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-(--border) bg-(--surface) px-2.5 py-1.5 text-xs font-medium hover:border-(--muted)"
+          >
+            <RotateCw size={13} /> Retry
+          </button>
+        </div>
+      ) : !runs ? (
         <p className="px-5 pb-5 text-sm text-(--muted)">Loading browser runs…</p>
       ) : runs.length === 0 ? (
         <div className="px-5 pb-6 text-sm text-(--muted)">
@@ -37,46 +72,70 @@ export function Playbacks() {
           </p>
         </div>
       ) : (
-        <table className="w-full text-[13.5px]">
-          <thead>
-            <tr>
-              <Th>Run</Th>
-              <Th>Commit</Th>
-              <Th>When</Th>
-              <Th right>Tests</Th>
-              <Th right>Duration</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {runs.map((run) => (
-              <tr key={run.id} className="hover:bg-(--surface-2)">
-                <Td>
-                  <Link
-                    className="font-medium hover:underline"
-                    to={`/r/${repo}/test-runs/${run.id}`}
-                  >
-                    <CirclePlay className="mr-2 inline text-(--accent)" size={16} />
-                    Run #{run.id}
-                  </Link>
-                </Td>
-                <Td>
-                  <span className="font-mono text-xs">{run.commit.slice(0, 10)}</span>
-                  {run.pr ? <span className="ml-2 text-(--muted)">PR #{run.pr}</span> : null}
-                </Td>
-                <Td className="text-(--muted)">{when(run.createdAt)}</Td>
-                <Td className="text-right">
-                  <span className="text-(--good)">{run.testsPassed} passed</span>
-                  {run.testsFailed ? (
-                    <span className="ml-2 text-(--bad)">{run.testsFailed} failed</span>
-                  ) : null}
-                </Td>
-                <Td className="text-right tabular-nums text-(--muted)">
-                  {duration(run.durationMs)}
-                </Td>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-[13.5px]">
+            <thead>
+              <tr>
+                <Th>Run</Th>
+                <Th>Commit</Th>
+                <Th>When</Th>
+                <Th right>Tests</Th>
+                <Th right>Duration</Th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {runs.map((run) => (
+                <tr key={run.id} className="hover:bg-(--surface-2)">
+                  <Td>
+                    <Link
+                      className="font-medium hover:underline"
+                      to={`/r/${repo}/test-runs/${run.id}`}
+                    >
+                      {run.testsFailed ? (
+                        <XCircle className="mr-2 inline text-(--bad)" size={16} />
+                      ) : (
+                        <CirclePlay className="mr-2 inline text-(--good)" size={16} />
+                      )}
+                      {run.pr ? `PR #${run.pr} browser run` : `${run.branch} browser run`}
+                    </Link>
+                  </Td>
+                  <Td>
+                    <span className="font-mono text-xs">{run.commit.slice(0, 10)}</span>
+                    <a
+                      className="ml-2 inline-flex text-(--muted) hover:text-(--ink)"
+                      href={`https://github.com/${repo}/commit/${run.commit}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="Open commit on GitHub"
+                    >
+                      <GitCommit size={14} />
+                    </a>
+                    {run.pr ? (
+                      <a
+                        className="ml-2 inline-flex items-center gap-1 text-(--muted) hover:text-(--ink)"
+                        href={`https://github.com/${repo}/pull/${run.pr}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <GitPullRequest size={14} />#{run.pr}
+                      </a>
+                    ) : null}
+                  </Td>
+                  <Td className="text-(--muted)">{when(run.createdAt)}</Td>
+                  <Td className="text-right">
+                    <span className="text-(--good)">{run.testsPassed} passed</span>
+                    {run.testsFailed ? (
+                      <span className="ml-2 text-(--bad)">{run.testsFailed} failed</span>
+                    ) : null}
+                  </Td>
+                  <Td className="text-right tabular-nums text-(--muted)">
+                    {duration(run.durationMs)}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </Card>
   );
@@ -139,7 +198,16 @@ export function PlaybackDetail() {
       .then(setData)
       .catch((e) => setError(String(e)));
   }, [id]);
-  if (error) return <p className="text-sm text-(--bad)">{error}</p>;
+  if (error)
+    return (
+      <div className="rounded-xl border border-(--bad)/25 bg-(--bad)/5 p-5">
+        <p className="text-sm font-medium text-(--bad)">This browser run couldn't be loaded.</p>
+        <p className="mt-1 text-xs text-(--muted)">
+          The run may have expired under your retention policy, or the connection may be
+          unavailable.
+        </p>
+      </div>
+    );
   if (!data) return <p className="text-sm text-(--muted)">Loading playback…</p>;
   const videos = data.artifacts.filter((a) => a.kind === "video");
   const screenshots = data.artifacts.filter((a) => a.kind === "screenshot");
@@ -153,7 +221,9 @@ export function PlaybackDetail() {
         >
           ← All playbacks
         </Link>
-        <h1 className="mt-2 text-xl font-semibold">Browser run #{data.run.id}</h1>
+        <h1 className="mt-2 text-xl font-semibold">
+          {data.run.pr ? `PR #${data.run.pr}` : data.run.branch} browser run
+        </h1>
         <p className="mt-1 font-mono text-xs text-(--muted)">
           {data.run.commit} · {when(data.run.createdAt)}
         </p>

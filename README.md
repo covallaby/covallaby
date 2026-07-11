@@ -179,6 +179,7 @@ export default defineConfig({
 
 ```yaml
 - uses: covallaby/action@main
+  if: always() # upload recordings even when the browser test fails
   with:
     files: coverage/lcov.info
     server-url: https://app.covallaby.com
@@ -199,6 +200,7 @@ browser recordings. Build Storybook in CI and upload its static directory:
 ```yaml
 - run: npm run build-storybook
 - uses: covallaby/action@main
+  if: always()
   with:
     files: coverage/lcov.info
     server-url: https://app.covallaby.com
