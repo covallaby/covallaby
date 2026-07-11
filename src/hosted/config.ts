@@ -11,7 +11,7 @@ export interface HostedConfig {
     clientSecret: string;
     /** api.github.com by default; a GHES base for self-hosted GitHub. */
     apiBase: string;
-    /** GitHub App webhook secret. Enables PR-aware artifact retention. */
+    /** GitHub organization/App webhook secret. Enables PR-aware artifact retention. */
     webhookSecret?: string;
   };
 }
