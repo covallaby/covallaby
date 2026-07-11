@@ -329,6 +329,7 @@ export function createApp({
   };
   const previewBase = storybookPreviewBaseUrl?.replace(/\/+$/, "");
   const previewOrigin = previewBase ? new URL(previewBase).origin : null;
+  const previewHost = previewBase ? new URL(previewBase).host.toLowerCase() : null;
   if (hosted && previewOrigin === new URL(hosted.baseUrl).origin) {
     throw new Error("COVALLABY_PREVIEW_BASE_URL must use a separate origin from Covallaby.");
   }
@@ -866,7 +867,11 @@ export function createApp({
   });
 
   app.get("/p/:id/*", async (c) => {
-    if (!previewReady() || new URL(c.req.url).origin !== previewOrigin) return c.notFound();
+    // Match the externally visible host, not the request scheme. TLS commonly
+    // terminates at a reverse proxy, so the app may see an http URL for an
+    // externally https request. The Host header remains the origin boundary.
+    const requestHost = (c.req.header("host") ?? new URL(c.req.url).host).toLowerCase();
+    if (!previewReady() || requestHost !== previewHost) return c.notFound();
     const id = Number(c.req.param("id"));
     if (!Number.isSafeInteger(id) || id <= 0) return c.notFound();
     const supplied =
@@ -887,16 +892,20 @@ export function createApp({
     const artifact = await store.getTestArtifactByName!(id, path);
     if (!artifact) return c.notFound();
     if (c.req.query("preview_token")) {
-      const secure = previewOrigin!.startsWith("https://") ? "; Secure" : "";
+      const securePreview = previewOrigin!.startsWith("https://");
+      const cookiePolicy = securePreview ? "SameSite=None; Secure" : "SameSite=Lax";
       c.header(
         "Set-Cookie",
-        `covallaby_preview=${supplied}; Path=/p/${id}/; HttpOnly; SameSite=Lax; Max-Age=3600${secure}`,
+        `covallaby_preview=${supplied}; Path=/p/${id}/; HttpOnly; ${cookiePolicy}; Max-Age=3600`,
       );
     }
     const bytes = await artifactStorage!.get(artifact.objectKey);
     c.header("Content-Type", artifact.contentType);
     c.header("Content-Length", String(bytes.byteLength));
-    c.header("Cache-Control", "private, max-age=31536000, immutable");
+    c.header(
+      "Cache-Control",
+      artifact.contentType.startsWith("text/html") ? "private, no-store" : "private, max-age=3600",
+    );
     c.header("X-Content-Type-Options", "nosniff");
     return c.body(bytes as Uint8Array<ArrayBuffer>);
   });

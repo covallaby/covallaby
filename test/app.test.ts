@@ -78,7 +78,7 @@ describe("browser test artifacts", () => {
     store: artifactDb,
     uploadToken: "sekret",
     artifactStorage: artifactStore,
-    storybookPreviewBaseUrl: "http://previews.test",
+    storybookPreviewBaseUrl: "https://previews.test",
     storybookPreviewSecret: "preview-secret",
   });
   const manifest = {
@@ -205,17 +205,26 @@ describe("browser test artifacts", () => {
       await artifactApp.request(`/api/v1/storybook-previews/${data.run.id}`)
     ).json();
     expect(detail.previewUrl).toMatch(
-      new RegExp(`^http://previews\\.test/p/${data.run.id}/index\\.html\\?preview_token=`),
+      new RegExp(`^https://previews\\.test/p/${data.run.id}/index\\.html\\?preview_token=`),
     );
     const index = await artifactApp.request(detail.previewUrl);
     expect(index.status).toBe(200);
     expect(index.headers.get("content-type")).toContain("text/html");
+    expect(index.headers.get("cache-control")).toBe("private, no-store");
+    expect(index.headers.get("set-cookie")).toContain("SameSite=None; Secure");
     expect(await index.text()).toContain("Component library");
     const cookie = index.headers.get("set-cookie")!.split(";")[0]!;
-    const asset = await artifactApp.request(`http://previews.test/p/${data.run.id}/assets/app.js`, {
-      headers: { cookie },
-    });
+    const asset = await artifactApp.request(
+      `https://previews.test/p/${data.run.id}/assets/app.js`,
+      { headers: { cookie } },
+    );
     expect(await asset.text()).toBe("console.log('hi')");
+    expect(asset.headers.get("cache-control")).toBe("private, max-age=3600");
+    const proxied = await artifactApp.request(
+      `http://internal-service/p/${data.run.id}/assets/app.js`,
+      { headers: { cookie, host: "previews.test" } },
+    );
+    expect(proxied.status).toBe(200);
     expect(
       (
         await artifactApp.request(
