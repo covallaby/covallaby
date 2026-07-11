@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import type { HostedConfig } from "../src/hosted/config.js";
+import type { GitHubAppClient } from "../src/hosted/github-app.js";
 import type { GitHubClient } from "../src/hosted/github.js";
 import { decodeSession, encodeSession } from "../src/hosted/session.js";
 import { SqliteStore } from "../src/store/sqlite.js";
@@ -20,6 +21,15 @@ const fakeGitHub: GitHubClient = {
   getUser: async () => ({ login: "alice", name: "Alice" }),
   getAccounts: async () => ["alice", "acme"],
 };
+
+const fakeGitHubApp: GitHubAppClient = {
+  getInstallation: async (id) => ({ id, account: id === 999 ? "other" : "acme" }),
+  listRepositories: async () => [{ fullName: "acme/app", defaultBranch: "main" }],
+  listOpenPullRequests: async () => [7],
+};
+
+const sessionCookieFor = (accounts: string[], secret = config.sessionSecret) =>
+  `covallaby_session=${encodeSession({ login: "alice", name: "Alice", accounts, iat: Date.now() }, secret)}`;
 
 describe("sessions", () => {
   it("round-trips a signed session and rejects tampering", () => {
@@ -57,8 +67,7 @@ describe("hosted mode: auth + tenancy scoping", () => {
       body: lcov,
     });
 
-  const session = (accounts: string[]) =>
-    `covallaby_session=${encodeSession({ login: "alice", name: "Alice", accounts, iat: Date.now() }, config.sessionSecret)}`;
+  const session = (accounts: string[]) => sessionCookieFor(accounts);
 
   it("uploads stay token-authed (no session needed) and record the account", async () => {
     expect((await upload("acme/app", "c1")).status).toBe(200);
@@ -137,7 +146,10 @@ describe("GitHub App retention webhooks", () => {
     ).toBe(401);
     const accepted = await app.request("/api/v1/github/webhook", {
       method: "POST",
-      headers: { "x-hub-signature-256": signature },
+      headers: {
+        "x-github-event": "pull_request",
+        "x-hub-signature-256": signature,
+      },
       body: payload,
     });
     expect(accepted.status).toBe(200);
@@ -145,5 +157,81 @@ describe("GitHub App retention webhooks", () => {
       '"defaultBranch":"trunk"',
     );
     expect(await store.getMeta("artifact-retention:pr:acme/app:42")).toContain('"open":false');
+  });
+
+  it("records and removes installations only for installation events", async () => {
+    const send = async (action: string, event: string) => {
+      const body = JSON.stringify({
+        action,
+        installation: { id: 123, account: { login: "acme" } },
+      });
+      return app.request("/api/v1/github/webhook", {
+        method: "POST",
+        headers: {
+          "x-github-event": event,
+          "x-hub-signature-256": `sha256=${createHmac("sha256", "hook-secret").update(body).digest("hex")}`,
+        },
+        body,
+      });
+    };
+
+    expect((await send("created", "installation")).status).toBe(200);
+    expect(await store.getMeta("github-app:account:acme")).toBe("123");
+
+    // A similarly named action on another event must not uninstall the App.
+    expect((await send("deleted", "repository")).status).toBe(200);
+    expect(await store.getMeta("github-app:account:acme")).toBe("123");
+
+    expect((await send("deleted", "installation")).status).toBe(200);
+    expect(await store.getMeta("github-app:account:acme")).toBe("");
+  });
+});
+
+describe("GitHub App installation flow", () => {
+  const store = new SqliteStore(":memory:");
+  const appConfig: HostedConfig = {
+    ...config,
+    githubApp: {
+      appId: "123",
+      slug: "covallaby-cloud",
+      privateKey: "injected-in-tests",
+      bootstrapInstallationIds: [],
+    },
+  };
+  const app = createApp({
+    store,
+    uploadToken: "up",
+    hosted: appConfig,
+    hostedDeps: { github: fakeGitHub, githubApp: fakeGitHubApp },
+  });
+
+  it("reports installation status and redirects to the public installation flow", async () => {
+    const before = await app.request("/api/v1/github/status", {
+      headers: { cookie: sessionCookieFor(["acme"]) },
+    });
+    expect((await before.json()).accounts).toEqual([{ account: "acme", installed: false }]);
+    const install = await app.request("/api/v1/github/install", {
+      headers: { cookie: sessionCookieFor(["acme"]) },
+    });
+    expect(install.headers.get("location")).toBe(
+      "https://github.com/apps/covallaby-cloud/installations/new",
+    );
+  });
+
+  it("records an installation only for a GitHub account in the signed-in session", async () => {
+    const denied = await app.request("/api/v1/github/setup?installation_id=999", {
+      headers: { cookie: sessionCookieFor(["acme"]) },
+    });
+    expect(denied.status).toBe(403);
+
+    const setup = await app.request("/api/v1/github/setup?installation_id=123", {
+      headers: { cookie: sessionCookieFor(["acme"]) },
+    });
+    expect(setup.status).toBe(302);
+    expect(await store.getMeta("github-app:account:acme")).toBe("123");
+    const after = await app.request("/api/v1/github/status", {
+      headers: { cookie: sessionCookieFor(["acme"]) },
+    });
+    expect((await after.json()).accounts[0].installed).toBe(true);
   });
 });

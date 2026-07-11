@@ -153,6 +153,12 @@ export interface Me {
   accounts?: string[];
 }
 
+export interface GitHubAppStatus {
+  configured: boolean;
+  slug?: string;
+  accounts: Array<{ account: string; installed: boolean }>;
+}
+
 /**
  * The signed-in user, or `null` when the server isn't in hosted mode (the
  * self-hosted server has no auth layer, so `/api/v1/me` 404s). Never throws.
@@ -177,6 +183,7 @@ const liveApi = {
     ),
   upload: (id: string) => get<UploadDetail>(`/api/v1/uploads/${id}`),
   me: fetchMe,
+  githubApp: () => get<GitHubAppStatus>("/api/v1/github/status"),
   trends: () => get<PortfolioTrends>("/api/v1/trends"),
   dirTrends: (repo: string, branch?: string) =>
     get<DirTrends>(
@@ -210,6 +217,7 @@ export const api: typeof liveApi = IS_DEMO
       history: (...a) => load().then((d) => d.history(...a)),
       upload: (...a) => load().then((d) => d.upload(...a)),
       me: () => Promise.resolve<Me | null>(null), // the static demo is always "public"
+      githubApp: () => Promise.resolve({ configured: false, accounts: [] }),
       trends: (...a) => load().then((d) => d.trends(...a)),
       dirTrends: (...a) => load().then((d) => d.dirTrends(...a)),
       prs: (...a) => load().then((d) => d.prs(...a)),

@@ -2,6 +2,7 @@ import { ChevronDown, Github, LayoutDashboard, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
+  type GitHubAppStatus,
   IS_DEMO,
   type Me,
   type OwnerGroup,
@@ -202,7 +203,11 @@ function OrgSection({ group, pathname }: { group: OwnerGroup; pathname: string }
   );
 }
 
-function Sidebar({ repos, me }: { repos: RepoOverview[] | null; me: Me | null }) {
+function Sidebar({
+  repos,
+  me,
+  githubApp,
+}: { repos: RepoOverview[] | null; me: Me | null; githubApp: GitHubAppStatus | null }) {
   const { pathname } = useLocation();
   return (
     <aside className="fixed inset-y-0 left-0 z-20 hidden w-60 flex-col border-r border-(--hairline) bg-(--surface) md:flex">
@@ -256,6 +261,17 @@ function Sidebar({ repos, me }: { repos: RepoOverview[] | null; me: Me | null })
               Sign out
             </button>
           </div>
+        )}
+        {githubApp?.configured && (
+          <a
+            href="/api/v1/github/install"
+            className="flex items-center gap-2.5 rounded-lg bg-(--accent-wash) px-2.5 py-2 text-[13px] font-medium text-(--ink) transition-colors hover:bg-(--surface-2)"
+          >
+            <Github size={15} strokeWidth={1.75} />
+            {githubApp.accounts.some((account) => account.installed)
+              ? "Manage repositories"
+              : "Connect repositories"}
+          </a>
         )}
         <a
           href="https://github.com/covallaby/action"
@@ -418,6 +434,7 @@ export function App() {
   const [theme, toggleTheme] = useTheme();
   const [repos, setRepos] = useState<RepoOverview[] | null>(null);
   const [me, setMe] = useState<Me | null | undefined>(undefined); // undefined = still loading
+  const [githubApp, setGitHubApp] = useState<GitHubAppStatus | null>(null);
   const { pathname } = useLocation();
 
   useEffect(() => {
@@ -428,6 +445,14 @@ export function App() {
   }, []);
 
   const signedOut = me?.authenticated === false;
+
+  useEffect(() => {
+    if (!me?.authenticated) return;
+    api
+      .githubApp()
+      .then(setGitHubApp)
+      .catch(() => setGitHubApp(null));
+  }, [me]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refetch on navigation keeps sidebar percentages fresh
   useEffect(() => {
@@ -451,7 +476,7 @@ export function App() {
           </a>
         </div>
       )}
-      <Sidebar repos={repos} me={me} />
+      <Sidebar repos={repos} me={me} githubApp={githubApp} />
       <div className="md:pl-60">
         <header className="sticky top-0 z-10 border-b border-(--hairline) bg-(--page)/80 backdrop-blur-md">
           <div className="flex items-center justify-between gap-4 px-6 py-2.5">

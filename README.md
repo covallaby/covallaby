@@ -193,11 +193,12 @@ the bucket, so they do not pass through the Covallaby process.
 
 Ordinary browser runs are retained for 30 days by default. The latest completed
 run on the repository default branch is always preserved. Hosted installations
-with `GITHUB_WEBHOOK_SECRET` also preserve the latest run for every open PR;
+with the Covallaby GitHub App also preserve the latest run for every open PR;
 when a PR closes, its latest run receives a fresh 30-day grace period. Configure
-an organization or GitHub App webhook URL as `/api/v1/github/webhook` and
-subscribe to **Pull request** events. Signatures are verified before retention
-state is recorded.
+the App's single webhook URL as `/api/v1/github/webhook` and subscribe to
+**Installation**, **Installation repositories**, and **Pull request** events.
+Signatures are verified before installation and retention state is recorded.
+Hosted customers install the App from Covallaby; they never configure a webhook.
 
 Unknown PRs are treated as open so a missed webhook cannot erase useful
 evidence. Self-hosters without GitHub can keep that safe default or set
@@ -221,7 +222,9 @@ Required in hosted mode:
 | `COVALLABY_SESSION_SECRET` | Random secret signing session cookies |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | A GitHub OAuth app |
 | `GITHUB_API_BASE` | Optional — a GHES API base for self-hosted GitHub |
-| `GITHUB_WEBHOOK_SECRET` | Optional organization/GitHub App webhook secret; enables GitHub-aware artifact retention. |
+| `GITHUB_APP_ID` / `GITHUB_APP_SLUG` / `GITHUB_APP_PRIVATE_KEY` | Optional installable GitHub App; enables repository onboarding and GitHub-aware retention. |
+| `GITHUB_WEBHOOK_SECRET` | GitHub App webhook secret; required when the GitHub App is configured. |
+| `GITHUB_APP_BOOTSTRAP_INSTALLATION_IDS` | Optional comma-separated installation IDs to reconcile after deploy. |
 
 Billing is optional even in hosted mode — set the Stripe env to enable the Pro
 plan, omit it and everything is `free`:

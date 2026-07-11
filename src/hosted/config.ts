@@ -14,6 +14,12 @@ export interface HostedConfig {
     /** GitHub organization/App webhook secret. Enables PR-aware artifact retention. */
     webhookSecret?: string;
   };
+  githubApp?: {
+    appId: string;
+    slug: string;
+    privateKey: string;
+    bootstrapInstallationIds: number[];
+  };
 }
 
 export function loadHostedConfig(env: NodeJS.ProcessEnv = process.env): HostedConfig | null {
@@ -29,6 +35,16 @@ export function loadHostedConfig(env: NodeJS.ProcessEnv = process.env): HostedCo
     return value;
   };
 
+  const appId = env.GITHUB_APP_ID?.trim();
+  const appSlug = env.GITHUB_APP_SLUG?.trim();
+  const appPrivateKey = env.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, "\n").trim();
+  const anyApp = Boolean(appId || appSlug || appPrivateKey);
+  if (anyApp && (!appId || !appSlug || !appPrivateKey)) {
+    throw new Error(
+      "GitHub App integration requires GITHUB_APP_ID, GITHUB_APP_SLUG, and GITHUB_APP_PRIVATE_KEY together.",
+    );
+  }
+
   return {
     baseUrl: (env.COVALLABY_BASE_URL ?? "http://localhost:8080").replace(/\/$/, ""),
     sessionSecret: need("COVALLABY_SESSION_SECRET"),
@@ -40,5 +56,18 @@ export function loadHostedConfig(env: NodeJS.ProcessEnv = process.env): HostedCo
         webhookSecret: env.GITHUB_WEBHOOK_SECRET.trim(),
       }),
     },
+    ...(appId &&
+      appSlug &&
+      appPrivateKey && {
+        githubApp: {
+          appId,
+          slug: appSlug,
+          privateKey: appPrivateKey,
+          bootstrapInstallationIds: (env.GITHUB_APP_BOOTSTRAP_INSTALLATION_IDS ?? "")
+            .split(",")
+            .map((value) => Number(value.trim()))
+            .filter((value) => Number.isSafeInteger(value) && value > 0),
+        },
+      }),
   };
 }
