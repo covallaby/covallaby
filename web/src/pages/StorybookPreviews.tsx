@@ -98,23 +98,39 @@ export function StorybookPreviewDetail() {
             {data.run.commit} · {when(data.run.createdAt)}
           </p>
         </div>
-        <a
-          href={data.previewUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-2 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-xs font-medium hover:border-(--muted)"
-        >
-          Open preview <ExternalLink size={14} />
-        </a>
+        {data.run.status === "complete" ? (
+          <a
+            href={data.previewUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-xs font-medium hover:border-(--muted)"
+          >
+            Open preview <ExternalLink size={14} />
+          </a>
+        ) : (
+          <span className="rounded-full bg-(--accent-wash) px-3 py-1.5 text-xs font-medium text-(--accent)">
+            Publishing…
+          </span>
+        )}
       </div>
-      <Card className="overflow-hidden">
-        <iframe
-          title={`Storybook preview ${data.run.id}`}
-          src={data.previewUrl}
-          className="h-[78vh] w-full border-0 bg-white"
-          sandbox="allow-downloads allow-forms allow-popups allow-same-origin allow-scripts"
-        />
-      </Card>
+      {data.run.status === "complete" ? (
+        <Card className="overflow-hidden">
+          <iframe
+            title={`Storybook preview ${data.run.id}`}
+            src={data.previewUrl}
+            referrerPolicy="no-referrer"
+            className="h-[78vh] w-full border-0 bg-white"
+            sandbox="allow-downloads allow-forms allow-popups allow-same-origin allow-scripts"
+          />
+        </Card>
+      ) : (
+        <Card className="p-6">
+          <p className="text-sm font-medium">This preview is still publishing.</p>
+          <p className="mt-1 text-xs text-(--muted)">
+            Covallaby will make it available as soon as every Storybook asset finishes uploading.
+          </p>
+        </Card>
+      )}
     </div>
   );
 }

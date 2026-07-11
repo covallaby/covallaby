@@ -348,8 +348,6 @@ export function createApp({
     const parts = raw.split("/");
     return parts.some((part) => !part || part === "." || part === "..") ? null : raw;
   };
-  const encodePreviewPath = (path: string) => path.split("/").map(encodeURIComponent).join("/");
-
   // Hosted tier (opt-in): sign-in, billing, and per-account read scoping.
   // Mounted before the API routes so its gate runs first. Off in self-hosted.
   if (hosted) mountHosted(app, store, hosted, hostedDeps);
@@ -533,6 +531,7 @@ export function createApp({
         !name ||
         !kind ||
         !contentType ||
+        /[\r\n]/.test(contentType) ||
         !Number.isSafeInteger(sizeBytes) ||
         sizeBytes < 0 ||
         sizeBytes > MAX_ARTIFACT_BYTES
@@ -736,11 +735,13 @@ export function createApp({
         return c.json({ ok: false, error: "Every preview file must be an object." }, 400);
       const raw = item as Record<string, unknown>;
       const path = previewPath(raw.path);
-      const contentType = typeof raw.contentType === "string" ? raw.contentType.slice(0, 120) : "";
+      const contentType =
+        typeof raw.contentType === "string" ? raw.contentType.trim().slice(0, 120) : "";
       const sizeBytes = Number(raw.sizeBytes);
       if (
         !path ||
         !contentType ||
+        /[\r\n]/.test(contentType) ||
         seen.has(path) ||
         !Number.isSafeInteger(sizeBytes) ||
         sizeBytes < 0 ||
@@ -898,6 +899,9 @@ export function createApp({
         "Set-Cookie",
         `covallaby_preview=${supplied}; Path=/p/${id}/; HttpOnly; ${cookiePolicy}; Max-Age=3600`,
       );
+      // Exchange the query token for the scoped cookie immediately so it does
+      // not remain in browser history, referrers, analytics, or access logs.
+      return c.redirect(c.req.path, 302);
     }
     const bytes = await artifactStorage!.get(artifact.objectKey);
     c.header("Content-Type", artifact.contentType);

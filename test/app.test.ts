@@ -207,13 +207,19 @@ describe("browser test artifacts", () => {
     expect(detail.previewUrl).toMatch(
       new RegExp(`^https://previews\\.test/p/${data.run.id}/index\\.html\\?preview_token=`),
     );
-    const index = await artifactApp.request(detail.previewUrl);
+    const tokenExchange = await artifactApp.request(detail.previewUrl);
+    expect(tokenExchange.status).toBe(302);
+    expect(tokenExchange.headers.get("location")).toBe(`/p/${data.run.id}/index.html`);
+    expect(tokenExchange.headers.get("location")).not.toContain("preview_token");
+    expect(tokenExchange.headers.get("set-cookie")).toContain("SameSite=None; Secure");
+    const cookie = tokenExchange.headers.get("set-cookie")!.split(";")[0]!;
+    const index = await artifactApp.request(`https://previews.test/p/${data.run.id}/index.html`, {
+      headers: { cookie },
+    });
     expect(index.status).toBe(200);
     expect(index.headers.get("content-type")).toContain("text/html");
     expect(index.headers.get("cache-control")).toBe("private, no-store");
-    expect(index.headers.get("set-cookie")).toContain("SameSite=None; Secure");
     expect(await index.text()).toContain("Component library");
-    const cookie = index.headers.get("set-cookie")!.split(";")[0]!;
     const asset = await artifactApp.request(
       `https://previews.test/p/${data.run.id}/assets/app.js`,
       { headers: { cookie } },
@@ -244,6 +250,16 @@ describe("browser test artifacts", () => {
       }),
     });
     expect(response.status).toBe(400);
+
+    const badContentType = await artifactApp.request("/api/v1/storybook-previews", {
+      method: "POST",
+      headers: { authorization: "Bearer sekret", "content-type": "application/json" },
+      body: JSON.stringify({
+        repo: "acme/app",
+        files: [{ path: "index.html", contentType: "text/html\r\nx-bad: yes", sizeBytes: 1 }],
+      }),
+    });
+    expect(badContentType.status).toBe(400);
   });
 });
 
