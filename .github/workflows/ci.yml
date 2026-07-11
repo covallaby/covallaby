@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  statuses: write
+
 jobs:
   ci:
     name: CI
@@ -45,20 +51,24 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Build Storybook
+        run: pnpm build:storybook
+
       - name: Test + coverage (SQLite + Postgres)
         run: pnpm test:coverage
         env:
           TEST_DATABASE_URL: postgres://covallaby:covallaby@localhost:5432/covallaby
 
-      # Dogfood: upload our own coverage to the hosted Covallaby (covallaby.com).
-      - name: Upload coverage to Covallaby
-        if: ${{ !cancelled() }}
-        run: |
-          URL="https://app.covallaby.com/api/v1/upload?repo=${{ github.repository }}&branch=${{ github.head_ref || github.ref_name }}&commit=${{ github.event.pull_request.head.sha || github.sha }}"
-          [ -n "${{ github.event.pull_request.number }}" ] && URL="${URL}&pr=${{ github.event.pull_request.number }}"
-          curl -sf -X POST "$URL" \
-            -H "Authorization: Bearer ${{ secrets.COVALLABY_TOKEN }}" \
-            --data-binary @coverage/lcov.info
+      # Dogfood both coverage and component previews. This stacked PR skips the
+      # upload until it is retargeted to main, after the preview API is deployed.
+      - name: Upload coverage and Storybook to Covallaby
+        if: ${{ !cancelled() && (github.event_name == 'push' || github.base_ref == 'main') }}
+        uses: covallaby/action@agent/storybook-previews
+        with:
+          files: coverage/lcov.info
+          server-url: https://app.covallaby.com
+          server-token: ${{ secrets.COVALLABY_TOKEN }}
+          storybook-dir: storybook-static
 
       - name: Docker image builds
         run: docker build -t covallaby-server .

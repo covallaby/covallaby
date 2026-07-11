@@ -9,6 +9,7 @@
       "data/**",
       "coverage/**",
       "web/demo-dist/**",
+      "storybook-static/**",
       "web/src/demo/fixtures.json"
     ]
   },
