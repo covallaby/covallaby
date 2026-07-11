@@ -38,11 +38,15 @@ export function loadHostedConfig(env: NodeJS.ProcessEnv = process.env): HostedCo
   const appId = env.GITHUB_APP_ID?.trim();
   const appSlug = env.GITHUB_APP_SLUG?.trim();
   const appPrivateKey = env.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, "\n").trim();
+  const webhookSecret = env.GITHUB_WEBHOOK_SECRET?.trim();
   const anyApp = Boolean(appId || appSlug || appPrivateKey);
   if (anyApp && (!appId || !appSlug || !appPrivateKey)) {
     throw new Error(
       "GitHub App integration requires GITHUB_APP_ID, GITHUB_APP_SLUG, and GITHUB_APP_PRIVATE_KEY together.",
     );
+  }
+  if (anyApp && !webhookSecret) {
+    throw new Error("GitHub App integration requires GITHUB_WEBHOOK_SECRET.");
   }
 
   return {
@@ -52,9 +56,7 @@ export function loadHostedConfig(env: NodeJS.ProcessEnv = process.env): HostedCo
       clientId: need("GITHUB_CLIENT_ID"),
       clientSecret: need("GITHUB_CLIENT_SECRET"),
       apiBase: (env.GITHUB_API_BASE ?? "https://api.github.com").replace(/\/$/, ""),
-      ...(env.GITHUB_WEBHOOK_SECRET?.trim() && {
-        webhookSecret: env.GITHUB_WEBHOOK_SECRET.trim(),
-      }),
+      ...(webhookSecret && { webhookSecret }),
     },
     ...(appId &&
       appSlug &&

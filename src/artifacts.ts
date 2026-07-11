@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -15,6 +18,7 @@ export interface ArtifactStorage {
   createUploadUrl(key: string, contentType: string): Promise<string | null>;
   createDownloadUrl(key: string): Promise<string | null>;
   put(key: string, body: Uint8Array): Promise<void>;
+  putStream?(key: string, body: ReadableStream<Uint8Array>, expectedSize: number): Promise<boolean>;
   get(key: string, range?: { start: number; end: number }): Promise<Uint8Array>;
   exists(key: string, expectedSize: number): Promise<boolean>;
   delete(key: string): Promise<void>;
@@ -53,9 +57,47 @@ export class LocalArtifactStorage implements ArtifactStorage {
     await writeFile(path, body);
   }
 
+  async putStream(
+    key: string,
+    body: ReadableStream<Uint8Array>,
+    expectedSize: number,
+  ): Promise<boolean> {
+    const path = this.path(key);
+    await mkdir(dirname(path), { recursive: true });
+    let received = 0;
+    const count = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        received += chunk.byteLength;
+        callback(
+          received > expectedSize ? new Error("Artifact exceeds its declared size.") : null,
+          chunk,
+        );
+      },
+    });
+    try {
+      await pipeline(Readable.fromWeb(body), count, createWriteStream(path));
+      if (received === expectedSize) return true;
+    } catch (error) {
+      await rm(path, { force: true });
+      if (received > expectedSize) return false;
+      throw error;
+    }
+    await rm(path, { force: true });
+    return false;
+  }
+
   async get(key: string, range?: { start: number; end: number }): Promise<Uint8Array> {
-    const bytes = await readFile(this.path(key));
-    return range ? bytes.subarray(range.start, range.end + 1) : bytes;
+    const path = this.path(key);
+    if (!range) return readFile(path);
+    const length = range.end - range.start + 1;
+    const bytes = Buffer.allocUnsafe(length);
+    const file = await open(path, "r");
+    try {
+      const { bytesRead } = await file.read(bytes, 0, length, range.start);
+      return bytes.subarray(0, bytesRead);
+    } finally {
+      await file.close();
+    }
   }
 
   async exists(key: string, expectedSize: number): Promise<boolean> {

@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
-import type { HostedConfig } from "../src/hosted/config.js";
+import { type HostedConfig, loadHostedConfig } from "../src/hosted/config.js";
 import type { GitHubAppClient } from "../src/hosted/github-app.js";
 import type { GitHubClient } from "../src/hosted/github.js";
 import { decodeSession, encodeSession } from "../src/hosted/session.js";
@@ -48,6 +48,38 @@ describe("sessions", () => {
       "s",
     );
     expect(decodeSession(old, "s")).toBeNull();
+  });
+});
+
+describe("hosted configuration", () => {
+  const base = {
+    COVALLABY_HOSTED: "1",
+    COVALLABY_SESSION_SECRET: "session",
+    GITHUB_CLIENT_ID: "client",
+    GITHUB_CLIENT_SECRET: "oauth-secret",
+  };
+
+  it("rejects a GitHub App without a webhook secret", () => {
+    expect(() =>
+      loadHostedConfig({
+        ...base,
+        GITHUB_APP_ID: "123",
+        GITHUB_APP_SLUG: "covallaby-cloud",
+        GITHUB_APP_PRIVATE_KEY: "private-key",
+      }),
+    ).toThrow("GITHUB_WEBHOOK_SECRET");
+  });
+
+  it("loads a complete GitHub App configuration", () => {
+    expect(
+      loadHostedConfig({
+        ...base,
+        GITHUB_APP_ID: "123",
+        GITHUB_APP_SLUG: "covallaby-cloud",
+        GITHUB_APP_PRIVATE_KEY: "private-key",
+        GITHUB_WEBHOOK_SECRET: "webhook-secret",
+      })?.githubApp?.appId,
+    ).toBe("123");
   });
 });
 

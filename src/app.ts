@@ -558,6 +558,17 @@ export function createApp({
     if (!found || !artifact) return c.json({ ok: false, error: "Unknown artifact." }, 404);
     if (!(await uploadAuthorized(found.run.repo, bearer(c.req.header("authorization")))))
       return c.json({ ok: false, error: "Invalid upload token." }, 401);
+    const stream = c.req.raw.body;
+    if (artifactStorage!.putStream && stream) {
+      const matches = await artifactStorage!.putStream(
+        artifact.objectKey,
+        stream,
+        artifact.sizeBytes,
+      );
+      if (!matches)
+        return c.json({ ok: false, error: "Artifact size does not match its manifest." }, 400);
+      return c.json({ ok: true });
+    }
     const bytes = new Uint8Array(await c.req.arrayBuffer());
     if (bytes.byteLength !== artifact.sizeBytes)
       return c.json({ ok: false, error: "Artifact size does not match its manifest." }, 400);
@@ -650,9 +661,9 @@ export function createApp({
     c.header("Cache-Control", "private, max-age=300");
     if (range) {
       c.header("Content-Range", `bytes ${range.start}-${range.end}/${artifact.sizeBytes}`);
-      return c.body(Uint8Array.from(bytes).buffer, 206);
+      return c.body(bytes as Uint8Array<ArrayBuffer>, 206);
     }
-    return c.body(Uint8Array.from(bytes).buffer);
+    return c.body(bytes as Uint8Array<ArrayBuffer>);
   });
 
   app.get("/api/v1/repos", async (c) =>
