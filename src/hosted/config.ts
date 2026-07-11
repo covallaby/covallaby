@@ -11,6 +11,8 @@ export interface HostedConfig {
     clientSecret: string;
     /** api.github.com by default; a GHES base for self-hosted GitHub. */
     apiBase: string;
+    /** GitHub App webhook secret. Enables PR-aware artifact retention. */
+    webhookSecret?: string;
   };
 }
 
@@ -34,6 +36,9 @@ export function loadHostedConfig(env: NodeJS.ProcessEnv = process.env): HostedCo
       clientId: need("GITHUB_CLIENT_ID"),
       clientSecret: need("GITHUB_CLIENT_SECRET"),
       apiBase: (env.GITHUB_API_BASE ?? "https://api.github.com").replace(/\/$/, ""),
+      ...(env.GITHUB_WEBHOOK_SECRET?.trim() && {
+        webhookSecret: env.GITHUB_WEBHOOK_SECRET.trim(),
+      }),
     },
   };
 }

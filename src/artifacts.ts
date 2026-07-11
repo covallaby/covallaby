@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
@@ -16,6 +17,7 @@ export interface ArtifactStorage {
   put(key: string, body: Uint8Array): Promise<void>;
   get(key: string, range?: { start: number; end: number }): Promise<Uint8Array>;
   exists(key: string, expectedSize: number): Promise<boolean>;
+  delete(key: string): Promise<void>;
 }
 
 export function artifactObjectKey(repo: string, runId: number, name: string): string {
@@ -62,6 +64,10 @@ export class LocalArtifactStorage implements ArtifactStorage {
     } catch {
       return false;
     }
+  }
+
+  async delete(key: string): Promise<void> {
+    await rm(this.path(key), { force: true });
   }
 }
 
@@ -110,6 +116,10 @@ export class S3ArtifactStorage implements ArtifactStorage {
     } catch {
       return false;
     }
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
   }
 }
 

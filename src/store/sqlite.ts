@@ -499,6 +499,11 @@ export class SqliteStore implements Store {
     return rows.map(toTestRun);
   }
 
+  async deleteTestRun(id: number): Promise<void> {
+    this.db.prepare("DELETE FROM test_artifacts WHERE run_id = ?").run(id);
+    this.db.prepare("DELETE FROM test_runs WHERE id = ?").run(id);
+  }
+
   async close(): Promise<void> {
     this.db.close();
   }

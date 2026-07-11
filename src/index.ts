@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { createApp, ensureUploadToken } from "./app.js";
 import { openArtifactStorage } from "./artifacts.js";
 import { loadHostedConfig } from "./hosted/index.js";
+import { loadArtifactRetention } from "./retention.js";
 import { attachDashboard } from "./static-node.js";
 import { openStore } from "./store.js";
 
@@ -10,11 +11,13 @@ const uploadToken = await ensureUploadToken(store, process.env.COVALLABY_TOKEN);
 const viewToken = process.env.COVALLABY_VIEW_TOKEN?.trim();
 const hosted = loadHostedConfig(); // null unless COVALLABY_HOSTED=1
 const artifactStorage = openArtifactStorage();
+const artifactRetention = loadArtifactRetention();
 
 const app = createApp({
   store,
   uploadToken,
   artifactStorage,
+  artifactRetention,
   ...(viewToken && { viewToken }),
   ...(hosted && { hosted }),
 });

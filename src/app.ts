@@ -10,6 +10,7 @@ import {
   parsePolicy,
   renderStatusBadge,
 } from "./policy.js";
+import { type ArtifactRetentionConfig, cleanupRepoArtifacts } from "./retention.js";
 import type { Store, UploadRow } from "./store.js";
 import type { TestArtifactKind } from "./store.js";
 import { renderBadge } from "./vendor/badge.js";
@@ -36,6 +37,7 @@ export interface AppOptions {
   hostedDeps?: HostedDeps;
   /** Binary storage for Playwright videos, traces, screenshots, and reports. */
   artifactStorage?: ArtifactStorage;
+  artifactRetention?: ArtifactRetentionConfig;
 }
 
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
@@ -294,6 +296,7 @@ export function createApp({
   hosted,
   hostedDeps,
   artifactStorage,
+  artifactRetention,
 }: AppOptions): Hono<AppEnv> {
   // Sliding-window upload rate limit, keyed by presented token.
   const uploadWindows = new Map<string, number[]>();
@@ -578,6 +581,14 @@ export function createApp({
         409,
       );
     const run = await store.completeTestRun!(found.run.id);
+    if (artifactRetention && store.deleteTestRun) {
+      try {
+        await cleanupRepoArtifacts(store, artifactStorage!, found.run.repo, artifactRetention);
+      } catch (error) {
+        // Maintenance must never turn a successfully uploaded run into a CI failure.
+        console.error(`Artifact cleanup failed for ${found.run.repo}:`, error);
+      }
+    }
     return c.json({ ok: true, run, url: `/r/${found.run.repo}/test-runs/${found.run.id}` });
   });
 

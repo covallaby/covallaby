@@ -1,4 +1,6 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Hono } from "hono";
+import { recordPRRetentionState, recordRepoRetentionState } from "../retention.js";
 import type { Store } from "../store.js";
 import { authRoutes, currentSession } from "./auth.js";
 import { billingRoutes } from "./billing.js";
@@ -34,6 +36,45 @@ export function mountHosted(
   app.route("/", authRoutes(config, github));
   app.route("/", billingRoutes(config, store));
 
+  if (config.github.webhookSecret) {
+    app.post("/api/v1/github/webhook", async (c) => {
+      const body = await c.req.text();
+      const supplied = c.req.header("x-hub-signature-256") ?? "";
+      const expected = `sha256=${createHmac("sha256", config.github.webhookSecret!).update(body).digest("hex")}`;
+      const a = Buffer.from(supplied);
+      const b = Buffer.from(expected);
+      if (a.length !== b.length || !timingSafeEqual(a, b)) {
+        return c.json({ ok: false, error: "Invalid GitHub webhook signature." }, 401);
+      }
+      let payload: {
+        action?: string;
+        number?: number;
+        pull_request?: { closed_at?: string | null };
+        repository?: { full_name?: string; default_branch?: string };
+      };
+      try {
+        payload = JSON.parse(body);
+      } catch {
+        return c.json({ ok: false, error: "Invalid GitHub webhook payload." }, 400);
+      }
+      const repo = payload.repository?.full_name;
+      if (repo && payload.repository?.default_branch) {
+        await recordRepoRetentionState(store, repo, payload.repository.default_branch);
+      }
+      if (repo && payload.number && payload.pull_request) {
+        const open = payload.action !== "closed";
+        await recordPRRetentionState(
+          store,
+          repo,
+          payload.number,
+          open,
+          open ? null : (payload.pull_request.closed_at ?? new Date().toISOString()),
+        );
+      }
+      return c.json({ ok: true });
+    });
+  }
+
   // Read gate: browsing endpoints require a session; scope them to the user's
   // accounts. Uploads, badges, health, auth, and the SPA shell are exempt.
   app.use("/api/v1/*", async (c, next) => {
@@ -41,6 +82,7 @@ export function mountHosted(
     const artifactWrite = c.req.method !== "GET" && path.startsWith("/api/v1/test-runs");
     const open =
       path === "/api/v1/upload" ||
+      path === "/api/v1/github/webhook" ||
       artifactWrite ||
       path.startsWith("/api/v1/billing/") ||
       path === "/api/v1/me";

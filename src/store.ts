@@ -163,6 +163,7 @@ export interface Store {
   failTestRun?(id: number): Promise<void>;
   getTestRun?(id: number): Promise<{ run: TestRunRow; artifacts: TestArtifactRow[] } | null>;
   listTestRuns?(repo: string, limit: number): Promise<TestRunRow[]>;
+  deleteTestRun?(id: number): Promise<void>;
   close(): Promise<void>;
 }
 

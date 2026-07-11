@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import type { HostedConfig } from "../src/hosted/config.js";
@@ -107,5 +108,42 @@ describe("self-hosted mode is unaffected", () => {
       body: lcov,
     });
     expect((await app.request("/api/v1/repos")).status).toBe(200);
+  });
+});
+
+describe("GitHub App retention webhooks", () => {
+  const store = new SqliteStore(":memory:");
+  const webhookConfig: HostedConfig = {
+    ...config,
+    github: { ...config.github, webhookSecret: "hook-secret" },
+  };
+  const app = createApp({
+    store,
+    uploadToken: "up",
+    hosted: webhookConfig,
+    hostedDeps: { github: fakeGitHub },
+  });
+  const payload = JSON.stringify({
+    action: "closed",
+    number: 42,
+    pull_request: { closed_at: "2026-07-01T00:00:00Z" },
+    repository: { full_name: "acme/app", default_branch: "trunk" },
+  });
+  const signature = `sha256=${createHmac("sha256", "hook-secret").update(payload).digest("hex")}`;
+
+  it("rejects unsigned events and records signed PR/default-branch state", async () => {
+    expect(
+      (await app.request("/api/v1/github/webhook", { method: "POST", body: payload })).status,
+    ).toBe(401);
+    const accepted = await app.request("/api/v1/github/webhook", {
+      method: "POST",
+      headers: { "x-hub-signature-256": signature },
+      body: payload,
+    });
+    expect(accepted.status).toBe(200);
+    expect(await store.getMeta("artifact-retention:repo:acme/app")).toContain(
+      '"defaultBranch":"trunk"',
+    );
+    expect(await store.getMeta("artifact-retention:pr:acme/app:42")).toContain('"open":false');
   });
 });

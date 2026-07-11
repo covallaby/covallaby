@@ -397,6 +397,10 @@ export class PostgresStore implements Store {
     return rows.map(toTestRun);
   }
 
+  async deleteTestRun(id: number): Promise<void> {
+    await this.sql`DELETE FROM test_runs WHERE id = ${id}`;
+  }
+
   async close(): Promise<void> {
     await this.sql.end({ timeout: 2 });
   }

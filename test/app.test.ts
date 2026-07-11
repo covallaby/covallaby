@@ -68,6 +68,9 @@ describe("browser test artifacts", () => {
     async exists(key: string, size: number) {
       return this.objects.get(key)?.byteLength === size;
     }
+    async delete(key: string) {
+      this.objects.delete(key);
+    }
   }
   const artifactStore = new MemoryArtifacts();
   const artifactDb = new SqliteStore(":memory:");

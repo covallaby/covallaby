@@ -117,6 +117,9 @@ Everything is optional:
 | `COVALLABY_ARTIFACTS_DIR` | Local browser-artifact directory when no bucket is configured. Put this on a persistent volume. | `data/artifacts` |
 | `AWS_ENDPOINT_URL_S3` / `AWS_REGION` | S3-compatible endpoint and region (Tigris, R2, MinIO, AWS S3). | AWS defaults |
 | `COVALLABY_S3_PATH_STYLE` | Set `1` for providers such as MinIO that require path-style bucket URLs. | unset |
+| `COVALLABY_ARTIFACT_RETENTION_DAYS` | Days to retain ordinary browser runs and closed-PR runs. | `30` |
+| `COVALLABY_KEEP_LATEST_DEFAULT_BRANCH` | Always preserve the latest completed run on the repository default branch. | `true` |
+| `COVALLABY_KEEP_LATEST_UNKNOWN_PRS` | Preserve the latest run for PRs whose state is unavailable. | `true` |
 | `COVALLABY_HOSTED` | `1` turns on the multi-tenant hosted tier (GitHub sign-in + per-account scoping). Requires the GitHub OAuth + session env below. | unset (single-tenant) |
 
 ## API
@@ -186,6 +189,21 @@ Self-hosters get the same feature with local disk by default. For production,
 configure any private S3-compatible bucket; CI uploads large files directly to
 the bucket, so they do not pass through the Covallaby process.
 
+### Artifact retention
+
+Ordinary browser runs are retained for 30 days by default. The latest completed
+run on the repository default branch is always preserved. Hosted installations
+with `GITHUB_WEBHOOK_SECRET` also preserve the latest run for every open PR;
+when a PR closes, its latest run receives a fresh 30-day grace period. Configure
+the GitHub App webhook URL as `/api/v1/github/webhook` and subscribe to **Pull
+request** events. Signatures are verified before retention state is recorded.
+
+Unknown PRs are treated as open so a missed webhook cannot erase useful
+evidence. Self-hosters without GitHub can keep that safe default or set
+`COVALLABY_KEEP_LATEST_UNKNOWN_PRS=false` for strict time-based cleanup.
+Cleanup runs after successful browser-run uploads; object storage and database
+metadata are removed together.
+
 ## Hosted / multi-tenant mode (optional)
 
 The same binary runs a multi-tenant hosted product when `COVALLABY_HOSTED=1`.
@@ -202,6 +220,7 @@ Required in hosted mode:
 | `COVALLABY_SESSION_SECRET` | Random secret signing session cookies |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | A GitHub OAuth app |
 | `GITHUB_API_BASE` | Optional — a GHES API base for self-hosted GitHub |
+| `GITHUB_WEBHOOK_SECRET` | Optional GitHub App webhook secret; enables GitHub-aware artifact retention. |
 
 Billing is optional even in hosted mode — set the Stripe env to enable the Pro
 plan, omit it and everything is `free`:
