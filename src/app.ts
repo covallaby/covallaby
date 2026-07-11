@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { type ArtifactStorage, artifactObjectKey } from "./artifacts.js";
 import { type AppEnv, type HostedConfig, type HostedDeps, mountHosted } from "./hosted/index.js";
@@ -38,12 +38,18 @@ export interface AppOptions {
   /** Binary storage for Playwright videos, traces, screenshots, and reports. */
   artifactStorage?: ArtifactStorage;
   artifactRetention?: ArtifactRetentionConfig;
+  /** Separate origin used to execute untrusted Storybook builds safely. */
+  storybookPreviewBaseUrl?: string;
+  storybookPreviewSecret?: string;
 }
 
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_ARTIFACT_BYTES = 500 * 1024 * 1024;
 const MAX_RUN_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_STORYBOOK_FILES = 2_000;
+const MAX_STORYBOOK_FILE_BYTES = 100 * 1024 * 1024;
+const MAX_STORYBOOK_BYTES = 1024 * 1024 * 1024;
 const ARTIFACT_KINDS = new Set<TestArtifactKind>([
   "video",
   "screenshot",
@@ -297,6 +303,8 @@ export function createApp({
   hostedDeps,
   artifactStorage,
   artifactRetention,
+  storybookPreviewBaseUrl,
+  storybookPreviewSecret = uploadToken,
 }: AppOptions): Hono<AppEnv> {
   // Sliding-window upload rate limit, keyed by presented token.
   const uploadWindows = new Map<string, number[]>();
@@ -319,7 +327,27 @@ export function createApp({
     const match = /^Bearer\s+(.+)$/.exec(header ?? "");
     return match ? match[1]!.trim() : null;
   };
-
+  const previewBase = storybookPreviewBaseUrl?.replace(/\/+$/, "");
+  const previewOrigin = previewBase ? new URL(previewBase).origin : null;
+  const previewHost = previewBase ? new URL(previewBase).host.toLowerCase() : null;
+  if (hosted && previewOrigin === new URL(hosted.baseUrl).origin) {
+    throw new Error("COVALLABY_PREVIEW_BASE_URL must use a separate origin from Covallaby.");
+  }
+  const previewToken = (id: number, expires: number) =>
+    `${expires}.${createHmac("sha256", storybookPreviewSecret)
+      .update(`storybook-preview:${id}:${expires}`)
+      .digest("base64url")}`;
+  const validPreviewToken = (id: number, supplied: string): boolean => {
+    const expires = Number(supplied.split(".", 1)[0]);
+    if (!Number.isSafeInteger(expires) || expires < Math.floor(Date.now() / 1000)) return false;
+    return tokenEquals(supplied, previewToken(id, expires));
+  };
+  const previewPath = (raw: unknown): string | null => {
+    if (typeof raw !== "string" || raw.length === 0 || raw.length > 500) return null;
+    if (raw.startsWith("/") || raw.includes("\\") || raw.includes("\0")) return null;
+    const parts = raw.split("/");
+    return parts.some((part) => !part || part === "." || part === "..") ? null : raw;
+  };
   // Hosted tier (opt-in): sign-in, billing, and per-account read scoping.
   // Mounted before the API routes so its gate runs first. Off in self-hosted.
   if (hosted) mountHosted(app, store, hosted, hostedDeps);
@@ -329,8 +357,11 @@ export function createApp({
     if (!viewToken) return next();
     const path = c.req.path;
     // Exact match — startsWith would leak /api/v1/uploads/:id past the gate.
-    const artifactWrite = c.req.method !== "GET" && path.startsWith("/api/v1/test-runs");
-    if (path === "/healthz" || path === "/api/v1/upload" || artifactWrite) return next();
+    const artifactWrite =
+      c.req.method !== "GET" &&
+      (path.startsWith("/api/v1/test-runs") || path.startsWith("/api/v1/storybook-previews"));
+    if (path === "/healthz" || path === "/api/v1/upload" || path.startsWith("/p/") || artifactWrite)
+      return next();
     const provided =
       bearer(c.req.header("authorization")) ??
       c.req.query("token") ??
@@ -447,6 +478,8 @@ export function createApp({
     store.completeTestRun &&
     store.getTestRun &&
     store.listTestRuns;
+  const previewReady = () =>
+    artifactReady() && previewBase && store.getTestRunRow && store.getTestArtifactByName;
   const uploadAuthorized = async (repo: string, token: string | null): Promise<boolean> => {
     if (!token) return false;
     const repoToken = await store.getRepoToken(repo);
@@ -498,6 +531,7 @@ export function createApp({
         !name ||
         !kind ||
         !contentType ||
+        /[\r\n]/.test(contentType) ||
         !Number.isSafeInteger(sizeBytes) ||
         sizeBytes < 0 ||
         sizeBytes > MAX_ARTIFACT_BYTES
@@ -666,6 +700,217 @@ export function createApp({
       c.header("Content-Range", `bytes ${range.start}-${range.end}/${artifact.sizeBytes}`);
       return c.body(bytes as Uint8Array<ArrayBuffer>, 206);
     }
+    return c.body(bytes as Uint8Array<ArrayBuffer>);
+  });
+
+  app.post("/api/v1/storybook-previews", async (c) => {
+    if (!previewReady())
+      return c.json(
+        { ok: false, error: "Storybook preview hosting is not configured on this server." },
+        503,
+      );
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ ok: false, error: "Body must be a JSON Storybook manifest." }, 400);
+    }
+    const repo = typeof body.repo === "string" ? body.repo : "";
+    if (!REPO_RE.test(repo)) return c.json({ ok: false, error: "Pass repo as owner/name." }, 400);
+    if (!(await uploadAuthorized(repo, bearer(c.req.header("authorization"))))) {
+      return c.json({ ok: false, error: "Invalid upload token for this repository." }, 401);
+    }
+    const rawFiles = Array.isArray(body.files) ? body.files : [];
+    if (rawFiles.length === 0 || rawFiles.length > MAX_STORYBOOK_FILES) {
+      return c.json(
+        { ok: false, error: `A Storybook preview must contain 1–${MAX_STORYBOOK_FILES} files.` },
+        400,
+      );
+    }
+    const files: Array<{ path: string; contentType: string; sizeBytes: number }> = [];
+    const seen = new Set<string>();
+    let totalBytes = 0;
+    for (const item of rawFiles) {
+      if (!item || typeof item !== "object")
+        return c.json({ ok: false, error: "Every preview file must be an object." }, 400);
+      const raw = item as Record<string, unknown>;
+      const path = previewPath(raw.path);
+      const contentType =
+        typeof raw.contentType === "string" ? raw.contentType.trim().slice(0, 120) : "";
+      const sizeBytes = Number(raw.sizeBytes);
+      if (
+        !path ||
+        !contentType ||
+        /[\r\n]/.test(contentType) ||
+        seen.has(path) ||
+        !Number.isSafeInteger(sizeBytes) ||
+        sizeBytes < 0 ||
+        sizeBytes > MAX_STORYBOOK_FILE_BYTES
+      ) {
+        return c.json({ ok: false, error: "Preview path, content type, or size is invalid." }, 400);
+      }
+      seen.add(path);
+      totalBytes += sizeBytes;
+      files.push({ path, contentType, sizeBytes });
+    }
+    if (!seen.has("index.html"))
+      return c.json({ ok: false, error: "The Storybook build must contain index.html." }, 400);
+    if (totalBytes > MAX_STORYBOOK_BYTES)
+      return c.json({ ok: false, error: "Storybook preview exceeds the 1 GB limit." }, 413);
+
+    const run = await store.createTestRun!({
+      repo,
+      branch: typeof body.branch === "string" ? body.branch.slice(0, 200) : "main",
+      commit: typeof body.commit === "string" ? body.commit.slice(0, 64) : "unknown",
+      pr: Number.isSafeInteger(Number(body.pr)) && Number(body.pr) > 0 ? Number(body.pr) : null,
+      framework: "storybook",
+      testsPassed: 0,
+      testsFailed: 0,
+      testsSkipped: 0,
+      durationMs: 0,
+    });
+    const origin = new URL(c.req.url).origin;
+    const artifacts = await Promise.all(
+      files.map(async (file) => {
+        const objectKey = artifactObjectKey(repo, run.id, file.path);
+        const artifact = await store.createTestArtifact!({
+          runId: run.id,
+          objectKey,
+          name: file.path,
+          kind: file.path.endsWith(".html") ? "report" : "other",
+          contentType: file.contentType,
+          sizeBytes: file.sizeBytes,
+          testName: null,
+        });
+        const signed = await artifactStorage!.createUploadUrl(objectKey, file.contentType);
+        return {
+          path: file.path,
+          uploadUrl:
+            signed ??
+            `${origin}/api/v1/storybook-previews/${run.id}/artifacts/${artifact.id}/content`,
+        };
+      }),
+    );
+    return c.json(
+      { ok: true, run, artifacts, url: `/r/${repo}/storybook-previews/${run.id}` },
+      201,
+    );
+  });
+
+  app.put("/api/v1/storybook-previews/:runId/artifacts/:artifactId/content", async (c) => {
+    if (!previewReady() || artifactStorage!.kind !== "local") return c.notFound();
+    const found = await store.getTestRun!(Number(c.req.param("runId")));
+    const artifact = found?.artifacts.find((item) => item.id === Number(c.req.param("artifactId")));
+    if (!found || found.run.framework !== "storybook" || !artifact) return c.notFound();
+    if (!(await uploadAuthorized(found.run.repo, bearer(c.req.header("authorization")))))
+      return c.json({ ok: false, error: "Invalid upload token." }, 401);
+    const stream = c.req.raw.body;
+    if (artifactStorage!.putStream && stream) {
+      const matches = await artifactStorage!.putStream(
+        artifact.objectKey,
+        stream,
+        artifact.sizeBytes,
+      );
+      return matches
+        ? c.json({ ok: true })
+        : c.json({ ok: false, error: "Preview file size does not match its manifest." }, 400);
+    }
+    const bytes = new Uint8Array(await c.req.arrayBuffer());
+    if (bytes.byteLength !== artifact.sizeBytes)
+      return c.json({ ok: false, error: "Preview file size does not match its manifest." }, 400);
+    await artifactStorage!.put(artifact.objectKey, bytes);
+    return c.json({ ok: true });
+  });
+
+  app.post("/api/v1/storybook-previews/:id/complete", async (c) => {
+    if (!previewReady()) return c.notFound();
+    const found = await store.getTestRun!(Number(c.req.param("id")));
+    if (!found || found.run.framework !== "storybook") return c.notFound();
+    if (!(await uploadAuthorized(found.run.repo, bearer(c.req.header("authorization")))))
+      return c.json({ ok: false, error: "Invalid upload token." }, 401);
+    const checks = await Promise.all(
+      found.artifacts.map((artifact) =>
+        artifactStorage!.exists(artifact.objectKey, artifact.sizeBytes),
+      ),
+    );
+    if (checks.some((exists) => !exists))
+      return c.json({ ok: false, error: "One or more preview files are missing." }, 409);
+    const run = await store.completeTestRun!(found.run.id);
+    if (artifactRetention && store.deleteTestRun) {
+      try {
+        await cleanupRepoArtifacts(store, artifactStorage!, found.run.repo, artifactRetention);
+      } catch (error) {
+        console.error(`Artifact cleanup failed for ${found.run.repo}:`, error);
+      }
+    }
+    return c.json({
+      ok: true,
+      run,
+      url: `/r/${found.run.repo}/storybook-previews/${found.run.id}`,
+    });
+  });
+
+  app.get("/api/v1/repos/:owner/:name/storybook-previews", async (c) => {
+    if (!previewReady()) return c.json({ previews: [] });
+    const runs = await store.listTestRuns!(`${c.req.param("owner")}/${c.req.param("name")}`, 200);
+    return c.json({ previews: runs.filter((run) => run.framework === "storybook").slice(0, 50) });
+  });
+
+  app.get("/api/v1/storybook-previews/:id", async (c) => {
+    if (!previewReady()) return c.notFound();
+    const run = await store.getTestRunRow!(Number(c.req.param("id")));
+    if (!run || run.framework !== "storybook") return c.notFound();
+    const token = previewToken(run.id, Math.floor(Date.now() / 1000) + 3600);
+    return c.json({
+      run,
+      previewUrl: `${previewBase}/p/${run.id}/index.html?preview_token=${encodeURIComponent(token)}`,
+    });
+  });
+
+  app.get("/p/:id/*", async (c) => {
+    // Match the externally visible host, not the request scheme. TLS commonly
+    // terminates at a reverse proxy, so the app may see an http URL for an
+    // externally https request. The Host header remains the origin boundary.
+    const requestHost = (c.req.header("host") ?? new URL(c.req.url).host).toLowerCase();
+    if (!previewReady() || requestHost !== previewHost) return c.notFound();
+    const id = Number(c.req.param("id"));
+    if (!Number.isSafeInteger(id) || id <= 0) return c.notFound();
+    const supplied =
+      c.req.query("preview_token") ??
+      /(?:^|;\s*)covallaby_preview=([^;]+)/.exec(c.req.header("cookie") ?? "")?.[1] ??
+      "";
+    if (!validPreviewToken(id, supplied)) return c.text("Preview link expired or is invalid.", 401);
+    const run = await store.getTestRunRow!(id);
+    if (!run || run.framework !== "storybook" || run.status !== "complete") return c.notFound();
+    let requestedPath: string;
+    try {
+      requestedPath = decodeURIComponent(c.req.path.slice(`/p/${id}/`.length));
+    } catch {
+      return c.notFound();
+    }
+    const path = previewPath(requestedPath);
+    if (!path) return c.notFound();
+    const artifact = await store.getTestArtifactByName!(id, path);
+    if (!artifact) return c.notFound();
+    if (c.req.query("preview_token")) {
+      const securePreview = previewOrigin!.startsWith("https://");
+      const cookiePolicy = securePreview ? "SameSite=None; Secure" : "SameSite=Lax";
+      c.header(
+        "Set-Cookie",
+        `covallaby_preview=${supplied}; Path=/p/${id}/; HttpOnly; ${cookiePolicy}; Max-Age=3600`,
+      );
+      // Exchange the query token for the scoped cookie immediately so it does
+      // not remain in browser history, referrers, analytics, or access logs.
+      return c.redirect(c.req.path, 302);
+    }
+    const bytes = await artifactStorage!.get(artifact.objectKey);
+    c.header("Content-Type", artifact.contentType);
+    c.header("Content-Length", String(bytes.byteLength));
+    c.header(
+      "Cache-Control",
+      artifact.contentType.startsWith("text/html") ? "private, no-store" : "private, max-age=3600",
+    );
+    c.header("X-Content-Type-Options", "nosniff");
     return c.body(bytes as Uint8Array<ArrayBuffer>);
   });
 

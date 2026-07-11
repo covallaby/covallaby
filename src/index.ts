@@ -18,6 +18,12 @@ const app = createApp({
   uploadToken,
   artifactStorage,
   artifactRetention,
+  ...(process.env.COVALLABY_PREVIEW_BASE_URL?.trim() && {
+    storybookPreviewBaseUrl: process.env.COVALLABY_PREVIEW_BASE_URL.trim(),
+  }),
+  ...(process.env.COVALLABY_PREVIEW_SECRET?.trim() && {
+    storybookPreviewSecret: process.env.COVALLABY_PREVIEW_SECRET.trim(),
+  }),
   ...(viewToken && { viewToken }),
   ...(hosted && { hosted }),
 });

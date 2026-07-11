@@ -78,6 +78,8 @@ describe("browser test artifacts", () => {
     store: artifactDb,
     uploadToken: "sekret",
     artifactStorage: artifactStore,
+    storybookPreviewBaseUrl: "https://previews.test",
+    storybookPreviewSecret: "preview-secret",
   });
   const manifest = {
     repo: "acme/app",
@@ -164,6 +166,100 @@ describe("browser test artifacts", () => {
     });
     expect(invalidRange.status).toBe(416);
     expect(invalidRange.headers.get("content-range")).toBe("bytes */4");
+  });
+
+  it("hosts a complete Storybook build on the isolated preview origin", async () => {
+    const manifest = {
+      repo: "acme/app",
+      branch: "feature/components",
+      commit: "decaf42",
+      pr: 12,
+      files: [
+        { path: "index.html", contentType: "text/html", sizeBytes: 30 },
+        { path: "assets/app.js", contentType: "text/javascript", sizeBytes: 17 },
+      ],
+    };
+    const created = await artifactApp.request("/api/v1/storybook-previews", {
+      method: "POST",
+      headers: { authorization: "Bearer sekret", "content-type": "application/json" },
+      body: JSON.stringify(manifest),
+    });
+    expect(created.status).toBe(201);
+    const data = await created.json();
+    const bodies = ["<h1>Component library</h1>okay", "console.log('hi')"];
+    for (const [index, artifact] of data.artifacts.entries()) {
+      const uploaded = await artifactApp.request(new URL(artifact.uploadUrl).pathname, {
+        method: "PUT",
+        headers: { authorization: "Bearer sekret" },
+        body: bodies[index],
+      });
+      expect(uploaded.status).toBe(200);
+    }
+    const completed = await artifactApp.request(
+      `/api/v1/storybook-previews/${data.run.id}/complete`,
+      { method: "POST", headers: { authorization: "Bearer sekret" } },
+    );
+    expect(completed.status).toBe(200);
+
+    const detail = await (
+      await artifactApp.request(`/api/v1/storybook-previews/${data.run.id}`)
+    ).json();
+    expect(detail.previewUrl).toMatch(
+      new RegExp(`^https://previews\\.test/p/${data.run.id}/index\\.html\\?preview_token=`),
+    );
+    const tokenExchange = await artifactApp.request(detail.previewUrl);
+    expect(tokenExchange.status).toBe(302);
+    expect(tokenExchange.headers.get("location")).toBe(`/p/${data.run.id}/index.html`);
+    expect(tokenExchange.headers.get("location")).not.toContain("preview_token");
+    expect(tokenExchange.headers.get("set-cookie")).toContain("SameSite=None; Secure");
+    const cookie = tokenExchange.headers.get("set-cookie")!.split(";")[0]!;
+    const index = await artifactApp.request(`https://previews.test/p/${data.run.id}/index.html`, {
+      headers: { cookie },
+    });
+    expect(index.status).toBe(200);
+    expect(index.headers.get("content-type")).toContain("text/html");
+    expect(index.headers.get("cache-control")).toBe("private, no-store");
+    expect(await index.text()).toContain("Component library");
+    const asset = await artifactApp.request(
+      `https://previews.test/p/${data.run.id}/assets/app.js`,
+      { headers: { cookie } },
+    );
+    expect(await asset.text()).toBe("console.log('hi')");
+    expect(asset.headers.get("cache-control")).toBe("private, max-age=3600");
+    const proxied = await artifactApp.request(
+      `http://internal-service/p/${data.run.id}/assets/app.js`,
+      { headers: { cookie, host: "previews.test" } },
+    );
+    expect(proxied.status).toBe(200);
+    expect(
+      (
+        await artifactApp.request(
+          `http://localhost/p/${data.run.id}/index.html?preview_token=not-relevant`,
+        )
+      ).status,
+    ).toBe(404);
+  });
+
+  it("rejects unsafe or incomplete Storybook manifests", async () => {
+    const response = await artifactApp.request("/api/v1/storybook-previews", {
+      method: "POST",
+      headers: { authorization: "Bearer sekret", "content-type": "application/json" },
+      body: JSON.stringify({
+        repo: "acme/app",
+        files: [{ path: "../index.html", contentType: "text/html", sizeBytes: 1 }],
+      }),
+    });
+    expect(response.status).toBe(400);
+
+    const badContentType = await artifactApp.request("/api/v1/storybook-previews", {
+      method: "POST",
+      headers: { authorization: "Bearer sekret", "content-type": "application/json" },
+      body: JSON.stringify({
+        repo: "acme/app",
+        files: [{ path: "index.html", contentType: "text/html\r\nx-bad: yes", sizeBytes: 1 }],
+      }),
+    });
+    expect(badContentType.status).toBe(400);
   });
 });
 

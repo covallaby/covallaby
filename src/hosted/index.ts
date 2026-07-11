@@ -165,7 +165,9 @@ export function mountHosted(
   // accounts. Uploads, badges, health, auth, and the SPA shell are exempt.
   app.use("/api/v1/*", async (c, next) => {
     const path = c.req.path;
-    const artifactWrite = c.req.method !== "GET" && path.startsWith("/api/v1/test-runs");
+    const artifactWrite =
+      c.req.method !== "GET" &&
+      (path.startsWith("/api/v1/test-runs") || path.startsWith("/api/v1/storybook-previews"));
     const open =
       path === "/api/v1/upload" ||
       path === "/api/v1/github/webhook" ||
@@ -191,10 +193,12 @@ export function mountHosted(
         return c.json({ ok: false, error: "Not found." }, 404);
       }
     }
-    const runMatch = /^\/api\/v1\/test-runs\/(\d+)/.exec(path);
-    if (runMatch && store.getTestRun) {
-      const found = await store.getTestRun(Number(runMatch[1]));
-      if (found && !canSeeAccount(found.run.repo.split("/")[0]!)) {
+    const runMatch = /^\/api\/v1\/(?:test-runs|storybook-previews)\/(\d+)/.exec(path);
+    if (runMatch && (store.getTestRunRow || store.getTestRun)) {
+      const run = store.getTestRunRow
+        ? await store.getTestRunRow(Number(runMatch[1]))
+        : (await store.getTestRun!(Number(runMatch[1])))?.run;
+      if (run && !canSeeAccount(run.repo.split("/")[0]!)) {
         return c.json({ ok: false, error: "Not found." }, 404);
       }
     }

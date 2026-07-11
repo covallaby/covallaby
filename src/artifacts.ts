@@ -145,8 +145,16 @@ export class S3ArtifactStorage implements ArtifactStorage {
   async put(): Promise<void> {
     throw new Error("S3 artifacts must use the presigned upload URL.");
   }
-  async get(): Promise<Uint8Array> {
-    throw new Error("S3 artifacts must use the signed download URL.");
+  async get(key: string, range?: { start: number; end: number }): Promise<Uint8Array> {
+    const result = await this.client.send(
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ...(range && { Range: `bytes=${range.start}-${range.end}` }),
+      }),
+    );
+    if (!result.Body) throw new Error(`Artifact ${key} has no body.`);
+    return result.Body.transformToByteArray();
   }
 
   async exists(key: string, expectedSize: number): Promise<boolean> {
