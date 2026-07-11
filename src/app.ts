@@ -637,7 +637,10 @@ export function createApp({
     let range: { start: number; end: number } | undefined;
     if (rangeHeader) {
       const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader);
-      if (!match) return c.body(null, 416);
+      if (!match) {
+        c.header("Content-Range", `bytes */${artifact.sizeBytes}`);
+        return c.body(null, 416);
+      }
       const start = match[1]
         ? Number(match[1])
         : Math.max(0, artifact.sizeBytes - Number(match[2]));

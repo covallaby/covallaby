@@ -159,6 +159,11 @@ describe("browser test artifacts", () => {
     expect(ranged.status).toBe(206);
     expect(ranged.headers.get("content-range")).toBe("bytes 1-2/4");
     expect(await ranged.text()).toBe("23");
+    const invalidRange = await artifactApp.request(detail.artifacts[0].url, {
+      headers: { range: "not-a-range" },
+    });
+    expect(invalidRange.status).toBe(416);
+    expect(invalidRange.headers.get("content-range")).toBe("bytes */4");
   });
 });
 

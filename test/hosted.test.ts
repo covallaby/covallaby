@@ -118,6 +118,13 @@ describe("hosted mode: auth + tenancy scoping", () => {
     expect(json.repos.some((r: { repo: string }) => r.repo === "bob/secret")).toBe(false);
   });
 
+  it("matches GitHub account names case-insensitively", async () => {
+    const res = await app.request("/api/v1/repos/acme/app/test-runs", {
+      headers: { cookie: session(["ACME"]) },
+    });
+    expect(res.status).toBe(200);
+  });
+
   it("404s a repo the user can't access", async () => {
     const mine = await app.request("/api/v1/repos/acme/app/history", {
       headers: { cookie: session(["acme"]) },

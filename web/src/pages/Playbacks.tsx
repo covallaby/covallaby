@@ -87,14 +87,13 @@ function ArtifactCard({ artifact }: { artifact: TestArtifact }) {
     return (
       <Card>
         <CardHeader title={artifact.testName || artifact.name} description="Browser recording" />
+        {/* biome-ignore lint/a11y/useMediaCaption: Playwright recordings do not include caption tracks. */}
         <video
           className="aspect-video w-full bg-black"
           controls
           preload="metadata"
           src={artifact.url}
-        >
-          <track kind="captions" />
-        </video>
+        />
       </Card>
     );
   if (artifact.kind === "screenshot")

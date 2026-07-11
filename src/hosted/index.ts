@@ -176,23 +176,25 @@ export function mountHosted(
 
     const session = currentSession(c.req.header("cookie"), config.sessionSecret);
     if (!session) return c.json({ ok: false, error: "Sign in to view coverage." }, 401);
+    const canSeeAccount = (owner: string) =>
+      session.accounts.some((account) => account.toLowerCase() === owner.toLowerCase());
 
     // For a repo-scoped route, enforce the repo's account is one the user can see.
     const repoMatch = /^\/api\/v1\/repos\/([^/]+)\/([^/]+)/.exec(path);
-    if (repoMatch && !session.accounts.includes(repoMatch[1]!)) {
+    if (repoMatch && !canSeeAccount(repoMatch[1]!)) {
       return c.json({ ok: false, error: "Not found." }, 404);
     }
     const uploadMatch = /^\/api\/v1\/uploads\/(\d+)/.exec(path);
     if (uploadMatch) {
       const found = await store.getUpload(Number(uploadMatch[1]));
-      if (found && !session.accounts.includes(found.row.repo.split("/")[0]!)) {
+      if (found && !canSeeAccount(found.row.repo.split("/")[0]!)) {
         return c.json({ ok: false, error: "Not found." }, 404);
       }
     }
     const runMatch = /^\/api\/v1\/test-runs\/(\d+)/.exec(path);
     if (runMatch && store.getTestRun) {
       const found = await store.getTestRun(Number(runMatch[1]));
-      if (found && !session.accounts.includes(found.run.repo.split("/")[0]!)) {
+      if (found && !canSeeAccount(found.run.repo.split("/")[0]!)) {
         return c.json({ ok: false, error: "Not found." }, 404);
       }
     }
