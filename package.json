@@ -19,7 +19,9 @@
     "verify": "pnpm lint && pnpm typecheck && pnpm build && pnpm test",
     "dev:web": "vite",
     "test:coverage": "vitest run --coverage --coverage.reporter=lcov --coverage.reporter=text-summary --coverage.include='src/**' --coverage.exclude='src/vendor/**'",
-    "build:demo": "vite build -c vite.demo.config.ts"
+    "build:demo": "vite build -c vite.demo.config.ts",
+    "storybook": "storybook dev -p 6006",
+    "build:storybook": "storybook build"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1084.0",
@@ -31,6 +33,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@storybook/addon-a11y": "^10.5.0",
+    "@storybook/react-vite": "^10.5.0",
     "@tailwindcss/vite": "^4.0.6",
     "@types/node": "^22",
     "@types/react": "^19.0.8",
@@ -41,6 +45,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.1.5",
+    "storybook": "^10.5.0",
     "tailwindcss": "^4.0.6",
     "typescript": "^5.7.3",
     "vite": "^6.1.0",

@@ -89,13 +89,22 @@ export const inkFor: Record<Severity, string> = {
 };
 
 /** Severity meter: fill carries state, track is a lighter step of the same ramp. */
-export function Meter({ percent, className = "" }: { percent: number | null; className?: string }) {
+export function Meter({
+  percent,
+  className = "",
+  label = "Coverage",
+}: {
+  percent: number | null;
+  className?: string;
+  label?: string;
+}) {
   const s = severity(percent);
   const width = percent === null ? 0 : Math.max(percent, 2);
   return (
     <div
       className={`h-1.5 overflow-hidden rounded-full ${track[s]} ${className}`}
       role="meter"
+      aria-label={label}
       aria-valuenow={percent ?? 0}
       aria-valuemin={0}
       aria-valuemax={100}

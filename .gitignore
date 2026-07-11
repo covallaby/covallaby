@@ -4,6 +4,7 @@ data/
 *.log
 .DS_Store
 web/demo-dist/
+storybook-static/
 
 # Personalized production deploy config (use deploy/fly.toml as the public template)
 /fly.toml
