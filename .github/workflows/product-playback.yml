@@ -1,0 +1,62 @@
+name: Product Playback
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  statuses: write
+
+jobs:
+  playback:
+    name: Recorded Covallaby journeys
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Record product journeys
+        id: playback
+        continue-on-error: true
+        run: pnpm test:e2e
+      - name: Publish playback to Covallaby
+        id: covallaby
+        if: always() && env.COVALLABY_TOKEN != ''
+        uses: covallaby/action@main
+        env:
+          COVALLABY_TOKEN: ${{ secrets.COVALLABY_TOKEN }}
+        with:
+          server-url: https://app.covallaby.com
+          server-token: ${{ secrets.COVALLABY_TOKEN }}
+          playwright-results: playwright-results.json
+          playwright-artifacts: test-results
+      - name: Preserve playback assets
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: covallaby-product-playback-${{ github.event.pull_request.number || github.run_number }}
+          path: |
+            playwright-report/
+            test-results/
+            playwright-results.json
+          retention-days: 14
+      - name: Playback summary
+        if: always()
+        env:
+          PLAYBACK_URL: ${{ steps.covallaby.outputs.playback-url }}
+        run: |
+          echo '## Covallaby product playback' >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo "[Watch the hosted journey]($PLAYBACK_URL) or download the full Playwright artifact above." >> "$GITHUB_STEP_SUMMARY"
+      - name: Enforce journey result
+        if: always() && steps.playback.outcome != 'success'
+        run: exit 1

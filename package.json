@@ -21,7 +21,8 @@
     "test:coverage": "vitest run --coverage --coverage.reporter=lcov --coverage.reporter=text-summary --coverage.include='src/**' --coverage.exclude='src/vendor/**'",
     "build:demo": "vite build -c vite.demo.config.ts",
     "storybook": "storybook dev -p 6006",
-    "build:storybook": "storybook build"
+    "build:storybook": "storybook build",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1084.0",
@@ -33,6 +34,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@playwright/test": "^1.54.1",
     "@storybook/addon-a11y": "^10.5.0",
     "@storybook/react-vite": "^10.5.0",
     "@tailwindcss/vite": "^4.0.6",
