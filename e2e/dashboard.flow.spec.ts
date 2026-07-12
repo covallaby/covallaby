@@ -36,8 +36,12 @@ test("maintainer discovers browser runs and component previews", async ({ page }
   await chapter(page, testInfo, "02-storybook-previews");
   await page.getByRole("table").getByText("PR #128 preview").click();
   await expect(page.getByPlaceholder("Search 2 component captures")).toBeVisible();
-  await expect(page.getByText("With component captures")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "With component captures" })).toBeVisible();
+  await expect(page.getByText(/2 reviewable changes against main/)).toBeVisible();
   await chapter(page, testInfo, "03-component-capture-gallery");
+  await page.getByRole("button", { name: "diff", exact: true }).click();
+  await expect(page.getByAltText("Pixel diff for With component captures")).toBeVisible();
+  await chapter(page, testInfo, "04-component-pixel-diff");
   await expectHealthyPage(page);
 });
 

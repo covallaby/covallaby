@@ -9,7 +9,12 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { type StorybookCapture, type StorybookPreview, api } from "../api.js";
+import {
+  type StorybookCapture,
+  type StorybookDiffSummary,
+  type StorybookPreview,
+  api,
+} from "../api.js";
 import { Card, CardHeader, Td, Th } from "../components/ui.js";
 import { useRepo } from "./Repo.js";
 
@@ -153,18 +158,31 @@ export function StorybookPreviewDetail() {
   const [data, setData] = useState<{
     run: StorybookPreview;
     previewUrl: string;
+    baselineRun: StorybookPreview | null;
+    summary: StorybookDiffSummary;
     captures: StorybookCapture[];
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [request, setRequest] = useState(0);
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"changes" | StorybookCapture["status"] | "all">("changes");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [view, setView] = useState<"side-by-side" | "overlay" | "diff">("side-by-side");
+  const [overlay, setOverlay] = useState(50);
   useEffect(() => {
     void request;
     setData(null);
     setError(null);
     api
       .storybookPreview(id!)
-      .then(setData)
+      .then((result) => {
+        setData(result);
+        setSelectedId(
+          result.captures.find((capture) => capture.status !== "unchanged")?.id ??
+            result.captures[0]?.id ??
+            null,
+        );
+      })
       .catch((reason) => setError(String(reason)));
   }, [id, request]);
   if (error)
@@ -184,9 +202,26 @@ export function StorybookPreviewDetail() {
       </div>
     );
   if (!data) return <p className="text-sm text-(--muted)">Loading component captures…</p>;
-  const captures = data.captures.filter((capture) =>
-    `${capture.title} ${capture.name}`.toLowerCase().includes(query.trim().toLowerCase()),
-  );
+  const captures = data.captures.filter((capture) => {
+    const matchesQuery = `${capture.title} ${capture.name}`
+      .toLowerCase()
+      .includes(query.trim().toLowerCase());
+    const matchesFilter =
+      filter === "all" ||
+      (filter === "changes"
+        ? capture.status === "changed" || capture.status === "new" || capture.status === "removed"
+        : capture.status === filter);
+    return matchesQuery && matchesFilter;
+  });
+  const selected = data.captures.find((capture) => capture.id === selectedId) ?? null;
+  const actionable = data.summary.changed + data.summary.new + data.summary.removed;
+  const statusTone: Record<StorybookCapture["status"], string> = {
+    changed: "bg-(--warn)/12 text-(--warn)",
+    new: "bg-(--good)/12 text-(--good)",
+    removed: "bg-(--bad)/12 text-(--bad)",
+    unchanged: "bg-(--surface-2) text-(--muted)",
+    uncompared: "bg-(--accent-wash) text-(--accent)",
+  };
   return (
     <div className="space-y-4">
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
@@ -221,42 +256,186 @@ export function StorybookPreviewDetail() {
       </div>
       {data.run.status === "complete" && data.captures.length > 0 ? (
         <>
+          <Card className="overflow-hidden">
+            <div className="grid grid-cols-2 divide-x divide-(--hairline) sm:grid-cols-5">
+              {(
+                [
+                  ["changed", data.summary.changed],
+                  ["new", data.summary.new],
+                  ["removed", data.summary.removed],
+                  ["unchanged", data.summary.unchanged],
+                  ["uncompared", data.summary.uncompared],
+                ] as const
+              ).map(([status, count]) => (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => setFilter(status)}
+                  className="px-4 py-3 text-left hover:bg-(--surface-2)"
+                >
+                  <span className="block text-lg font-semibold">{count}</span>
+                  <span className="text-xs capitalize text-(--muted)">{status}</span>
+                </button>
+              ))}
+            </div>
+            <div className="border-t border-(--hairline) px-4 py-3 text-xs text-(--muted)">
+              {data.baselineRun
+                ? `${actionable} reviewable change${actionable === 1 ? "" : "s"} against main ${data.baselineRun.commit.slice(0, 9)}`
+                : "No earlier main capture is available yet; this run will establish visual history."}
+            </div>
+          </Card>
+          {selected ? (
+            <Card className="overflow-hidden">
+              <div className="flex flex-col gap-3 border-b border-(--hairline) p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="font-medium">{selected.name}</h2>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] capitalize ${statusTone[selected.status]}`}
+                    >
+                      {selected.status}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-(--muted)">{selected.title}</p>
+                </div>
+                {selected.baselineImageUrl && selected.imageUrl ? (
+                  <div className="flex rounded-lg border border-(--border) bg-(--surface-2) p-1 text-xs">
+                    {(["side-by-side", "overlay", "diff"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        disabled={mode === "diff" && !selected.diffImageUrl}
+                        onClick={() => setView(mode)}
+                        className={`rounded-md px-2.5 py-1.5 capitalize disabled:opacity-35 ${view === mode ? "bg-(--surface) text-(--ink) shadow-sm" : "text-(--muted)"}`}
+                      >
+                        {mode.replace("-", " ")}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              <div className="bg-(--surface-2) p-3 sm:p-5">
+                {view === "diff" && selected.diffImageUrl ? (
+                  <ReviewImage
+                    src={selected.diffImageUrl}
+                    alt={`Pixel diff for ${selected.name}`}
+                    label="Pixel diff"
+                  />
+                ) : view === "overlay" && selected.baselineImageUrl && selected.imageUrl ? (
+                  <div>
+                    <div className="relative mx-auto max-w-5xl overflow-hidden rounded-lg border border-(--border) bg-white">
+                      <img
+                        src={selected.baselineImageUrl}
+                        alt={`Baseline ${selected.name}`}
+                        className="block w-full"
+                      />
+                      <img
+                        src={selected.imageUrl}
+                        alt={`Current ${selected.name}`}
+                        className="absolute inset-0 h-full w-full border-r-2 border-white/80 object-contain"
+                        style={{ clipPath: `inset(0 ${100 - overlay}% 0 0)` }}
+                      />
+                    </div>
+                    <input
+                      aria-label="Current image visibility"
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={overlay}
+                      onChange={(event) => setOverlay(Number(event.target.value))}
+                      className="mx-auto mt-4 block w-full max-w-lg"
+                    />
+                  </div>
+                ) : selected.baselineImageUrl && selected.imageUrl ? (
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <ReviewImage
+                      src={selected.baselineImageUrl}
+                      alt={`Baseline ${selected.name}`}
+                      label="Baseline · main"
+                    />
+                    <ReviewImage
+                      src={selected.imageUrl}
+                      alt={`Current ${selected.name}`}
+                      label="Current · this run"
+                    />
+                  </div>
+                ) : (
+                  <ReviewImage
+                    src={selected.imageUrl || selected.baselineImageUrl!}
+                    alt={selected.name}
+                    label={
+                      selected.status === "removed"
+                        ? "Removed · last seen on main"
+                        : "New · this run"
+                    }
+                  />
+                )}
+              </div>
+            </Card>
+          ) : null}
           <Card className="p-3 sm:p-4">
-            <label className="relative block">
-              <Search
-                size={15}
-                className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-(--muted)"
-              />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={`Search ${data.captures.length} component captures`}
-                className="w-full rounded-lg border border-(--border) bg-(--surface-2) py-2 pr-3 pl-9 text-sm outline-none focus:border-(--muted)"
-              />
-            </label>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <label className="relative block flex-1">
+                <Search
+                  size={15}
+                  className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-(--muted)"
+                />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={`Search ${data.captures.length} component captures`}
+                  className="w-full rounded-lg border border-(--border) bg-(--surface-2) py-2 pr-3 pl-9 text-sm outline-none focus:border-(--muted)"
+                />
+              </label>
+              <select
+                aria-label="Capture filter"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value as typeof filter)}
+                className="rounded-lg border border-(--border) bg-(--surface-2) px-3 py-2 text-sm"
+              >
+                <option value="changes">Changes to review</option>
+                <option value="all">All captures</option>
+                <option value="changed">Changed</option>
+                <option value="new">New</option>
+                <option value="removed">Removed</option>
+                <option value="unchanged">Unchanged</option>
+                <option value="uncompared">Uncompared</option>
+              </select>
+            </div>
           </Card>
           {captures.length > 0 ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {captures.map((capture) => (
-                <Card key={capture.artifactId} className="group overflow-hidden">
-                  <a
-                    href={capture.imageUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block bg-[linear-gradient(45deg,var(--surface-2)_25%,transparent_25%),linear-gradient(-45deg,var(--surface-2)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,var(--surface-2)_75%),linear-gradient(-45deg,transparent_75%,var(--surface-2)_75%)] bg-size-[18px_18px] bg-position-[0_0,0_9px,9px_-9px,-9px_0] p-3"
+                <button
+                  key={capture.id}
+                  type="button"
+                  onClick={() => setSelectedId(capture.id)}
+                  className="text-left"
+                >
+                  <Card
+                    className={`group overflow-hidden transition-colors ${selectedId === capture.id ? "border-(--accent)" : ""}`}
                   >
-                    <img
-                      src={capture.imageUrl}
-                      alt={`${capture.title} — ${capture.name}`}
-                      loading="lazy"
-                      className="mx-auto max-h-[420px] w-auto max-w-full rounded-md bg-white object-contain shadow-sm transition-transform group-hover:scale-[1.01]"
-                    />
-                  </a>
-                  <div className="border-t border-(--hairline) px-4 py-3">
-                    <p className="truncate text-xs text-(--muted)">{capture.title}</p>
-                    <p className="mt-0.5 truncate text-sm font-medium">{capture.name}</p>
-                  </div>
-                </Card>
+                    <div className="block bg-[linear-gradient(45deg,var(--surface-2)_25%,transparent_25%),linear-gradient(-45deg,var(--surface-2)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,var(--surface-2)_75%),linear-gradient(-45deg,transparent_75%,var(--surface-2)_75%)] bg-size-[18px_18px] bg-position-[0_0,0_9px,9px_-9px,-9px_0] p-3">
+                      <img
+                        src={capture.imageUrl || capture.baselineImageUrl}
+                        alt={`${capture.title} — ${capture.name}`}
+                        loading="lazy"
+                        className="mx-auto h-52 w-full rounded-md bg-white object-contain shadow-sm transition-transform group-hover:scale-[1.01]"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-3 border-t border-(--hairline) px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs text-(--muted)">{capture.title}</p>
+                        <p className="mt-0.5 truncate text-sm font-medium">{capture.name}</p>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] capitalize ${statusTone[capture.status]}`}
+                      >
+                        {capture.status}
+                      </span>
+                    </div>
+                  </Card>
+                </button>
               ))}
             </div>
           ) : (
@@ -287,5 +466,25 @@ export function StorybookPreviewDetail() {
         </Card>
       )}
     </div>
+  );
+}
+
+function ReviewImage({ src, alt, label }: { src: string; alt: string; label: string }) {
+  return (
+    <figure>
+      <figcaption className="mb-2 text-xs font-medium text-(--muted)">{label}</figcaption>
+      <a
+        href={src}
+        target="_blank"
+        rel="noreferrer"
+        className="block overflow-hidden rounded-lg border border-(--border) bg-white"
+      >
+        <img
+          src={src}
+          alt={alt}
+          className="mx-auto max-h-[620px] w-auto max-w-full object-contain"
+        />
+      </a>
+    </figure>
   );
 }
