@@ -99,6 +99,13 @@ describe("browser test artifacts", () => {
         sizeBytes: 4,
         testName: "checkout › buys a plan",
       },
+      {
+        name: "trace.zip",
+        kind: "trace",
+        contentType: "application/zip",
+        sizeBytes: 4,
+        testName: "checkout › buys a plan",
+      },
     ],
   };
 
@@ -136,12 +143,14 @@ describe("browser test artifacts", () => {
     });
     expect(early.status).toBe(409);
 
-    const uploaded = await artifactApp.request(new URL(data.artifacts[0].uploadUrl).pathname, {
-      method: "PUT",
-      headers: { authorization: "Bearer sekret", "content-type": "video/webm" },
-      body: "1234",
-    });
-    expect(uploaded.status).toBe(200);
+    for (const artifact of data.artifacts) {
+      const uploaded = await artifactApp.request(new URL(artifact.uploadUrl).pathname, {
+        method: "PUT",
+        headers: { authorization: "Bearer sekret", "content-type": artifact.contentType },
+        body: "1234",
+      });
+      expect(uploaded.status).toBe(200);
+    }
     const completed = await artifactApp.request(`/api/v1/test-runs/${data.run.id}/complete`, {
       method: "POST",
       headers: { authorization: "Bearer sekret" },
@@ -152,6 +161,16 @@ describe("browser test artifacts", () => {
     expect(listed.runs[0].status).toBe("complete");
     const detail = await (await artifactApp.request(`/api/v1/test-runs/${data.run.id}`)).json();
     expect(detail.artifacts[0].testName).toContain("checkout");
+    const trace = detail.artifacts.find((artifact: { kind: string }) => artifact.kind === "trace");
+    const viewer = new URL(trace.viewerUrl);
+    expect(viewer.origin).toBe("https://trace.playwright.dev");
+    const traceSource = viewer.searchParams.get("trace")!;
+    const traceResponse = await artifactApp.request(traceSource);
+    expect(traceResponse.status).toBe(200);
+    expect(traceResponse.headers.get("access-control-allow-origin")).toBe(
+      "https://trace.playwright.dev",
+    );
+    expect(await traceResponse.text()).toBe("1234");
     const media = await artifactApp.request(detail.artifacts[0].url);
     expect(media.headers.get("content-type")).toContain("video/webm");
     expect(await media.text()).toBe("1234");

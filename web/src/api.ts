@@ -112,6 +112,7 @@ export interface TestArtifact {
   testName: string | null;
   createdAt: string;
   url: string;
+  viewerUrl?: string;
 }
 
 export interface StorybookPreview extends TestRun {}
