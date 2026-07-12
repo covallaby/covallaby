@@ -201,6 +201,19 @@ describe("browser test artifacts", () => {
     );
     expect(completed.status).toBe(200);
 
+    const browserRuns = await (
+      await artifactApp.request("/api/v1/repos/acme/app/test-runs")
+    ).json();
+    expect(
+      browserRuns.runs.every((run: { framework: string }) => run.framework === "playwright"),
+    ).toBe(true);
+    expect((await artifactApp.request(`/api/v1/test-runs/${data.run.id}`)).status).toBe(404);
+    const previews = await (
+      await artifactApp.request("/api/v1/repos/acme/app/storybook-previews")
+    ).json();
+    expect(previews.previews).toHaveLength(1);
+    expect(previews.previews[0].framework).toBe("storybook");
+
     const detail = await (
       await artifactApp.request(`/api/v1/storybook-previews/${data.run.id}`)
     ).json();

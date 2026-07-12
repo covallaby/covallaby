@@ -640,7 +640,11 @@ export function createApp({
   app.get("/api/v1/repos/:owner/:name/test-runs", async (c) => {
     if (!artifactReady()) return c.json({ runs: [] });
     return c.json({
-      runs: await store.listTestRuns!(`${c.req.param("owner")}/${c.req.param("name")}`, 50),
+      runs: await store.listTestRuns!(
+        `${c.req.param("owner")}/${c.req.param("name")}`,
+        50,
+        "playwright",
+      ),
     });
   });
 
@@ -648,7 +652,8 @@ export function createApp({
     if (!artifactReady())
       return c.json({ ok: false, error: "Test artifact storage is unavailable." }, 503);
     const found = await store.getTestRun!(Number(c.req.param("id")));
-    if (!found) return c.json({ ok: false, error: "Unknown test run." }, 404);
+    if (!found || found.run.framework !== "playwright")
+      return c.json({ ok: false, error: "Unknown Playwright run." }, 404);
     return c.json({
       run: found.run,
       artifacts: found.artifacts.map(({ objectKey: _, ...a }) => ({
@@ -852,8 +857,12 @@ export function createApp({
 
   app.get("/api/v1/repos/:owner/:name/storybook-previews", async (c) => {
     if (!previewReady()) return c.json({ previews: [] });
-    const runs = await store.listTestRuns!(`${c.req.param("owner")}/${c.req.param("name")}`, 200);
-    return c.json({ previews: runs.filter((run) => run.framework === "storybook").slice(0, 50) });
+    const previews = await store.listTestRuns!(
+      `${c.req.param("owner")}/${c.req.param("name")}`,
+      50,
+      "storybook",
+    );
+    return c.json({ previews });
   });
 
   app.get("/api/v1/storybook-previews/:id", async (c) => {
