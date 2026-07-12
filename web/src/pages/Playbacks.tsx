@@ -231,7 +231,7 @@ export function JourneyViewer({ artifacts }: { artifacts: TestArtifact[] }) {
   const stage = useRef<HTMLDivElement>(null);
   const journey = library.journeys[journeyIndex] ?? null;
   const selectedStep = journey?.screenshots[stepIndex] ?? null;
-  const video = journey?.videos[0] ?? null;
+  const video = journey?.videos.toSorted((a, b) => b.sizeBytes - a.sizeBytes)[0] ?? null;
 
   useEffect(() => {
     setStepIndex(0);
@@ -263,7 +263,7 @@ export function JourneyViewer({ artifacts }: { artifacts: TestArtifact[] }) {
 
   const tabs: Array<{ id: ViewerTab; label: string; count: number; icon: typeof Images }> = [
     { id: "steps", label: "Steps", count: journey.screenshots.length, icon: Images },
-    { id: "video", label: "Video", count: journey.videos.length, icon: Play },
+    { id: "video", label: "Video", count: journey.videos.length ? 1 : 0, icon: Play },
     { id: "trace", label: "Trace", count: journey.traces.length, icon: Bug },
     { id: "files", label: "Files", count: journey.files.length, icon: FileArchive },
   ];
@@ -445,28 +445,30 @@ export function JourneyViewer({ artifacts }: { artifacts: TestArtifact[] }) {
               <Bug className="mx-auto text-(--accent)" size={30} />
               <h3 className="mt-4 text-base font-semibold">Inspect the Playwright trace</h3>
               <p className="mt-2 text-sm leading-6 text-(--muted)">
-                The trace contains action-by-action DOM snapshots, network activity, console logs,
-                source locations, and precise timing. Download it and open it with Playwright Trace
-                Viewer.
+                Time-travel through every action with DOM snapshots, network activity, console logs,
+                source locations, and precise timing.
               </p>
               <div className="mt-5 flex flex-wrap justify-center gap-2">
                 {journey.traces.map((trace) => (
                   <a
                     key={trace.id}
-                    href={trace.url}
+                    href={trace.viewerUrl ?? trace.url}
+                    target="_blank"
+                    rel="noreferrer"
                     className="inline-flex items-center gap-2 rounded-lg bg-(--accent) px-4 py-2 text-sm font-medium text-white"
                   >
-                    <Download size={15} /> Download trace
+                    <Bug size={15} /> Open interactive trace
                   </a>
                 ))}
-                <a
-                  href="https://trace.playwright.dev"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-2 rounded-lg border border-(--border) px-4 py-2 text-sm font-medium"
-                >
-                  Open Trace Viewer
-                </a>
+                {journey.traces.map((trace) => (
+                  <a
+                    key={`download-${trace.id}`}
+                    href={trace.url}
+                    className="inline-flex items-center gap-2 rounded-lg border border-(--border) px-4 py-2 text-sm font-medium"
+                  >
+                    <Download size={15} /> Download
+                  </a>
+                ))}
               </div>
             </div>
           ) : null}

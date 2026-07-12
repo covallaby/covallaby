@@ -342,6 +342,15 @@ export function createApp({
     if (!Number.isSafeInteger(expires) || expires < Math.floor(Date.now() / 1000)) return false;
     return tokenEquals(supplied, previewToken(id, expires));
   };
+  const traceToken = (runId: number, artifactId: number, expires: number) =>
+    `${expires}.${createHmac("sha256", storybookPreviewSecret)
+      .update(`playwright-trace:${runId}:${artifactId}:${expires}`)
+      .digest("base64url")}`;
+  const validTraceToken = (runId: number, artifactId: number, supplied: string): boolean => {
+    const expires = Number(supplied.split(".", 1)[0]);
+    if (!Number.isSafeInteger(expires) || expires < Math.floor(Date.now() / 1000)) return false;
+    return tokenEquals(supplied, traceToken(runId, artifactId, expires));
+  };
   const previewPath = (raw: unknown): string | null => {
     if (typeof raw !== "string" || raw.length === 0 || raw.length > 500) return null;
     if (raw.startsWith("/") || raw.includes("\\") || raw.includes("\0")) return null;
@@ -654,13 +663,40 @@ export function createApp({
     const found = await store.getTestRun!(Number(c.req.param("id")));
     if (!found || found.run.framework !== "playwright")
       return c.json({ ok: false, error: "Unknown Playwright run." }, 404);
+    const expires = Math.floor(Date.now() / 1000) + 3600;
     return c.json({
       run: found.run,
-      artifacts: found.artifacts.map(({ objectKey: _, ...a }) => ({
-        ...a,
-        url: `/api/v1/test-runs/${found.run.id}/artifacts/${a.id}/content`,
-      })),
+      artifacts: found.artifacts.map(({ objectKey: _, ...a }) => {
+        const url = `/api/v1/test-runs/${found.run.id}/artifacts/${a.id}/content`;
+        if (a.kind !== "trace") return { ...a, url };
+        const source = new URL(`/playwright-traces/${found.run.id}/${a.id}`, c.req.url);
+        source.searchParams.set("trace_token", traceToken(found.run.id, a.id, expires));
+        const viewer = new URL("https://trace.playwright.dev/");
+        viewer.searchParams.set("trace", source.toString());
+        return { ...a, url, viewerUrl: viewer.toString() };
+      }),
     });
+  });
+
+  // A short-lived, CORS-enabled trace source lets Playwright's official viewer
+  // open a private trace without exposing the bucket or requiring third-party cookies.
+  app.get("/playwright-traces/:runId/:artifactId", async (c) => {
+    if (!artifactReady()) return c.notFound();
+    const runId = Number(c.req.param("runId"));
+    const artifactId = Number(c.req.param("artifactId"));
+    const supplied = c.req.query("trace_token") ?? "";
+    if (!validTraceToken(runId, artifactId, supplied)) return c.notFound();
+    const found = await store.getTestRun!(runId);
+    const artifact = found?.artifacts.find((item) => item.id === artifactId);
+    if (!found || found.run.framework !== "playwright" || artifact?.kind !== "trace")
+      return c.notFound();
+    const bytes = await artifactStorage!.get(artifact.objectKey);
+    c.header("Access-Control-Allow-Origin", "https://trace.playwright.dev");
+    c.header("Content-Type", "application/zip");
+    c.header("Content-Length", String(bytes.byteLength));
+    c.header("Cache-Control", "private, no-store");
+    c.header("Content-Disposition", 'inline; filename="trace.zip"');
+    return c.body(bytes as Uint8Array<ArrayBuffer>);
   });
 
   app.get("/api/v1/test-runs/:runId/artifacts/:artifactId/content", async (c) => {
