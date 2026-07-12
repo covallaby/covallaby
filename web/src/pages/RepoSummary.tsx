@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { formatPercent, severity } from "../api.js";
 import { HistoryChart } from "../components/charts.js";
+import { RepositoryLatestSnapshot } from "../components/review-overview.js";
 import { Card, CardHeader, DeltaChip, inkFor } from "../components/ui.js";
 import { BadgeCard, NeedsLove, RANGES, StatCard, UploadsTable, useRepo, when } from "./Repo.js";
 
@@ -28,6 +29,13 @@ export function Summary() {
 
   return (
     <div className="space-y-4">
+      <RepositoryLatestSnapshot
+        repo={{
+          repo,
+          latest,
+          trend: [...data.history].reverse().map((upload) => upload.percent),
+        }}
+      />
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <StatCard
           label="Coverage"

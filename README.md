@@ -122,6 +122,7 @@ Everything is optional:
 | `COVALLABY_KEEP_LATEST_UNKNOWN_PRS` | Preserve the latest run for PRs whose state is unavailable. | `true` |
 | `COVALLABY_PREVIEW_BASE_URL` | Separate origin used to serve executable Storybook previews, such as `https://previews.example.com`. | unset (previews disabled) |
 | `COVALLABY_PREVIEW_SECRET` | Secret used to sign short-lived preview access. | upload token |
+| `COVALLABY_VISUAL_DIFF_THRESHOLD` | Pixelmatch sensitivity from `0` (strict) to `1` (lenient) for generated Storybook diffs. | `0.1` |
 | `COVALLABY_HOSTED` | `1` turns on the multi-tenant hosted tier (GitHub sign-in + per-account scoping). Requires the GitHub OAuth + session env below. | unset (single-tenant) |
 
 ## API
@@ -212,8 +213,9 @@ Set `COVALLABY_PREVIEW_BASE_URL` to a separate origin routed to the same
 Covallaby server. For example, the dashboard can use `app.example.com` while
 previews use `previews.example.com`. Covallaby requires this separation in
 hosted mode because Storybook builds contain repository-controlled JavaScript.
-Preview access is signed, stored in a path-scoped HTTP-only cookie, and embedded
-in a sandboxed dashboard viewer.
+Preview access is signed and stored in a path-scoped HTTP-only cookie. The interactive
+Storybook remains a secondary option; individual story captures and on-demand visual
+diffs are the primary review experience.
 
 ### Artifact retention
 

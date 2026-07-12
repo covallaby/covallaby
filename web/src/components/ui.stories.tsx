@@ -112,7 +112,7 @@ export const EmptyState: Story = {
   render: () => (
     <Card>
       <CardHeader
-        title="Storybook previews"
+        title="Component captures"
         description="Explore the exact component library built by CI."
       />
       <div className="px-5 pb-6 text-sm text-(--muted)">

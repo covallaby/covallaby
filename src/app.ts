@@ -11,8 +11,9 @@ import {
   renderStatusBadge,
 } from "./policy.js";
 import { type ArtifactRetentionConfig, cleanupRepoArtifacts } from "./retention.js";
-import type { Store, UploadRow } from "./store.js";
+import type { Store, TestArtifactRow, TestRunRow, UploadRow } from "./store.js";
 import type { TestArtifactKind } from "./store.js";
+import { createVisualDiff, parseStoryCaptureMetadata } from "./storybook-diff.js";
 import { renderBadge } from "./vendor/badge.js";
 import { ignorePaths } from "./vendor/ignore.js";
 import {
@@ -491,6 +492,21 @@ export function createApp({
     store.listTestRuns;
   const previewReady = () =>
     artifactReady() && previewBase && store.getTestRunRow && store.getTestArtifactByName;
+  const storyCaptures = (artifacts: TestArtifactRow[]) =>
+    artifacts
+      .filter((artifact) => artifact.kind === "screenshot")
+      .map((artifact) => ({
+        artifact,
+        story: parseStoryCaptureMetadata(artifact.testName, artifact.name),
+      }));
+  const storybookBaseline = async (run: TestRunRow) => {
+    const candidates = await store.listTestRuns!(run.repo, 50, "storybook");
+    const baselineRun = candidates.find(
+      (candidate) =>
+        candidate.id < run.id && candidate.branch === "main" && candidate.status === "complete",
+    );
+    return baselineRun ? await store.getTestRun!(baselineRun.id) : null;
+  };
   app.post("/api/v1/test-runs", async (c) => {
     if (!artifactReady())
       return c.json(
@@ -764,7 +780,13 @@ export function createApp({
         400,
       );
     }
-    const files: Array<{ path: string; contentType: string; sizeBytes: number }> = [];
+    const files: Array<{
+      path: string;
+      contentType: string;
+      sizeBytes: number;
+      kind: "screenshot" | "report" | "other";
+      testName: string | null;
+    }> = [];
     const seen = new Set<string>();
     let totalBytes = 0;
     for (const item of rawFiles) {
@@ -775,6 +797,9 @@ export function createApp({
       const contentType =
         typeof raw.contentType === "string" ? raw.contentType.trim().slice(0, 120) : "";
       const sizeBytes = Number(raw.sizeBytes);
+      const screenshot = path?.startsWith("_covallaby/captures/") && path.endsWith(".png");
+      const testName =
+        screenshot && typeof raw.testName === "string" ? raw.testName.slice(0, 1000) : null;
       if (
         !path ||
         !contentType ||
@@ -788,7 +813,13 @@ export function createApp({
       }
       seen.add(path);
       totalBytes += sizeBytes;
-      files.push({ path, contentType, sizeBytes });
+      files.push({
+        path,
+        contentType,
+        sizeBytes,
+        kind: screenshot ? "screenshot" : path.endsWith(".html") ? "report" : "other",
+        testName,
+      });
     }
     if (!seen.has("index.html"))
       return c.json({ ok: false, error: "The Storybook build must contain index.html." }, 400);
@@ -814,10 +845,10 @@ export function createApp({
           runId: run.id,
           objectKey,
           name: file.path,
-          kind: file.path.endsWith(".html") ? "report" : "other",
+          kind: file.kind,
           contentType: file.contentType,
           sizeBytes: file.sizeBytes,
-          testName: null,
+          testName: file.testName,
         });
         const signed = await artifactStorage!.createUploadUrl(objectKey, file.contentType);
         return {
@@ -894,17 +925,136 @@ export function createApp({
       50,
       "storybook",
     );
-    return c.json({ previews });
+    return c.json({
+      previews: await Promise.all(
+        previews.map(async (preview) => {
+          const found = await store.getTestRun!(preview.id);
+          const artifacts = found?.artifacts ?? [];
+          return {
+            ...preview,
+            artifactCount: artifacts.length,
+            imageCount: artifacts.filter((artifact) => artifact.kind === "screenshot").length,
+          };
+        }),
+      ),
+    });
+  });
+
+  app.get("/api/v1/review-signals", async (c) => {
+    if (!artifactReady()) return c.json({ repositories: [] });
+    const accounts = c.get("accounts");
+    const requested = c.req.query("repo");
+    const repos = requested
+      ? [requested]
+      : (await store.listRepos(1, accounts)).map((overview) => overview.repo);
+    const visible = repos.filter((repo) => {
+      if (!REPO_RE.test(repo)) return false;
+      if (!accounts) return true;
+      const owner = repo.split("/")[0]!;
+      return accounts.some((account) => account.toLowerCase() === owner.toLowerCase());
+    });
+    return c.json({
+      repositories: await Promise.all(
+        visible.map(async (repo) => {
+          const [runs, previews] = await Promise.all([
+            store.listTestRuns!(repo, 5, "playwright"),
+            store.listTestRuns!(repo, 5, "storybook"),
+          ]);
+          return {
+            repo,
+            runs,
+            previews: await Promise.all(
+              previews.map(async (preview) => {
+                const found = await store.getTestRun!(preview.id);
+                const artifacts = found?.artifacts ?? [];
+                return {
+                  ...preview,
+                  artifactCount: artifacts.length,
+                  imageCount: artifacts.filter((artifact) => artifact.kind === "screenshot").length,
+                };
+              }),
+            ),
+          };
+        }),
+      ),
+    });
   });
 
   app.get("/api/v1/storybook-previews/:id", async (c) => {
     if (!previewReady()) return c.notFound();
-    const run = await store.getTestRunRow!(Number(c.req.param("id")));
-    if (!run || run.framework !== "storybook") return c.notFound();
+    const found = await store.getTestRun!(Number(c.req.param("id")));
+    if (!found || found.run.framework !== "storybook") return c.notFound();
+    const run = found.run;
     const token = previewToken(run.id, Math.floor(Date.now() / 1000) + 3600);
+    const baseline = await storybookBaseline(run);
+    const baselineToken = baseline
+      ? previewToken(baseline.run.id, Math.floor(Date.now() / 1000) + 3600)
+      : null;
+    const baselineCaptures = new Map(
+      storyCaptures(baseline?.artifacts ?? []).map((capture) => [capture.story.id, capture]),
+    );
+    const captures: Array<{
+      artifactId: number | null;
+      id: string;
+      title: string;
+      name: string;
+      status: "changed" | "new" | "removed" | "unchanged" | "uncompared";
+      imageUrl: string;
+      baselineImageUrl?: string;
+      diffImageUrl?: string;
+    }> = storyCaptures(found.artifacts).map(({ artifact, story }) => {
+      const before = baselineCaptures.get(story.id);
+      baselineCaptures.delete(story.id);
+      const status = !baseline
+        ? "uncompared"
+        : !before
+          ? "new"
+          : story.sha256 && before.story.sha256
+            ? story.sha256 === before.story.sha256
+              ? "unchanged"
+              : "changed"
+            : "uncompared";
+      return {
+        artifactId: artifact.id,
+        id: story.id,
+        title: story.title,
+        name: story.name,
+        status,
+        imageUrl: `${previewBase}/p/${run.id}/${artifact.name}?preview_token=${encodeURIComponent(token)}`,
+        ...(before && baselineToken
+          ? {
+              baselineImageUrl: `${previewBase}/p/${baseline!.run.id}/${before.artifact.name}?preview_token=${encodeURIComponent(baselineToken)}`,
+              ...(status === "changed" && {
+                diffImageUrl: `${previewBase}/p/${run.id}/_covallaby/diffs/${artifact.id}.png?preview_token=${encodeURIComponent(token)}`,
+              }),
+            }
+          : {}),
+      };
+    });
+    for (const { artifact, story } of baselineCaptures.values()) {
+      captures.push({
+        artifactId: null,
+        id: story.id,
+        title: story.title,
+        name: story.name,
+        status: "removed",
+        imageUrl: "",
+        baselineImageUrl: `${previewBase}/p/${baseline!.run.id}/${artifact.name}?preview_token=${encodeURIComponent(baselineToken!)}`,
+      });
+    }
+    const summary = {
+      changed: captures.filter((capture) => capture.status === "changed").length,
+      new: captures.filter((capture) => capture.status === "new").length,
+      removed: captures.filter((capture) => capture.status === "removed").length,
+      unchanged: captures.filter((capture) => capture.status === "unchanged").length,
+      uncompared: captures.filter((capture) => capture.status === "uncompared").length,
+    };
     return c.json({
       run,
       previewUrl: `${previewBase}/p/${run.id}/index.html?preview_token=${encodeURIComponent(token)}`,
+      baselineRun: baseline?.run ?? null,
+      summary,
+      captures,
     });
   });
 
@@ -929,10 +1079,6 @@ export function createApp({
     } catch {
       return c.notFound();
     }
-    const path = previewPath(requestedPath);
-    if (!path) return c.notFound();
-    const artifact = await store.getTestArtifactByName!(id, path);
-    if (!artifact) return c.notFound();
     if (c.req.query("preview_token")) {
       const securePreview = previewOrigin!.startsWith("https://");
       const cookiePolicy = securePreview ? "SameSite=None; Secure" : "SameSite=Lax";
@@ -940,10 +1086,43 @@ export function createApp({
         "Set-Cookie",
         `covallaby_preview=${supplied}; Path=/p/${id}/; HttpOnly; ${cookiePolicy}; Max-Age=3600`,
       );
-      // Exchange the query token for the scoped cookie immediately so it does
-      // not remain in browser history, referrers, analytics, or access logs.
       return c.redirect(c.req.path, 302);
     }
+    const diffMatch = /^_covallaby\/diffs\/(\d+)\.png$/.exec(requestedPath);
+    if (diffMatch) {
+      const found = await store.getTestRun!(id);
+      const current = found?.artifacts.find(
+        (artifact) => artifact.id === Number(diffMatch[1]) && artifact.kind === "screenshot",
+      );
+      if (!found || !current) return c.notFound();
+      const baseline = await storybookBaseline(found.run);
+      if (!baseline) return c.notFound();
+      const story = parseStoryCaptureMetadata(current.testName, current.name);
+      const before = storyCaptures(baseline.artifacts).find(
+        (capture) => capture.story.id === story.id,
+      )?.artifact;
+      if (!before) return c.notFound();
+      const configuredThreshold = Number(process.env.COVALLABY_VISUAL_DIFF_THRESHOLD ?? "0.1");
+      const threshold = Number.isFinite(configuredThreshold)
+        ? Math.min(1, Math.max(0, configuredThreshold))
+        : 0.1;
+      const result = createVisualDiff(
+        await artifactStorage!.get(before.objectKey),
+        await artifactStorage!.get(current.objectKey),
+        threshold,
+      );
+      c.header("Content-Type", "image/png");
+      c.header("Content-Length", String(result.png.byteLength));
+      c.header("Cache-Control", "private, max-age=3600");
+      c.header("X-Covallaby-Changed-Pixels", String(result.changedPixels));
+      c.header("X-Covallaby-Change-Ratio", String(result.changeRatio));
+      c.header("X-Content-Type-Options", "nosniff");
+      return c.body(result.png as Uint8Array<ArrayBuffer>);
+    }
+    const path = previewPath(requestedPath);
+    if (!path) return c.notFound();
+    const artifact = await store.getTestArtifactByName!(id, path);
+    if (!artifact) return c.notFound();
     const bytes = await artifactStorage!.get(artifact.objectKey);
     c.header("Content-Type", artifact.contentType);
     c.header("Content-Length", String(bytes.byteLength));

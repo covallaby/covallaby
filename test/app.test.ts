@@ -1,3 +1,4 @@
+import { PNG } from "pngjs";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createApp, ensureUploadToken } from "../src/app.js";
 import type { ArtifactStorage } from "../src/artifacts.js";
@@ -196,6 +197,17 @@ describe("browser test artifacts", () => {
       files: [
         { path: "index.html", contentType: "text/html", sizeBytes: 30 },
         { path: "assets/app.js", contentType: "text/javascript", sizeBytes: 17 },
+        {
+          path: "_covallaby/captures/button--primary.png",
+          contentType: "image/png",
+          sizeBytes: 4,
+          kind: "screenshot",
+          testName: JSON.stringify({
+            id: "button--primary",
+            title: "Components/Button",
+            name: "Primary",
+          }),
+        },
       ],
     };
     const created = await artifactApp.request("/api/v1/storybook-previews", {
@@ -205,7 +217,7 @@ describe("browser test artifacts", () => {
     });
     expect(created.status).toBe(201);
     const data = await created.json();
-    const bodies = ["<h1>Component library</h1>okay", "console.log('hi')"];
+    const bodies = ["<h1>Component library</h1>okay", "console.log('hi')", "png!"];
     for (const [index, artifact] of data.artifacts.entries()) {
       const uploaded = await artifactApp.request(new URL(artifact.uploadUrl).pathname, {
         method: "PUT",
@@ -232,6 +244,14 @@ describe("browser test artifacts", () => {
     ).json();
     expect(previews.previews).toHaveLength(1);
     expect(previews.previews[0].framework).toBe("storybook");
+    expect(previews.previews[0]).toMatchObject({ artifactCount: 3, imageCount: 1 });
+    const reviewSignals = await (
+      await artifactApp.request("/api/v1/review-signals?repo=acme/app")
+    ).json();
+    expect(reviewSignals.repositories[0]).toMatchObject({
+      repo: "acme/app",
+      previews: [{ artifactCount: 3, imageCount: 1 }],
+    });
 
     const detail = await (
       await artifactApp.request(`/api/v1/storybook-previews/${data.run.id}`)
@@ -239,6 +259,14 @@ describe("browser test artifacts", () => {
     expect(detail.previewUrl).toMatch(
       new RegExp(`^https://previews\\.test/p/${data.run.id}/index\\.html\\?preview_token=`),
     );
+    expect(detail.captures).toEqual([
+      expect.objectContaining({
+        id: "button--primary",
+        title: "Components/Button",
+        name: "Primary",
+        imageUrl: expect.stringContaining("/_covallaby/captures/button--primary.png"),
+      }),
+    ]);
     const tokenExchange = await artifactApp.request(detail.previewUrl);
     expect(tokenExchange.status).toBe(302);
     expect(tokenExchange.headers.get("location")).toBe(`/p/${data.run.id}/index.html`);
@@ -270,6 +298,112 @@ describe("browser test artifacts", () => {
         )
       ).status,
     ).toBe(404);
+  });
+
+  it("compares a PR capture set to the preceding main run and serves pixel diffs", async () => {
+    const png = (red: number) => {
+      const image = new PNG({ width: 2, height: 2 });
+      for (let index = 0; index < image.data.length; index += 4) {
+        image.data.set([red, 20, 30, 255], index);
+      }
+      return PNG.sync.write(image);
+    };
+    const uploadPreview = async (
+      branch: string,
+      commit: string,
+      pr: number | null,
+      stories: Array<{ id: string; hash: string; bytes: Uint8Array }>,
+    ) => {
+      const files = [
+        { path: "index.html", contentType: "text/html", sizeBytes: 4 },
+        ...stories.map((story) => ({
+          path: `_covallaby/captures/${story.id}.png`,
+          contentType: "image/png",
+          sizeBytes: story.bytes.byteLength,
+          kind: "screenshot",
+          testName: JSON.stringify({
+            id: story.id,
+            title: "Components/Button",
+            name: story.id.split("--")[1],
+            sha256: story.hash,
+          }),
+        })),
+      ];
+      const response = await artifactApp.request("/api/v1/storybook-previews", {
+        method: "POST",
+        headers: { authorization: "Bearer sekret", "content-type": "application/json" },
+        body: JSON.stringify({ repo: "acme/diffs", branch, commit, pr, files }),
+      });
+      const created = await response.json();
+      const bodies = [Buffer.from("home"), ...stories.map((story) => story.bytes)];
+      for (const [index, artifact] of created.artifacts.entries()) {
+        expect(
+          (
+            await artifactApp.request(new URL(artifact.uploadUrl).pathname, {
+              method: "PUT",
+              headers: { authorization: "Bearer sekret" },
+              body: bodies[index],
+            })
+          ).status,
+        ).toBe(200);
+      }
+      expect(
+        (
+          await artifactApp.request(`/api/v1/storybook-previews/${created.run.id}/complete`, {
+            method: "POST",
+            headers: { authorization: "Bearer sekret" },
+          })
+        ).status,
+      ).toBe(200);
+      return created.run.id as number;
+    };
+
+    const dark = png(10);
+    const light = png(240);
+    await uploadPreview("main", "base123", null, [
+      { id: "button--primary", hash: "a".repeat(64), bytes: dark },
+      { id: "button--removed", hash: "b".repeat(64), bytes: dark },
+    ]);
+    const currentId = await uploadPreview("feature/buttons", "head123", 42, [
+      { id: "button--primary", hash: "c".repeat(64), bytes: light },
+      { id: "button--new", hash: "d".repeat(64), bytes: dark },
+    ]);
+
+    const detail = await (
+      await artifactApp.request(`/api/v1/storybook-previews/${currentId}`)
+    ).json();
+    expect(detail.baselineRun).toMatchObject({ branch: "main", commit: "base123" });
+    expect(detail.summary).toEqual({ changed: 1, new: 1, removed: 1, unchanged: 0, uncompared: 0 });
+    expect(detail.captures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "button--primary",
+          status: "changed",
+          diffImageUrl: expect.any(String),
+        }),
+        expect.objectContaining({ id: "button--new", status: "new" }),
+        expect.objectContaining({ id: "button--removed", status: "removed", artifactId: null }),
+      ]),
+    );
+
+    const changed = detail.captures.find(
+      (capture: { status: string }) => capture.status === "changed",
+    );
+    const exchange = await artifactApp.request(changed.diffImageUrl);
+    expect(exchange.status).toBe(302);
+    const diff = await artifactApp.request(
+      `https://previews.test${exchange.headers.get("location")}`,
+      {
+        headers: { cookie: exchange.headers.get("set-cookie")!.split(";")[0]! },
+      },
+    );
+    expect(diff.status).toBe(200);
+    expect(diff.headers.get("content-type")).toBe("image/png");
+    expect(Number(diff.headers.get("x-covallaby-changed-pixels"))).toBeGreaterThan(0);
+    expect(PNG.sync.read(Buffer.from(await diff.arrayBuffer()))).toMatchObject({
+      width: 2,
+      height: 2,
+    });
   });
 
   it("rejects unsafe or incomplete Storybook manifests", async () => {

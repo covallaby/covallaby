@@ -12,6 +12,7 @@ import {
 } from "../api.js";
 import mascotUrl from "../assets/mascot.png";
 import { Sparkline } from "../components/charts.js";
+import { PortfolioReviewQueue } from "../components/review-overview.js";
 import { Skeleton } from "../components/skeleton.js";
 import {
   BranchTag,
@@ -180,6 +181,7 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
           </div>
         </div>
       )}
+      <PortfolioReviewQueue repos={shown} />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Tile
           label="Overall coverage"
