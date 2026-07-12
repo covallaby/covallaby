@@ -139,4 +139,36 @@ describe.each(stores)("store contract (%s)", (_name, store) => {
     expect(await store.getMeta("k")).toBe("v2");
     expect(await store.getMeta("missing")).toBeNull();
   });
+
+  it("filters visual runs by framework before applying the result limit", async () => {
+    await store.createTestRun!({
+      repo: "acme/visuals",
+      branch: "main",
+      commit: "story1",
+      pr: null,
+      framework: "storybook",
+      testsPassed: 0,
+      testsFailed: 0,
+      testsSkipped: 0,
+      durationMs: 0,
+    });
+    await store.createTestRun!({
+      repo: "acme/visuals",
+      branch: "main",
+      commit: "play1",
+      pr: null,
+      framework: "playwright",
+      testsPassed: 6,
+      testsFailed: 0,
+      testsSkipped: 0,
+      durationMs: 1200,
+    });
+
+    expect(await store.listTestRuns!("acme/visuals", 1, "playwright")).toMatchObject([
+      { framework: "playwright", commit: "play1" },
+    ]);
+    expect(await store.listTestRuns!("acme/visuals", 1, "storybook")).toMatchObject([
+      { framework: "storybook", commit: "story1" },
+    ]);
+  });
 });

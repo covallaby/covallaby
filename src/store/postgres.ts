@@ -402,10 +402,14 @@ export class PostgresStore implements Store {
     return raw ? toArtifact(raw) : null;
   }
 
-  async listTestRuns(repo: string, limit: number): Promise<TestRunRow[]> {
-    const rows = await this.sql<
-      RawTestRun[]
-    >`SELECT * FROM test_runs WHERE repo = ${repo} ORDER BY id DESC LIMIT ${limit}`;
+  async listTestRuns(repo: string, limit: number, framework?: string): Promise<TestRunRow[]> {
+    const rows = framework
+      ? await this.sql<
+          RawTestRun[]
+        >`SELECT * FROM test_runs WHERE repo = ${repo} AND framework = ${framework} ORDER BY id DESC LIMIT ${limit}`
+      : await this.sql<
+          RawTestRun[]
+        >`SELECT * FROM test_runs WHERE repo = ${repo} ORDER BY id DESC LIMIT ${limit}`;
     return rows.map(toTestRun);
   }
 

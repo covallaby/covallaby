@@ -507,10 +507,18 @@ export class SqliteStore implements Store {
     return raw ? toArtifact(raw) : null;
   }
 
-  async listTestRuns(repo: string, limit: number): Promise<TestRunRow[]> {
-    const rows = this.db
-      .prepare(`SELECT ${TEST_RUN_COLUMNS} FROM test_runs WHERE repo = ? ORDER BY id DESC LIMIT ?`)
-      .all(repo, limit) as unknown as RawTestRun[];
+  async listTestRuns(repo: string, limit: number, framework?: string): Promise<TestRunRow[]> {
+    const rows = framework
+      ? (this.db
+          .prepare(
+            `SELECT ${TEST_RUN_COLUMNS} FROM test_runs WHERE repo = ? AND framework = ? ORDER BY id DESC LIMIT ?`,
+          )
+          .all(repo, framework, limit) as unknown as RawTestRun[])
+      : (this.db
+          .prepare(
+            `SELECT ${TEST_RUN_COLUMNS} FROM test_runs WHERE repo = ? ORDER BY id DESC LIMIT ?`,
+          )
+          .all(repo, limit) as unknown as RawTestRun[]);
     return rows.map(toTestRun);
   }
 

@@ -39,7 +39,7 @@ export function Playbacks() {
   return (
     <Card>
       <CardHeader
-        title="Browser runs"
+        title="Playwright runs"
         description="Watch the browser flows CI exercised, with traces and screenshots beside them."
       />
       {error ? (
@@ -47,7 +47,7 @@ export function Playbacks() {
           <div className="flex gap-3">
             <AlertCircle className="mt-0.5 shrink-0 text-(--bad)" size={18} />
             <div>
-              <p className="text-sm font-medium">We couldn't load browser runs.</p>
+              <p className="text-sm font-medium">We couldn't load Playwright runs.</p>
               <p className="mt-1 text-xs text-(--muted)">
                 Your recordings are still safe. Check the connection and try again.
               </p>
@@ -62,11 +62,11 @@ export function Playbacks() {
           </button>
         </div>
       ) : !runs ? (
-        <p className="px-5 pb-5 text-sm text-(--muted)">Loading browser runs…</p>
+        <p className="px-5 pb-5 text-sm text-(--muted)">Loading Playwright runs…</p>
       ) : runs.length === 0 ? (
         <div className="px-5 pb-6 text-sm text-(--muted)">
           <p>
-            No browser runs yet. Add{" "}
+            No Playwright runs yet. Add{" "}
             <code className="rounded bg-(--surface-2) px-1.5 py-0.5">playwright-results</code> to
             the Covallaby Action and the first run will appear here.
           </p>
@@ -136,7 +136,7 @@ export function Playbacks() {
                         ) : (
                           <CirclePlay className="mr-2 inline text-(--good)" size={16} />
                         )}
-                        {run.pr ? `PR #${run.pr} browser run` : `${run.branch} browser run`}
+                        {run.pr ? `PR #${run.pr} Playwright run` : `${run.branch} Playwright run`}
                       </Link>
                     </Td>
                     <Td>
@@ -242,7 +242,7 @@ export function PlaybackDetail() {
   if (error)
     return (
       <div className="rounded-xl border border-(--bad)/25 bg-(--bad)/5 p-5">
-        <p className="text-sm font-medium text-(--bad)">This browser run couldn't be loaded.</p>
+        <p className="text-sm font-medium text-(--bad)">This Playwright run couldn't be loaded.</p>
         <p className="mt-1 text-xs text-(--muted)">
           The run may have expired under your retention policy, or the connection may be
           unavailable.
@@ -260,10 +260,10 @@ export function PlaybackDetail() {
           to={`/r/${data.run.repo}/playbacks`}
           className="text-xs text-(--muted) hover:text-(--ink)"
         >
-          ← All playbacks
+          ← All Playwright runs
         </Link>
         <h1 className="mt-2 text-xl font-semibold">
-          {data.run.pr ? `PR #${data.run.pr}` : data.run.branch} browser run
+          {data.run.pr ? `PR #${data.run.pr}` : data.run.branch} Playwright run
         </h1>
         <p className="mt-1 font-mono text-xs text-(--muted)">
           {data.run.commit} · {when(data.run.createdAt)}
