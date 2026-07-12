@@ -30,6 +30,8 @@
     "@hono/node-server": "^1.13.8",
     "fast-xml-parser": "^4.5.1",
     "hono": "^4.6.20",
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0",
     "postgres": "^3.4.5"
   },
   "devDependencies": {
@@ -39,6 +41,7 @@
     "@storybook/react-vite": "^10.5.0",
     "@tailwindcss/vite": "^4.0.6",
     "@types/node": "^22",
+    "@types/pngjs": "^6.0.5",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",

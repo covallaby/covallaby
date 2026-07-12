@@ -121,11 +121,22 @@ export interface StorybookPreview extends TestRun {
 }
 
 export interface StorybookCapture {
-  artifactId: number;
+  artifactId: number | null;
   id: string;
   title: string;
   name: string;
   imageUrl: string;
+  baselineImageUrl?: string;
+  diffImageUrl?: string;
+  status: "changed" | "new" | "removed" | "unchanged" | "uncompared";
+}
+
+export interface StorybookDiffSummary {
+  changed: number;
+  new: number;
+  removed: number;
+  unchanged: number;
+  uncompared: number;
 }
 
 export interface ReviewSignals {
@@ -219,9 +230,13 @@ const liveApi = {
   storybookPreviews: (repo: string) =>
     get<{ previews: StorybookPreview[] }>(`/api/v1/repos/${repo}/storybook-previews`),
   storybookPreview: (id: string) =>
-    get<{ run: StorybookPreview; previewUrl: string; captures: StorybookCapture[] }>(
-      `/api/v1/storybook-previews/${id}`,
-    ),
+    get<{
+      run: StorybookPreview;
+      previewUrl: string;
+      baselineRun: StorybookPreview | null;
+      summary: StorybookDiffSummary;
+      captures: StorybookCapture[];
+    }>(`/api/v1/storybook-previews/${id}`),
   reviewSignals: (repo?: string) =>
     get<{ repositories: ReviewSignals[] }>(
       `/api/v1/review-signals${repo ? `?repo=${encodeURIComponent(repo)}` : ""}`,
@@ -356,20 +371,42 @@ export const api: typeof liveApi = IS_DEMO
             imageCount: 2,
           },
           previewUrl: "https://example.invalid/storybook",
+          baselineRun: {
+            id: 17,
+            repo: "covallaby/covallaby",
+            branch: "main",
+            commit: "72d41f0dd8",
+            pr: null,
+            framework: "storybook",
+            status: "complete" as const,
+            testsPassed: 0,
+            testsFailed: 0,
+            testsSkipped: 0,
+            durationMs: 0,
+            createdAt: "2026-07-10T16:14:00.000Z",
+            completedAt: "2026-07-10T16:15:12.000Z",
+          },
+          summary: { changed: 1, new: 1, removed: 0, unchanged: 0, uncompared: 0 },
           captures: [
             {
               artifactId: 1,
               id: "dashboard--review-queue",
               title: "Dashboard/Review queue",
               name: "With component captures",
+              status: "changed" as const,
               imageUrl:
                 "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='100%25' height='100%25' fill='%231c1a17'/%3E%3Crect x='80' y='80' width='640' height='290' rx='18' fill='%2328231d' stroke='%23483f34'/%3E%3Ccircle cx='130' cy='135' r='18' fill='%2322c55e'/%3E%3Crect x='170' y='118' width='360' height='18' rx='9' fill='%23f5f1e8'/%3E%3Crect x='170' y='150' width='260' height='12' rx='6' fill='%238f8778'/%3E%3C/svg%3E",
+              baselineImageUrl:
+                "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='100%25' height='100%25' fill='%231c1a17'/%3E%3Crect x='100' y='95' width='600' height='260' rx='12' fill='%2328231d' stroke='%23483f34'/%3E%3Ccircle cx='145' cy='145' r='15' fill='%23d59b16'/%3E%3Crect x='180' y='130' width='300' height='16' rx='8' fill='%23f5f1e8'/%3E%3C/svg%3E",
+              diffImageUrl:
+                "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='100%25' height='100%25' fill='%231c1a17'/%3E%3Crect x='80' y='80' width='640' height='290' rx='18' fill='none' stroke='%23ff2f92' stroke-width='8'/%3E%3C/svg%3E",
             },
             {
               artifactId: 2,
               id: "playback--steps",
               title: "Visual testing/Playback",
               name: "Step gallery",
+              status: "new" as const,
               imageUrl:
                 "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='100%25' height='100%25' fill='%231c1a17'/%3E%3Crect x='60' y='60' width='205' height='330' rx='14' fill='%2328231d'/%3E%3Crect x='290' y='60' width='450' height='330' rx='14' fill='%23f5f1e8'/%3E%3C/svg%3E",
             },
