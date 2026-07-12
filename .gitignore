@@ -5,6 +5,9 @@ data/
 .DS_Store
 web/demo-dist/
 storybook-static/
+playwright-report/
+playwright-results.json
+test-results/
 
 # Personalized production deploy config (use deploy/fly.toml as the public template)
 /fly.toml
