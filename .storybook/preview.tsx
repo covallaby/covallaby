@@ -9,7 +9,9 @@ const withTheme: Decorator = (Story, context) => {
   }, [theme]);
   return (
     <div className="min-h-screen bg-(--page) p-6 text-(--ink)">
-      <div className="mx-auto max-w-4xl">
+      <div
+        className={`mx-auto ${context.parameters.contentWidth === "wide" ? "max-w-7xl" : "max-w-4xl"}`}
+      >
         <Story />
       </div>
     </div>
