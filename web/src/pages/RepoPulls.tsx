@@ -35,7 +35,7 @@ export function PullRequests() {
             <Link
               key={p.pr}
               to={`/r/${repo}/pr/${p.pr}`}
-              className="grid grid-cols-[minmax(0,1fr)_auto_120px] items-center gap-4 rounded-lg px-3 py-2.5 transition-colors hover:bg-(--surface-2)"
+              className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-(--surface-2) sm:grid-cols-[minmax(0,1fr)_auto_120px] sm:gap-4"
             >
               <span className="min-w-0">
                 <span className="block truncate text-[13.5px] font-medium">
@@ -54,7 +54,9 @@ export function PullRequests() {
               >
                 {formatPercent(p.latest.percent)}
               </span>
-              <Meter percent={p.latest.percent} />
+              <span className="hidden sm:block">
+                <Meter percent={p.latest.percent} />
+              </span>
             </Link>
           ))}
         </div>

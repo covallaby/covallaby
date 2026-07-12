@@ -160,48 +160,53 @@ export function UploadsTable({
   const navigate = useNavigate();
   const rows = limit ? history.slice(0, limit) : history;
   return (
-    <table className="w-full text-[13.5px]">
-      <thead>
-        <tr>
-          <Th>Commit</Th>
-          <Th>When</Th>
-          <Th right>Lines</Th>
-          <Th right>Δ</Th>
-          <Th right>Coverage</Th>
-          <Th />
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((u, i) => (
-          // biome-ignore lint/a11y/useKeyWithClickEvents: the commit Link is the keyboard path; row onClick is a mouse convenience
-          <tr
-            key={u.id}
-            onClick={() => navigate(`/r/${repo}/u/${u.id}`)}
-            className="cursor-pointer transition-colors hover:bg-(--surface-2)"
-          >
-            <Td>
-              <Link className="font-mono text-[12.5px] hover:underline" to={`/r/${repo}/u/${u.id}`}>
-                {u.commit.slice(0, 10)}
-              </Link>
-              {u.pr ? <span className="ml-1.5 text-(--muted)">#{u.pr}</span> : null}
-            </Td>
-            <Td className="text-(--muted)">{when(u.createdAt)}</Td>
-            <Td className="text-right font-mono text-[12.5px] text-(--muted) tabular-nums">
-              {u.linesCovered.toLocaleString()}/{u.linesTotal.toLocaleString()}
-            </Td>
-            <Td className="text-right">
-              <DeltaChip current={u.percent} previous={history[i + 1]?.percent} />
-            </Td>
-            <Td className="text-right">
-              <Pct percent={u.percent} />
-            </Td>
-            <Td className="w-24">
-              <Meter percent={u.percent} />
-            </Td>
+    <div className="max-w-full overflow-x-auto overscroll-x-contain" data-mobile-scroll-region>
+      <table className="w-full min-w-[680px] text-[13.5px]">
+        <thead>
+          <tr>
+            <Th>Commit</Th>
+            <Th>When</Th>
+            <Th right>Lines</Th>
+            <Th right>Δ</Th>
+            <Th right>Coverage</Th>
+            <Th />
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((u, i) => (
+            // biome-ignore lint/a11y/useKeyWithClickEvents: the commit Link is the keyboard path; row onClick is a mouse convenience
+            <tr
+              key={u.id}
+              onClick={() => navigate(`/r/${repo}/u/${u.id}`)}
+              className="cursor-pointer transition-colors hover:bg-(--surface-2)"
+            >
+              <Td>
+                <Link
+                  className="font-mono text-[12.5px] hover:underline"
+                  to={`/r/${repo}/u/${u.id}`}
+                >
+                  {u.commit.slice(0, 10)}
+                </Link>
+                {u.pr ? <span className="ml-1.5 text-(--muted)">#{u.pr}</span> : null}
+              </Td>
+              <Td className="text-(--muted)">{when(u.createdAt)}</Td>
+              <Td className="text-right font-mono text-[12.5px] text-(--muted) tabular-nums">
+                {u.linesCovered.toLocaleString()}/{u.linesTotal.toLocaleString()}
+              </Td>
+              <Td className="text-right">
+                <DeltaChip current={u.percent} previous={history[i + 1]?.percent} />
+              </Td>
+              <Td className="text-right">
+                <Pct percent={u.percent} />
+              </Td>
+              <Td className="w-24">
+                <Meter percent={u.percent} />
+              </Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
