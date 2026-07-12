@@ -15,7 +15,11 @@ import {
   Monitor,
   Play,
   RotateCw,
+  Scan,
+  StretchHorizontal,
   XCircle,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -191,6 +195,7 @@ export function Playbacks() {
 }
 
 type ViewerTab = "steps" | "video" | "trace" | "files";
+type ImageMode = "screen" | "width" | "zoom";
 
 function FileLink({ artifact }: { artifact: TestArtifact }) {
   const Icon = artifact.kind === "report" ? Camera : FileArchive;
@@ -215,9 +220,10 @@ function FileLink({ artifact }: { artifact: TestArtifact }) {
 }
 
 function ViewportBadge({ width, height }: { width: number | null; height: number | null }) {
+  if (!width || !height) return null;
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-(--border) bg-(--surface-2) px-2.5 py-1 font-mono text-[10px] text-(--muted)">
-      <Monitor size={11} /> {width && height ? `${width} × ${height}` : "detecting viewport"}
+      <Monitor size={11} /> {width} × {height}
     </span>
   );
 }
@@ -228,7 +234,10 @@ export function JourneyViewer({ artifacts }: { artifacts: TestArtifact[] }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [tab, setTab] = useState<ViewerTab>("steps");
   const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [imageMode, setImageMode] = useState<ImageMode>("screen");
+  const [zoom, setZoom] = useState(1);
   const stage = useRef<HTMLDivElement>(null);
+  const imageScroller = useRef<HTMLDivElement>(null);
   const journey = library.journeys[journeyIndex] ?? null;
   const selectedStep = journey?.screenshots[stepIndex] ?? null;
   const video = journey?.videos.toSorted((a, b) => b.sizeBytes - a.sizeBytes)[0] ?? null;
@@ -239,6 +248,14 @@ export function JourneyViewer({ artifacts }: { artifacts: TestArtifact[] }) {
     const next = library.journeys[journeyIndex];
     setTab(next?.screenshots.length ? "steps" : next?.videos.length ? "video" : "trace");
   }, [journeyIndex, library.journeys]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset the image canvas when selection changes
+  useEffect(() => {
+    imageScroller.current?.scrollTo({ top: 0, left: 0 });
+    setDimensions(null);
+    setZoom(1);
+    setImageMode("screen");
+  }, [selectedStep?.id]);
 
   useEffect(() => {
     if (tab !== "steps" || !journey?.screenshots.length) return;
@@ -338,7 +355,7 @@ export function JourneyViewer({ artifacts }: { artifacts: TestArtifact[] }) {
         <div ref={stage} className="min-w-0 bg-(--bg) p-3 sm:p-5">
           {tab === "steps" && selectedStep ? (
             <div>
-              <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <p className="text-sm font-medium">
                     Step {stepIndex + 1} of {journey.screenshots.length}
@@ -347,30 +364,103 @@ export function JourneyViewer({ artifacts }: { artifacts: TestArtifact[] }) {
                     {selectedStep.name}
                   </p>
                 </div>
-                <ViewportBadge
-                  width={dimensions?.width ?? null}
-                  height={dimensions?.height ?? null}
-                />
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <ViewportBadge
+                    width={dimensions?.width ?? null}
+                    height={dimensions?.height ?? null}
+                  />
+                  {dimensions && dimensions.height / dimensions.width > 2 ? (
+                    <span className="rounded-full bg-(--accent-wash) px-2.5 py-1 text-[10px] font-medium text-(--ink-2)">
+                      Full page
+                    </span>
+                  ) : null}
+                  <div className="ml-1 inline-flex rounded-lg border border-(--border) bg-(--surface)">
+                    <button
+                      type="button"
+                      onClick={() => setImageMode("width")}
+                      className={`inline-flex items-center gap-1.5 rounded-l-lg px-2.5 py-1.5 text-[11px] ${imageMode === "width" ? "bg-(--accent-wash) text-(--ink)" : "text-(--muted)"}`}
+                      title="Fit the image to the available width"
+                    >
+                      <StretchHorizontal size={12} /> Fit width
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setImageMode("screen")}
+                      className={`inline-flex items-center gap-1.5 border-l border-(--border) px-2.5 py-1.5 text-[11px] ${imageMode === "screen" ? "bg-(--accent-wash) text-(--ink)" : "text-(--muted)"}`}
+                      title="Show the entire image"
+                    >
+                      <Scan size={12} /> Fit screen
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImageMode("zoom");
+                        setZoom((value) => Math.max(0.25, value - 0.25));
+                      }}
+                      className="border-l border-(--border) px-2 py-1.5 text-(--muted)"
+                      aria-label="Zoom out"
+                    >
+                      <ZoomOut size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImageMode("zoom");
+                        setZoom((value) => Math.min(2, value + 0.25));
+                      }}
+                      className="rounded-r-lg border-l border-(--border) px-2 py-1.5 text-(--muted)"
+                      aria-label="Zoom in"
+                    >
+                      <ZoomIn size={12} />
+                    </button>
+                  </div>
+                  {imageMode === "zoom" ? (
+                    <span className="w-10 text-right font-mono text-[10px] text-(--muted)">
+                      {Math.round(zoom * 100)}%
+                    </span>
+                  ) : null}
+                </div>
               </div>
-              <div className="flex min-h-[420px] items-center justify-center overflow-auto rounded-xl border border-(--border) bg-black/90 p-3">
+              <div
+                ref={imageScroller}
+                className={`flex h-[min(70vh,760px)] min-h-[460px] overflow-auto rounded-xl border border-(--border) bg-[linear-gradient(45deg,var(--surface-2)_25%,transparent_25%),linear-gradient(-45deg,var(--surface-2)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,var(--surface-2)_75%),linear-gradient(-45deg,transparent_75%,var(--surface-2)_75%)] bg-[length:20px_20px] bg-[position:0_0,0_10px,10px_-10px,-10px_0px] p-3 ${imageMode === "screen" ? "items-center justify-center" : "items-start justify-center"}`}
+              >
                 <img
                   key={selectedStep.id}
                   ref={(element) => {
-                    if (element?.complete && element.naturalWidth && !dimensions)
-                      setDimensions({
+                    if (element?.complete && element.naturalWidth && !dimensions) {
+                      const next = {
                         width: element.naturalWidth,
                         height: element.naturalHeight,
+                      };
+                      setDimensions({
+                        ...next,
                       });
+                      setImageMode(next.height / next.width > 2 ? "width" : "screen");
+                    }
                   }}
                   src={selectedStep.url}
                   alt={`${shortJourneyName(journey.name)}, step ${stepIndex + 1}`}
-                  onLoad={(event) =>
-                    setDimensions({
+                  onLoad={(event) => {
+                    const next = {
                       width: event.currentTarget.naturalWidth,
                       height: event.currentTarget.naturalHeight,
-                    })
+                    };
+                    setDimensions(next);
+                    setImageMode(next.height / next.width > 2 ? "width" : "screen");
+                  }}
+                  style={
+                    imageMode === "zoom" && dimensions
+                      ? { width: dimensions.width * zoom, maxWidth: "none" }
+                      : undefined
                   }
-                  className="max-h-[68vh] max-w-full object-contain shadow-2xl"
+                  className={
+                    imageMode === "screen"
+                      ? "max-h-full max-w-full object-contain shadow-xl"
+                      : imageMode === "width"
+                        ? "h-auto w-full max-w-none shadow-xl"
+                        : "h-auto max-w-none shadow-xl"
+                  }
                 />
               </div>
               <div className="mt-3 flex items-center gap-2">

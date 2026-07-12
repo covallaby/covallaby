@@ -2,8 +2,8 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { TestArtifact } from "../api.js";
 import { JourneyViewer } from "./Playbacks.js";
 
-const shot = (label: string, color: string) =>
-  `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900"><rect width="1440" height="900" fill="#10100f"/><rect x="80" y="70" width="1280" height="86" rx="18" fill="${color}" opacity=".22"/><rect x="80" y="190" width="310" height="640" rx="22" fill="#1d1d1a"/><rect x="425" y="190" width="935" height="300" rx="22" fill="#20201c"/><rect x="425" y="525" width="450" height="305" rx="22" fill="#20201c"/><rect x="910" y="525" width="450" height="305" rx="22" fill="#20201c"/><text x="115" y="125" fill="white" font-family="system-ui" font-size="32" font-weight="700">${label}</text><text x="465" y="250" fill="${color}" font-family="system-ui" font-size="24">Mostly Good Metrics</text></svg>`)}`;
+const shot = (label: string, color: string, height = 900) =>
+  `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="${height}"><rect width="1440" height="${height}" fill="#10100f"/><rect x="80" y="70" width="1280" height="86" rx="18" fill="${color}" opacity=".22"/><rect x="80" y="190" width="310" height="640" rx="22" fill="#1d1d1a"/><rect x="425" y="190" width="935" height="300" rx="22" fill="#20201c"/><rect x="425" y="525" width="450" height="305" rx="22" fill="#20201c"/><rect x="910" y="525" width="450" height="305" rx="22" fill="#20201c"/><text x="115" y="125" fill="white" font-family="system-ui" font-size="32" font-weight="700">${label}</text><text x="465" y="250" fill="${color}" font-family="system-ui" font-size="24">Mostly Good Metrics</text></svg>`)}`;
 
 let id = 1;
 const make = (
@@ -44,7 +44,7 @@ const artifacts = journeys.flatMap((journey, journeyIndex) => {
         "screenshot",
         fullName,
         `${String(stepIndex + 1).padStart(2, "0")}-${step.toLowerCase().replaceAll(" ", "-")}.png`,
-        shot(step, journeyIndex % 2 ? "#a3c957" : "#59c3ff"),
+        shot(step, journeyIndex % 2 ? "#a3c957" : "#59c3ff", stepIndex === 2 ? 4200 : 900),
       ),
     ),
     make("video", fullName, "video.webm", "#video-not-loaded-in-story"),
