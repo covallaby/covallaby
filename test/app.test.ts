@@ -196,6 +196,17 @@ describe("browser test artifacts", () => {
       files: [
         { path: "index.html", contentType: "text/html", sizeBytes: 30 },
         { path: "assets/app.js", contentType: "text/javascript", sizeBytes: 17 },
+        {
+          path: "_covallaby/captures/button--primary.png",
+          contentType: "image/png",
+          sizeBytes: 4,
+          kind: "screenshot",
+          testName: JSON.stringify({
+            id: "button--primary",
+            title: "Components/Button",
+            name: "Primary",
+          }),
+        },
       ],
     };
     const created = await artifactApp.request("/api/v1/storybook-previews", {
@@ -205,7 +216,7 @@ describe("browser test artifacts", () => {
     });
     expect(created.status).toBe(201);
     const data = await created.json();
-    const bodies = ["<h1>Component library</h1>okay", "console.log('hi')"];
+    const bodies = ["<h1>Component library</h1>okay", "console.log('hi')", "png!"];
     for (const [index, artifact] of data.artifacts.entries()) {
       const uploaded = await artifactApp.request(new URL(artifact.uploadUrl).pathname, {
         method: "PUT",
@@ -232,13 +243,13 @@ describe("browser test artifacts", () => {
     ).json();
     expect(previews.previews).toHaveLength(1);
     expect(previews.previews[0].framework).toBe("storybook");
-    expect(previews.previews[0]).toMatchObject({ artifactCount: 2, imageCount: 0 });
+    expect(previews.previews[0]).toMatchObject({ artifactCount: 3, imageCount: 1 });
     const reviewSignals = await (
       await artifactApp.request("/api/v1/review-signals?repo=acme/app")
     ).json();
     expect(reviewSignals.repositories[0]).toMatchObject({
       repo: "acme/app",
-      previews: [{ artifactCount: 2, imageCount: 0 }],
+      previews: [{ artifactCount: 3, imageCount: 1 }],
     });
 
     const detail = await (
@@ -247,6 +258,14 @@ describe("browser test artifacts", () => {
     expect(detail.previewUrl).toMatch(
       new RegExp(`^https://previews\\.test/p/${data.run.id}/index\\.html\\?preview_token=`),
     );
+    expect(detail.captures).toEqual([
+      expect.objectContaining({
+        id: "button--primary",
+        title: "Components/Button",
+        name: "Primary",
+        imageUrl: expect.stringContaining("/_covallaby/captures/button--primary.png"),
+      }),
+    ]);
     const tokenExchange = await artifactApp.request(detail.previewUrl);
     expect(tokenExchange.status).toBe(302);
     expect(tokenExchange.headers.get("location")).toBe(`/p/${data.run.id}/index.html`);

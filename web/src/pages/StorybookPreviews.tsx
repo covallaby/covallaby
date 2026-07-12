@@ -5,10 +5,11 @@ import {
   GitCommit,
   GitPullRequest,
   RotateCw,
+  Search,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { type StorybookPreview, api } from "../api.js";
+import { type StorybookCapture, type StorybookPreview, api } from "../api.js";
 import { Card, CardHeader, Td, Th } from "../components/ui.js";
 import { useRepo } from "./Repo.js";
 
@@ -34,7 +35,7 @@ export function StorybookPreviews() {
   return (
     <Card>
       <CardHeader
-        title="Storybook previews"
+        title="Component captures"
         description="Review the exact component experience built by CI before it reaches production."
       />
       {error ? (
@@ -42,7 +43,7 @@ export function StorybookPreviews() {
           <div className="flex gap-3">
             <AlertCircle className="mt-0.5 shrink-0 text-(--bad)" size={18} />
             <div>
-              <p className="text-sm font-medium">We couldn't load Storybook previews.</p>
+              <p className="text-sm font-medium">We couldn't load component captures.</p>
               <p className="mt-1 text-xs text-(--muted)">
                 Your previews are still safe. Check the connection and try again.
               </p>
@@ -149,9 +150,14 @@ export function StorybookPreviews() {
 
 export function StorybookPreviewDetail() {
   const { id } = useParams();
-  const [data, setData] = useState<{ run: StorybookPreview; previewUrl: string } | null>(null);
+  const [data, setData] = useState<{
+    run: StorybookPreview;
+    previewUrl: string;
+    captures: StorybookCapture[];
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [request, setRequest] = useState(0);
+  const [query, setQuery] = useState("");
   useEffect(() => {
     void request;
     setData(null);
@@ -177,7 +183,10 @@ export function StorybookPreviewDetail() {
         </button>
       </div>
     );
-  if (!data) return <p className="text-sm text-(--muted)">Loading Storybook preview…</p>;
+  if (!data) return <p className="text-sm text-(--muted)">Loading component captures…</p>;
+  const captures = data.captures.filter((capture) =>
+    `${capture.title} ${capture.name}`.toLowerCase().includes(query.trim().toLowerCase()),
+  );
   return (
     <div className="space-y-4">
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
@@ -186,10 +195,10 @@ export function StorybookPreviewDetail() {
             to={`/r/${data.run.repo}/storybook-previews`}
             className="text-xs text-(--muted) hover:text-(--ink)"
           >
-            ← All Storybook previews
+            ← All component captures
           </Link>
           <h1 className="mt-2 text-xl font-semibold">
-            {data.run.pr ? `PR #${data.run.pr}` : data.run.branch} Storybook preview
+            {data.run.pr ? `PR #${data.run.pr}` : data.run.branch} component captures
           </h1>
           <p className="mt-1 font-mono text-xs text-(--muted)">
             {data.run.commit} · {when(data.run.createdAt)}
@@ -202,7 +211,7 @@ export function StorybookPreviewDetail() {
             rel="noreferrer"
             className="inline-flex items-center gap-2 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-xs font-medium hover:border-(--muted)"
           >
-            Open preview <ExternalLink size={14} />
+            Open interactive Storybook <ExternalLink size={14} />
           </a>
         ) : (
           <span className="rounded-full bg-(--accent-wash) px-3 py-1.5 text-xs font-medium text-(--accent)">
@@ -210,15 +219,64 @@ export function StorybookPreviewDetail() {
           </span>
         )}
       </div>
-      {data.run.status === "complete" ? (
-        <Card className="overflow-hidden">
-          <iframe
-            title={`Storybook preview ${data.run.id}`}
-            src={data.previewUrl}
-            referrerPolicy="no-referrer"
-            className="h-[78vh] w-full border-0 bg-white"
-            sandbox="allow-downloads allow-forms allow-popups allow-same-origin allow-scripts"
-          />
+      {data.run.status === "complete" && data.captures.length > 0 ? (
+        <>
+          <Card className="p-3 sm:p-4">
+            <label className="relative block">
+              <Search
+                size={15}
+                className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-(--muted)"
+              />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={`Search ${data.captures.length} component captures`}
+                className="w-full rounded-lg border border-(--border) bg-(--surface-2) py-2 pr-3 pl-9 text-sm outline-none focus:border-(--muted)"
+              />
+            </label>
+          </Card>
+          {captures.length > 0 ? (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {captures.map((capture) => (
+                <Card key={capture.artifactId} className="group overflow-hidden">
+                  <a
+                    href={capture.imageUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block bg-[linear-gradient(45deg,var(--surface-2)_25%,transparent_25%),linear-gradient(-45deg,var(--surface-2)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,var(--surface-2)_75%),linear-gradient(-45deg,transparent_75%,var(--surface-2)_75%)] bg-size-[18px_18px] bg-position-[0_0,0_9px,9px_-9px,-9px_0] p-3"
+                  >
+                    <img
+                      src={capture.imageUrl}
+                      alt={`${capture.title} — ${capture.name}`}
+                      loading="lazy"
+                      className="mx-auto max-h-[420px] w-auto max-w-full rounded-md bg-white object-contain shadow-sm transition-transform group-hover:scale-[1.01]"
+                    />
+                  </a>
+                  <div className="border-t border-(--hairline) px-4 py-3">
+                    <p className="truncate text-xs text-(--muted)">{capture.title}</p>
+                    <p className="mt-0.5 truncate text-sm font-medium">{capture.name}</p>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <Card className="p-6 text-center text-sm text-(--muted)">
+              No component captures match “{query}”.
+            </Card>
+          )}
+        </>
+      ) : data.run.status === "complete" ? (
+        <Card className="p-6">
+          <div className="flex items-start gap-3">
+            <BookOpen size={20} className="mt-0.5 shrink-0 text-(--accent)" />
+            <div>
+              <p className="text-sm font-medium">This older run has no individual captures.</p>
+              <p className="mt-1 text-xs text-(--muted)">
+                Its interactive Storybook is still available. New runs captured by the Covallaby
+                Action will appear here as a searchable image gallery.
+              </p>
+            </div>
+          </div>
         </Card>
       ) : (
         <Card className="p-6">
