@@ -898,7 +898,59 @@ export function createApp({
       50,
       "storybook",
     );
-    return c.json({ previews });
+    return c.json({
+      previews: await Promise.all(
+        previews.map(async (preview) => {
+          const found = await store.getTestRun!(preview.id);
+          const artifacts = found?.artifacts ?? [];
+          return {
+            ...preview,
+            artifactCount: artifacts.length,
+            imageCount: artifacts.filter((artifact) => artifact.kind === "screenshot").length,
+          };
+        }),
+      ),
+    });
+  });
+
+  app.get("/api/v1/review-signals", async (c) => {
+    if (!artifactReady()) return c.json({ repositories: [] });
+    const accounts = c.get("accounts");
+    const requested = c.req.query("repo");
+    const repos = requested
+      ? [requested]
+      : (await store.listRepos(1, accounts)).map((overview) => overview.repo);
+    const visible = repos.filter((repo) => {
+      if (!REPO_RE.test(repo)) return false;
+      if (!accounts) return true;
+      const owner = repo.split("/")[0]!;
+      return accounts.some((account) => account.toLowerCase() === owner.toLowerCase());
+    });
+    return c.json({
+      repositories: await Promise.all(
+        visible.map(async (repo) => {
+          const [runs, previews] = await Promise.all([
+            store.listTestRuns!(repo, 5, "playwright"),
+            store.listTestRuns!(repo, 5, "storybook"),
+          ]);
+          return {
+            repo,
+            runs,
+            previews: await Promise.all(
+              previews.map(async (preview) => {
+                const found = await store.getTestRun!(preview.id);
+                const artifacts = found?.artifacts ?? [];
+                return {
+                  ...preview,
+                  artifactCount: artifacts.length,
+                  imageCount: artifacts.filter((artifact) => artifact.kind === "screenshot").length,
+                };
+              }),
+            ),
+          };
+        }),
+      ),
+    });
   });
 
   app.get("/api/v1/storybook-previews/:id", async (c) => {

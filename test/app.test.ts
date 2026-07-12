@@ -232,6 +232,14 @@ describe("browser test artifacts", () => {
     ).json();
     expect(previews.previews).toHaveLength(1);
     expect(previews.previews[0].framework).toBe("storybook");
+    expect(previews.previews[0]).toMatchObject({ artifactCount: 2, imageCount: 0 });
+    const reviewSignals = await (
+      await artifactApp.request("/api/v1/review-signals?repo=acme/app")
+    ).json();
+    expect(reviewSignals.repositories[0]).toMatchObject({
+      repo: "acme/app",
+      previews: [{ artifactCount: 2, imageCount: 0 }],
+    });
 
     const detail = await (
       await artifactApp.request(`/api/v1/storybook-previews/${data.run.id}`)

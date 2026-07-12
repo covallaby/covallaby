@@ -115,7 +115,16 @@ export interface TestArtifact {
   viewerUrl?: string;
 }
 
-export interface StorybookPreview extends TestRun {}
+export interface StorybookPreview extends TestRun {
+  artifactCount?: number;
+  imageCount?: number;
+}
+
+export interface ReviewSignals {
+  repo: string;
+  runs: TestRun[];
+  previews: StorybookPreview[];
+}
 
 /** A repo's merge policy — the "can I merge?" gate. */
 export interface RepoPolicy {
@@ -203,6 +212,10 @@ const liveApi = {
     get<{ previews: StorybookPreview[] }>(`/api/v1/repos/${repo}/storybook-previews`),
   storybookPreview: (id: string) =>
     get<{ run: StorybookPreview; previewUrl: string }>(`/api/v1/storybook-previews/${id}`),
+  reviewSignals: (repo?: string) =>
+    get<{ repositories: ReviewSignals[] }>(
+      `/api/v1/review-signals${repo ? `?repo=${encodeURIComponent(repo)}` : ""}`,
+    ),
   compare: (repo: string, q: { pr?: number; head?: string; base?: string }) => {
     const params = new URLSearchParams();
     if (q.pr !== undefined) params.set("pr", String(q.pr));
@@ -232,77 +245,101 @@ export const api: typeof liveApi = IS_DEMO
       status: (...a) => load().then((d) => d.status(...a)),
       testRuns: (repo: string) =>
         Promise.resolve({
-          runs: [
-            {
-              id: 42,
-              repo,
-              branch: "feature/checkout-polish",
-              commit: "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
-              pr: 128,
-              framework: "playwright",
-              status: "complete" as const,
-              testsPassed: 34,
-              testsFailed: 0,
-              testsSkipped: 2,
-              durationMs: 48210,
-              createdAt: "2026-07-11T18:42:00.000Z",
-              completedAt: "2026-07-11T18:43:02.000Z",
-            },
-            {
-              id: 41,
-              repo,
-              branch: "main",
-              commit: "72d41f0dd8e6abfe280d9e340c277421f3607184",
-              pr: null,
-              framework: "playwright",
-              status: "complete" as const,
-              testsPassed: 31,
-              testsFailed: 1,
-              testsSkipped: 1,
-              durationMs: 55900,
-              createdAt: "2026-07-10T16:14:00.000Z",
-              completedAt: "2026-07-10T16:15:12.000Z",
-            },
-          ],
+          ...(repo !== "covallaby/covallaby"
+            ? { runs: [] }
+            : {
+                runs: [
+                  {
+                    id: 42,
+                    repo,
+                    branch: "feature/checkout-polish",
+                    commit: "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
+                    pr: 128,
+                    framework: "playwright",
+                    status: "complete" as const,
+                    testsPassed: 34,
+                    testsFailed: 0,
+                    testsSkipped: 2,
+                    durationMs: 48210,
+                    createdAt: "2026-07-11T18:42:00.000Z",
+                    completedAt: "2026-07-11T18:43:02.000Z",
+                  },
+                  {
+                    id: 41,
+                    repo,
+                    branch: "main",
+                    commit: "72d41f0dd8e6abfe280d9e340c277421f3607184",
+                    pr: null,
+                    framework: "playwright",
+                    status: "complete" as const,
+                    testsPassed: 31,
+                    testsFailed: 1,
+                    testsSkipped: 1,
+                    durationMs: 55900,
+                    createdAt: "2026-07-10T16:14:00.000Z",
+                    completedAt: "2026-07-10T16:15:12.000Z",
+                  },
+                ],
+              }),
         }),
       testRun: () => Promise.reject(new Error("Playbacks are not included in the static demo.")),
       storybookPreviews: (repo: string) =>
         Promise.resolve({
-          previews: [
-            {
-              id: 18,
-              repo,
-              branch: "feature/checkout-polish",
-              commit: "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
-              pr: 128,
-              framework: "storybook",
-              status: "complete" as const,
-              testsPassed: 0,
-              testsFailed: 0,
-              testsSkipped: 0,
-              durationMs: 0,
-              createdAt: "2026-07-11T18:42:00.000Z",
-              completedAt: "2026-07-11T18:43:02.000Z",
-            },
-            {
-              id: 17,
-              repo,
-              branch: "main",
-              commit: "72d41f0dd8e6abfe280d9e340c277421f3607184",
-              pr: null,
-              framework: "storybook",
-              status: "complete" as const,
-              testsPassed: 0,
-              testsFailed: 0,
-              testsSkipped: 0,
-              durationMs: 0,
-              createdAt: "2026-07-10T16:14:00.000Z",
-              completedAt: "2026-07-10T16:15:12.000Z",
-            },
-          ],
+          ...(repo !== "covallaby/covallaby"
+            ? { previews: [] }
+            : {
+                previews: [
+                  {
+                    id: 18,
+                    repo,
+                    branch: "feature/checkout-polish",
+                    commit: "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
+                    pr: 128,
+                    framework: "storybook",
+                    status: "complete" as const,
+                    testsPassed: 0,
+                    testsFailed: 0,
+                    testsSkipped: 0,
+                    durationMs: 0,
+                    createdAt: "2026-07-11T18:42:00.000Z",
+                    completedAt: "2026-07-11T18:43:02.000Z",
+                    artifactCount: 28,
+                    imageCount: 24,
+                  },
+                  {
+                    id: 17,
+                    repo,
+                    branch: "main",
+                    commit: "72d41f0dd8e6abfe280d9e340c277421f3607184",
+                    pr: null,
+                    framework: "storybook",
+                    status: "complete" as const,
+                    testsPassed: 0,
+                    testsFailed: 0,
+                    testsSkipped: 0,
+                    durationMs: 0,
+                    createdAt: "2026-07-10T16:14:00.000Z",
+                    completedAt: "2026-07-10T16:15:12.000Z",
+                    artifactCount: 22,
+                    imageCount: 19,
+                  },
+                ],
+              }),
         }),
       storybookPreview: () =>
         Promise.reject(new Error("Storybook previews are not included in the static demo.")),
+      reviewSignals: async (repo?: string) => {
+        const names = repo ? [repo] : ["acme/megarepo", "covallaby/covallaby", "covallaby/server"];
+        return {
+          repositories: await Promise.all(
+            names.map(async (name) => ({
+              repo: name,
+              runs: (await api.testRuns(name)).runs,
+              previews: (await api.storybookPreviews(name)).previews,
+            })),
+          ),
+        };
+      },
       compare: (...a) => load().then((d) => d.compare(...a)),
     }
   : liveApi;

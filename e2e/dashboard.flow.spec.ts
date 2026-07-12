@@ -6,11 +6,15 @@ test("maintainer finds repository risk and reviews its coverage", async ({ page 
   await expect(page.getByText("Live demo")).toBeVisible();
   await expect(page.getByText("Overall coverage")).toBeVisible();
   await expect(page.getByText("Risk map")).toBeVisible();
+  await expect(page.getByText("Needs attention", { exact: true })).toBeVisible();
+  await expect(page.getByText("24 component captures are ready to review")).toBeVisible();
   await chapter(page, testInfo, "01-portfolio-health");
 
   await page.locator('a[href="#/r/covallaby/covallaby"]').first().click();
   await expect(page).toHaveURL(/#\/r\/covallaby\/covallaby$/);
   await expect(page.getByRole("heading", { name: "covallaby/covallaby" })).toBeVisible();
+  await expect(page.getByText("Latest checks", { exact: true })).toBeVisible();
+  await expect(page.getByText("Component captures", { exact: true })).toBeVisible();
   await chapter(page, testInfo, "02-repository-summary");
 
   await page.getByRole("link", { name: "Insights", exact: true }).click();
