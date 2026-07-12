@@ -39,6 +39,7 @@ export function mountHosted(
   store: Store,
   config: HostedConfig,
   deps: HostedDeps = {},
+  uploadAuthorized?: (repo: string, token: string) => Promise<boolean>,
 ): void {
   const github = deps.github ?? createGitHubClient(config);
   const githubApp =
@@ -101,6 +102,43 @@ export function mountHosted(
       await recordInstallation(store, installation);
       await reconcileInstallation(store, githubApp, installationId);
       return c.redirect("/?github=installed");
+    });
+
+    app.post("/api/v1/github/pr-comment", async (c) => {
+      const token = /^Bearer\s+(.+)$/i.exec(c.req.header("authorization") ?? "")?.[1]?.trim();
+      const payload = await c.req.json<{
+        repo?: string;
+        pr?: number;
+        marker?: string;
+        body?: string;
+      }>();
+      const repo = payload.repo ?? "";
+      if (!token || !uploadAuthorized || !(await uploadAuthorized(repo, token))) {
+        return c.json({ ok: false, handled: false, error: "Invalid upload token." }, 401);
+      }
+      if (
+        !/^[-\w.]+\/[-\w.]+$/.test(repo) ||
+        !Number.isSafeInteger(payload.pr) ||
+        (payload.pr ?? 0) <= 0 ||
+        payload.marker !== "<!-- covallaby-report:v1 -->" ||
+        !payload.body?.startsWith(payload.marker) ||
+        payload.body.length > 65_000
+      ) {
+        return c.json({ ok: false, handled: false, error: "Invalid PR comment payload." }, 400);
+      }
+      const owner = repo.split("/")[0]!;
+      const installationId = Number(await store.getMeta(installationAccountKey(owner)));
+      if (!Number.isSafeInteger(installationId) || installationId <= 0) {
+        return c.json({ ok: true, handled: false });
+      }
+      await githubApp.upsertPullRequestComment(
+        installationId,
+        repo,
+        payload.pr!,
+        payload.marker,
+        payload.body,
+      );
+      return c.json({ ok: true, handled: true });
     });
   } else {
     app.get("/api/v1/github/status", (c) => c.json({ configured: false, accounts: [] }));

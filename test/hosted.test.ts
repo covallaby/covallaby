@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
 import { type HostedConfig, loadHostedConfig } from "../src/hosted/config.js";
 import type { GitHubAppClient } from "../src/hosted/github-app.js";
@@ -22,10 +22,12 @@ const fakeGitHub: GitHubClient = {
   getAccounts: async () => ["alice", "acme"],
 };
 
+const upsertPullRequestComment = vi.fn(async () => {});
 const fakeGitHubApp: GitHubAppClient = {
   getInstallation: async (id) => ({ id, account: id === 999 ? "other" : "acme" }),
   listRepositories: async () => [{ fullName: "acme/app", defaultBranch: "main" }],
   listOpenPullRequests: async () => [7],
+  upsertPullRequestComment,
 };
 
 const sessionCookieFor = (accounts: string[], secret = config.sessionSecret) =>
@@ -272,5 +274,40 @@ describe("GitHub App installation flow", () => {
       headers: { cookie: sessionCookieFor(["acme"]) },
     });
     expect((await after.json()).accounts[0].installed).toBe(true);
+  });
+
+  it("owns the sticky PR comment only when its GitHub App is installed", async () => {
+    await store.setMeta("github-app:account:acme", "123");
+    const body = "<!-- covallaby-report:v1 -->\n\n## Covallaby";
+    const handled = await app.request("/api/v1/github/pr-comment", {
+      method: "POST",
+      headers: { authorization: "Bearer up", "content-type": "application/json" },
+      body: JSON.stringify({
+        repo: "acme/app",
+        pr: 7,
+        marker: "<!-- covallaby-report:v1 -->",
+        body,
+      }),
+    });
+    expect(await handled.json()).toMatchObject({ ok: true, handled: true });
+    expect(upsertPullRequestComment).toHaveBeenCalledWith(
+      123,
+      "acme/app",
+      7,
+      "<!-- covallaby-report:v1 -->",
+      body,
+    );
+
+    const fallback = await app.request("/api/v1/github/pr-comment", {
+      method: "POST",
+      headers: { authorization: "Bearer up", "content-type": "application/json" },
+      body: JSON.stringify({
+        repo: "alice/app",
+        pr: 8,
+        marker: "<!-- covallaby-report:v1 -->",
+        body,
+      }),
+    });
+    expect(await fallback.json()).toMatchObject({ ok: true, handled: false });
   });
 });

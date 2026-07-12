@@ -16,6 +16,13 @@ export interface GitHubAppClient {
   getInstallation(id: number): Promise<GitHubInstallation>;
   listRepositories(id: number): Promise<GitHubInstallationRepo[]>;
   listOpenPullRequests(id: number, repo: string): Promise<number[]>;
+  upsertPullRequestComment(
+    id: number,
+    repo: string,
+    pr: number,
+    marker: string,
+    body: string,
+  ): Promise<void>;
 }
 
 export const installationAccountKey = (account: string): string =>
@@ -145,6 +152,27 @@ export function createGitHubAppClient(config: {
       const token = await installationToken(id);
       const pulls = await paged<{ number: number }>(`/repos/${repo}/pulls?state=open`, token);
       return pulls.map((pr) => pr.number);
+    },
+    async upsertPullRequestComment(id, repo, pr, marker, body) {
+      const token = await installationToken(id);
+      const comments = await paged<{ id: number; body: string | null }>(
+        `/repos/${repo}/issues/${pr}/comments`,
+        token,
+      );
+      const existing = comments.find((comment) => comment.body?.startsWith(marker));
+      if (existing) {
+        await api(`/repos/${repo}/issues/comments/${existing.id}`, token, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ body }),
+        });
+      } else {
+        await api(`/repos/${repo}/issues/${pr}/comments`, token, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ body }),
+        });
+      }
     },
   };
 }

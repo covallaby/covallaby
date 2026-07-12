@@ -328,6 +328,11 @@ export function createApp({
     const match = /^Bearer\s+(.+)$/.exec(header ?? "");
     return match ? match[1]!.trim() : null;
   };
+  const uploadAuthorized = async (repo: string, token: string | null): Promise<boolean> => {
+    if (!token || !REPO_RE.test(repo)) return false;
+    const repoToken = await store.getRepoToken(repo);
+    return tokenEquals(token, uploadToken) || (repoToken !== null && tokenEquals(token, repoToken));
+  };
   const previewBase = storybookPreviewBaseUrl?.replace(/\/+$/, "");
   const previewOrigin = previewBase ? new URL(previewBase).origin : null;
   const previewHost = previewBase ? new URL(previewBase).host.toLowerCase() : null;
@@ -360,7 +365,7 @@ export function createApp({
   };
   // Hosted tier (opt-in): sign-in, billing, and per-account read scoping.
   // Mounted before the API routes so its gate runs first. Off in self-hosted.
-  if (hosted) mountHosted(app, store, hosted, hostedDeps);
+  if (hosted) mountHosted(app, store, hosted, hostedDeps, uploadAuthorized);
 
   // Optional read gate for everything except health + upload.
   app.use("*", async (c, next) => {
@@ -404,10 +409,7 @@ export function createApp({
         400,
       );
     }
-    const repoToken = await store.getRepoToken(repo);
-    const authorized =
-      tokenEquals(token, uploadToken) || (repoToken !== null && tokenEquals(token, repoToken));
-    if (!authorized) {
+    if (!(await uploadAuthorized(repo, token))) {
       return c.json({ ok: false, error: "Invalid upload token for this repository." }, 401);
     }
     if (rateLimited(token)) {
@@ -505,12 +507,6 @@ export function createApp({
     );
     return baselineRun ? await store.getTestRun!(baselineRun.id) : null;
   };
-  const uploadAuthorized = async (repo: string, token: string | null): Promise<boolean> => {
-    if (!token) return false;
-    const repoToken = await store.getRepoToken(repo);
-    return tokenEquals(token, uploadToken) || (repoToken !== null && tokenEquals(token, repoToken));
-  };
-
   app.post("/api/v1/test-runs", async (c) => {
     if (!artifactReady())
       return c.json(
