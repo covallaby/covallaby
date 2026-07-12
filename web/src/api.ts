@@ -120,6 +120,14 @@ export interface StorybookPreview extends TestRun {
   imageCount?: number;
 }
 
+export interface StorybookCapture {
+  artifactId: number;
+  id: string;
+  title: string;
+  name: string;
+  imageUrl: string;
+}
+
 export interface ReviewSignals {
   repo: string;
   runs: TestRun[];
@@ -211,7 +219,9 @@ const liveApi = {
   storybookPreviews: (repo: string) =>
     get<{ previews: StorybookPreview[] }>(`/api/v1/repos/${repo}/storybook-previews`),
   storybookPreview: (id: string) =>
-    get<{ run: StorybookPreview; previewUrl: string }>(`/api/v1/storybook-previews/${id}`),
+    get<{ run: StorybookPreview; previewUrl: string; captures: StorybookCapture[] }>(
+      `/api/v1/storybook-previews/${id}`,
+    ),
   reviewSignals: (repo?: string) =>
     get<{ repositories: ReviewSignals[] }>(
       `/api/v1/review-signals${repo ? `?repo=${encodeURIComponent(repo)}` : ""}`,
@@ -326,8 +336,45 @@ export const api: typeof liveApi = IS_DEMO
                 ],
               }),
         }),
-      storybookPreview: () =>
-        Promise.reject(new Error("Storybook previews are not included in the static demo.")),
+      storybookPreview: (id: string) =>
+        Promise.resolve({
+          run: {
+            id: Number(id),
+            repo: "covallaby/covallaby",
+            branch: "feature/checkout-polish",
+            commit: "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
+            pr: 128,
+            framework: "storybook",
+            status: "complete" as const,
+            testsPassed: 0,
+            testsFailed: 0,
+            testsSkipped: 0,
+            durationMs: 0,
+            createdAt: "2026-07-11T18:42:00.000Z",
+            completedAt: "2026-07-11T18:43:02.000Z",
+            artifactCount: 3,
+            imageCount: 2,
+          },
+          previewUrl: "https://example.invalid/storybook",
+          captures: [
+            {
+              artifactId: 1,
+              id: "dashboard--review-queue",
+              title: "Dashboard/Review queue",
+              name: "With component captures",
+              imageUrl:
+                "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='100%25' height='100%25' fill='%231c1a17'/%3E%3Crect x='80' y='80' width='640' height='290' rx='18' fill='%2328231d' stroke='%23483f34'/%3E%3Ccircle cx='130' cy='135' r='18' fill='%2322c55e'/%3E%3Crect x='170' y='118' width='360' height='18' rx='9' fill='%23f5f1e8'/%3E%3Crect x='170' y='150' width='260' height='12' rx='6' fill='%238f8778'/%3E%3C/svg%3E",
+            },
+            {
+              artifactId: 2,
+              id: "playback--steps",
+              title: "Visual testing/Playback",
+              name: "Step gallery",
+              imageUrl:
+                "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='100%25' height='100%25' fill='%231c1a17'/%3E%3Crect x='60' y='60' width='205' height='330' rx='14' fill='%2328231d'/%3E%3Crect x='290' y='60' width='450' height='330' rx='14' fill='%23f5f1e8'/%3E%3C/svg%3E",
+            },
+          ],
+        }),
       reviewSignals: async (repo?: string) => {
         const names = repo ? [repo] : ["acme/megarepo", "covallaby/covallaby", "covallaby/server"];
         return {

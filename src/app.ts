@@ -768,7 +768,13 @@ export function createApp({
         400,
       );
     }
-    const files: Array<{ path: string; contentType: string; sizeBytes: number }> = [];
+    const files: Array<{
+      path: string;
+      contentType: string;
+      sizeBytes: number;
+      kind: "screenshot" | "report" | "other";
+      testName: string | null;
+    }> = [];
     const seen = new Set<string>();
     let totalBytes = 0;
     for (const item of rawFiles) {
@@ -779,6 +785,9 @@ export function createApp({
       const contentType =
         typeof raw.contentType === "string" ? raw.contentType.trim().slice(0, 120) : "";
       const sizeBytes = Number(raw.sizeBytes);
+      const screenshot = path?.startsWith("_covallaby/captures/") && path.endsWith(".png");
+      const testName =
+        screenshot && typeof raw.testName === "string" ? raw.testName.slice(0, 1000) : null;
       if (
         !path ||
         !contentType ||
@@ -792,7 +801,13 @@ export function createApp({
       }
       seen.add(path);
       totalBytes += sizeBytes;
-      files.push({ path, contentType, sizeBytes });
+      files.push({
+        path,
+        contentType,
+        sizeBytes,
+        kind: screenshot ? "screenshot" : path.endsWith(".html") ? "report" : "other",
+        testName,
+      });
     }
     if (!seen.has("index.html"))
       return c.json({ ok: false, error: "The Storybook build must contain index.html." }, 400);
@@ -818,10 +833,10 @@ export function createApp({
           runId: run.id,
           objectKey,
           name: file.path,
-          kind: file.path.endsWith(".html") ? "report" : "other",
+          kind: file.kind,
           contentType: file.contentType,
           sizeBytes: file.sizeBytes,
-          testName: null,
+          testName: file.testName,
         });
         const signed = await artifactStorage!.createUploadUrl(objectKey, file.contentType);
         return {
@@ -955,12 +970,31 @@ export function createApp({
 
   app.get("/api/v1/storybook-previews/:id", async (c) => {
     if (!previewReady()) return c.notFound();
-    const run = await store.getTestRunRow!(Number(c.req.param("id")));
-    if (!run || run.framework !== "storybook") return c.notFound();
+    const found = await store.getTestRun!(Number(c.req.param("id")));
+    if (!found || found.run.framework !== "storybook") return c.notFound();
+    const run = found.run;
     const token = previewToken(run.id, Math.floor(Date.now() / 1000) + 3600);
     return c.json({
       run,
       previewUrl: `${previewBase}/p/${run.id}/index.html?preview_token=${encodeURIComponent(token)}`,
+      captures: found.artifacts
+        .filter((artifact) => artifact.kind === "screenshot")
+        .map((artifact) => {
+          let story: { id?: string; title?: string; name?: string } = {};
+          try {
+            story = JSON.parse(artifact.testName ?? "{}") as typeof story;
+          } catch {
+            // Older captures may only have a story id in testName.
+            story = { id: artifact.testName ?? artifact.name };
+          }
+          return {
+            artifactId: artifact.id,
+            id: story.id ?? artifact.name,
+            title: story.title ?? "Component",
+            name: story.name ?? story.id ?? artifact.name,
+            imageUrl: `${previewBase}/p/${run.id}/${artifact.name}?preview_token=${encodeURIComponent(token)}`,
+          };
+        }),
     });
   });
 
