@@ -36,6 +36,11 @@ export function Summary() {
           trend: [...data.history].reverse().map((upload) => upload.percent),
         }}
       />
+      <p className="px-1 text-xs text-(--muted)">
+        These signals measure different things: code lines exercised, browser journeys executed, and
+        component states captured. Covallaby keeps them separate instead of inventing one confidence
+        percentage.
+      </p>
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <StatCard
           label="Coverage"
