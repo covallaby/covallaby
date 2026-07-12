@@ -190,6 +190,52 @@ export function PortfolioReviewQueue({ repos }: { repos: RepoOverview[] }) {
   );
 }
 
+export function PortfolioConfidenceCoverage({ repos }: { repos: RepoOverview[] }) {
+  const visual = useVisualState();
+  if (!visual) return null;
+  const states = repos.map((repo) => visual.find((entry) => entry.repo === repo.repo));
+  const latestRuns = states.map((state) => state?.runs[0]).filter(Boolean) as TestRun[];
+  const latestPreviews = states
+    .map((state) => state?.previews[0])
+    .filter(Boolean) as StorybookPreview[];
+  const journeys = latestRuns.reduce(
+    (total, run) => total + run.testsPassed + run.testsFailed + run.testsSkipped,
+    0,
+  );
+  const captures = latestPreviews.reduce((total, preview) => total + (preview.imageCount ?? 0), 0);
+  return (
+    <Card className="mb-4 overflow-hidden">
+      <CardHeader
+        title="Confidence coverage"
+        description="Three independent signals—never rolled into a misleading combined score"
+      />
+      <div className="grid divide-y divide-(--hairline) sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        <div className="p-4 sm:p-5">
+          <div className="text-xs font-medium text-(--muted)">Code coverage</div>
+          <div className="mt-2 text-2xl font-semibold">
+            {repos.length}/{repos.length}
+          </div>
+          <div className="mt-1 text-xs text-(--muted)">repositories reporting line coverage</div>
+        </div>
+        <div className="p-4 sm:p-5">
+          <div className="text-xs font-medium text-(--muted)">Journey execution</div>
+          <div className="mt-2 text-2xl font-semibold">{journeys}</div>
+          <div className="mt-1 text-xs text-(--muted)">
+            tests across {latestRuns.length}/{repos.length} repositories
+          </div>
+        </div>
+        <div className="p-4 sm:p-5">
+          <div className="text-xs font-medium text-(--muted)">Component coverage</div>
+          <div className="mt-2 text-2xl font-semibold">{captures}</div>
+          <div className="mt-1 text-xs text-(--muted)">
+            states across {latestPreviews.length}/{repos.length} repositories
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function SnapshotCell({
   icon: Icon,
   label,
@@ -230,14 +276,14 @@ export function RepositoryLatestSnapshot({ repo }: { repo: RepoOverview }) {
       <div className="grid divide-y divide-(--hairline) sm:grid-cols-3 sm:divide-x sm:divide-y-0">
         <SnapshotCell
           icon={CheckCircle2}
-          label="Coverage"
+          label="Code coverage"
           value={formatPercent(repo.latest.percent)}
           detail={`${repo.latest.linesCovered.toLocaleString()} of ${repo.latest.linesTotal.toLocaleString()} lines`}
           href={`/r/${repo.repo}/u/${repo.latest.id}`}
         />
         <SnapshotCell
           icon={CirclePlay}
-          label="Browser journeys"
+          label="Journey execution"
           value={
             run
               ? run.testsFailed
@@ -254,11 +300,11 @@ export function RepositoryLatestSnapshot({ repo }: { repo: RepoOverview }) {
         />
         <SnapshotCell
           icon={Images}
-          label="Component captures"
+          label="Component coverage"
           value={
             preview
               ? captureCount > 0
-                ? `${captureCount} images`
+                ? `${captureCount} states captured`
                 : "Ready to review"
               : "Not reported"
           }
