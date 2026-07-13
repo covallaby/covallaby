@@ -14,8 +14,8 @@ import {
   shortRepoName,
 } from "./api.js";
 import { Meter, OwnerAvatar, inkFor } from "./components/ui.js";
-import { CompareBranches, PullRequest } from "./pages/Compare.js";
 import { Commits } from "./pages/Commits.js";
+import { CompareBranches, PullRequest } from "./pages/Compare.js";
 import { Home } from "./pages/Home.js";
 import { PlaybackDetail, Playbacks } from "./pages/Playbacks.js";
 import { Policy } from "./pages/Policy.js";
