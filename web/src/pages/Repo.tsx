@@ -1,4 +1,4 @@
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, GitBranch } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   Link,
@@ -210,7 +210,7 @@ export function UploadsTable({
   );
 }
 
-function RepoHeader({ repo, data }: { repo: string; data: RepoHistory }) {
+export function RepoHeader({ repo, data }: { repo: string; data: RepoHistory }) {
   const [, setParams] = useSearchParams();
   const latest = data.history[0];
   const setBranch = (b: string) =>
@@ -220,36 +220,41 @@ function RepoHeader({ repo, data }: { repo: string; data: RepoHistory }) {
       return p;
     });
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div>
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="min-w-0">
         <h1 className="font-mono text-lg font-semibold tracking-tight">{repo}</h1>
         <p className="text-[13px] text-(--muted)">
           {latest
-            ? `${formatPercent(latest.percent)} on ${data.branch} · ${latest.files} files`
+            ? `${formatPercent(latest.percent)} · ${latest.files} files · ${latest.commit.slice(0, 7)}`
             : "No uploads yet."}
         </p>
       </div>
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex min-w-0 items-center gap-2">
+        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-(--border) bg-(--surface) px-2.5 text-(--ink-2) sm:w-64 sm:flex-none">
+          <GitBranch size={14} className="shrink-0 text-(--muted)" />
+          <span className="sr-only">Branch</span>
+          <select
+            aria-label="Branch"
+            value={data.branch}
+            onChange={(event) => setBranch(event.target.value)}
+            className="min-w-0 flex-1 appearance-none bg-transparent py-2 pr-4 font-mono text-xs font-medium text-(--ink) outline-none"
+          >
+            {data.branches.map((branch) => (
+              <option key={branch} value={branch}>
+                {branch}
+              </option>
+            ))}
+          </select>
+          <span className="shrink-0 text-[10px] text-(--muted)">
+            {data.branches.length} {data.branches.length === 1 ? "branch" : "branches"}
+          </span>
+        </label>
         <Link
           to={`/r/${repo}/compare?head=${encodeURIComponent(data.branch)}&base=main`}
-          className="rounded-lg border border-(--border) bg-(--surface) px-3 py-1 text-[12.5px] text-(--ink-2) transition-colors hover:border-(--muted)"
+          className="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-xs font-medium text-(--ink-2) transition-colors hover:border-(--muted) hover:text-(--ink)"
         >
-          Compare…
+          Compare
         </Link>
-        {data.branches.slice(0, 6).map((b) => (
-          <button
-            key={b}
-            type="button"
-            onClick={() => setBranch(b)}
-            className={`rounded-lg border px-3 py-1 text-[12.5px] transition-colors ${
-              b === data.branch
-                ? "border-(--accent) bg-(--accent-wash) font-medium text-(--ink)"
-                : "border-(--border) bg-(--surface) text-(--ink-2) hover:border-(--muted)"
-            }`}
-          >
-            {b}
-          </button>
-        ))}
       </div>
     </div>
   );
