@@ -526,7 +526,7 @@ export function App() {
         mobileOpen={mobileNavOpen}
         onClose={() => setMobileNavOpen(false)}
       />
-      <div className="md:pl-60">
+      <div className="min-w-0 md:pl-60">
         <header className="sticky top-0 z-10 border-b border-(--hairline) bg-(--page)/80 backdrop-blur-md">
           <div className="flex items-center justify-between gap-2 px-4 py-2.5 sm:gap-4 sm:px-6">
             <div className="flex min-w-0 items-center gap-2">
@@ -557,9 +557,9 @@ export function App() {
             </div>
           </div>
         </header>
-        <main className="px-4 py-5 motion-safe:animate-[rise_.3s_cubic-bezier(.21,1.02,.73,1)] sm:px-6 sm:py-7">
+        <main className="min-w-0 overflow-x-clip px-4 py-5 motion-safe:animate-[rise_.3s_cubic-bezier(.21,1.02,.73,1)] sm:px-6 sm:py-7">
           <style>{"@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1}}"}</style>
-          <div className="mx-auto max-w-5xl">
+          <div className="mx-auto min-w-0 max-w-5xl">
             <Routes>
               <Route path="/" element={<Home repos={repos} />} />
               <Route path="/r/:owner/:name" element={<RepoLayout />}>

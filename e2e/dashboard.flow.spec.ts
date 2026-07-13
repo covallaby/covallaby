@@ -67,4 +67,34 @@ test.describe("mobile product playback", () => {
     await expect(page.getByText("Component captures", { exact: true }).first()).toBeVisible();
     await expectHealthyPage(page);
   });
+
+  test("dashboard routes contain wide content instead of overflowing the phone viewport", async ({
+    page,
+  }) => {
+    const routes = [
+      "./",
+      "./#/r/covallaby/covallaby",
+      "./#/r/covallaby/covallaby/uploads",
+      "./#/r/covallaby/covallaby/pulls",
+      "./#/r/covallaby/covallaby/playbacks",
+      "./#/r/covallaby/covallaby/storybook-previews",
+      "./#/r/covallaby/covallaby/u/10",
+    ];
+
+    for (const route of routes) {
+      await page.goto(route);
+      await expect(page.getByText("Live demo")).toBeVisible();
+      const audit = await page.evaluate(() => {
+        const viewportOverflow = document.documentElement.scrollWidth - window.innerWidth;
+        const brokenScrollRegions = [...document.querySelectorAll("[data-mobile-scroll-region]")]
+          .filter((element) => element.scrollWidth > element.clientWidth)
+          .filter((element) => {
+            const overflow = getComputedStyle(element).overflowX;
+            return overflow !== "auto" && overflow !== "scroll";
+          }).length;
+        return { viewportOverflow, brokenScrollRegions };
+      });
+      expect(audit, route).toEqual({ viewportOverflow: 0, brokenScrollRegions: 0 });
+    }
+  });
 });

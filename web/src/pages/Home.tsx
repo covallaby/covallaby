@@ -270,8 +270,11 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
 
       <Card className="mt-4">
         <CardHeader title="Recent activity" description="Latest uploads across every repository" />
-        <div className="px-1 pb-1">
-          <table className="w-full text-[13.5px]">
+        <div
+          className="max-w-full overflow-x-auto overscroll-x-contain px-1 pb-1"
+          data-mobile-scroll-region
+        >
+          <table className="w-full min-w-[680px] text-[13.5px]">
             <thead>
               <tr>
                 <Th>Repository</Th>
