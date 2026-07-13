@@ -14,6 +14,7 @@ import {
   shortRepoName,
 } from "./api.js";
 import { Meter, OwnerAvatar, inkFor } from "./components/ui.js";
+import { Commits } from "./pages/Commits.js";
 import { CompareBranches, PullRequest } from "./pages/Compare.js";
 import { Home } from "./pages/Home.js";
 import { PlaybackDetail, Playbacks } from "./pages/Playbacks.js";
@@ -126,13 +127,10 @@ function RepoNavItem({ r, pathname }: { r: RepoOverview; pathname: string }) {
       {active && (
         <div className="mt-0.5 mb-1 ml-3 flex flex-col items-start gap-0.5 border-l border-(--hairline) pl-2">
           <SubLink to={base} active={pathname === base || pathname.startsWith(`${base}/u/`)}>
-            Summary
+            Overview
           </SubLink>
-          <SubLink to={`${base}/insights`} active={pathname.startsWith(`${base}/insights`)}>
-            Insights
-          </SubLink>
-          <SubLink to={`${base}/uploads`} active={pathname.startsWith(`${base}/uploads`)}>
-            Uploads
+          <SubLink to={`${base}/commits`} active={pathname.startsWith(`${base}/commits`)}>
+            Commits
           </SubLink>
           <SubLink
             to={`${base}/pulls`}
@@ -140,19 +138,25 @@ function RepoNavItem({ r, pathname }: { r: RepoOverview; pathname: string }) {
           >
             Pull requests
           </SubLink>
+          <SubLink to={`${base}/insights`} active={pathname.startsWith(`${base}/insights`)}>
+            Insights
+          </SubLink>
           <SubLink to={`${base}/policy`} active={pathname.startsWith(`${base}/policy`)}>
             Policy
           </SubLink>
           <div className="px-2.5 pt-2 pb-0.5 text-[9px] font-semibold tracking-widest text-(--muted) uppercase">
-            Visual testing
+            Evidence
           </div>
+          <SubLink to={`${base}/uploads`} active={pathname.startsWith(`${base}/uploads`)}>
+            Code uploads
+          </SubLink>
           <SubLink
             to={`${base}/playbacks`}
             active={
               pathname.startsWith(`${base}/playbacks`) || pathname.startsWith(`${base}/test-runs/`)
             }
           >
-            Playwright runs
+            Journey runs
           </SubLink>
           <SubLink
             to={`${base}/storybook-previews`}
@@ -564,6 +568,7 @@ export function App() {
               <Route path="/" element={<Home repos={repos} />} />
               <Route path="/r/:owner/:name" element={<RepoLayout />}>
                 <Route index element={<Summary />} />
+                <Route path="commits" element={<Commits />} />
                 <Route path="insights" element={<Insights />} />
                 <Route path="uploads" element={<Uploads />} />
                 <Route path="playbacks" element={<Playbacks />} />
