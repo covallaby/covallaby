@@ -10,22 +10,30 @@ test("maintainer finds repository risk and reviews its coverage", async ({ page 
   await expect(page.getByText("Confidence coverage", { exact: true })).toBeVisible();
   await expect(page.getByText("Journey execution", { exact: true })).toBeVisible();
   await expect(page.getByText("Component coverage", { exact: true })).toBeVisible();
-  await expect(page.getByText("24 component captures are ready to review")).toBeVisible();
+  await expect(page.locator('a[href="#/r/covallaby/server/commits"]')).toContainText(
+    "Commit is missing journeys and components",
+  );
   await chapter(page, testInfo, "01-portfolio-health");
 
   await page.locator('a[href="#/r/covallaby/covallaby"]').first().click();
   await expect(page).toHaveURL(/#\/r\/covallaby\/covallaby$/);
   await expect(page.getByRole("heading", { name: "covallaby/covallaby" })).toBeVisible();
-  await expect(page.getByText("Latest checks", { exact: true })).toBeVisible();
+  await expect(page.getByText("Incomplete", { exact: true })).toBeVisible();
   await expect(
-    page.getByRole("link", { name: /Component coverage 24 states captured/ }),
+    page.getByText(/One commit, with code, journey, and component evidence/),
   ).toBeVisible();
-  await expect(page.getByText(/Covallaby keeps them separate/)).toBeVisible();
+  await expect(page.getByRole("link", { name: /Journeys 34 passed/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Components 24 states/ })).toBeVisible();
   await chapter(page, testInfo, "02-repository-summary");
+
+  await page.getByRole("link", { name: "Commits", exact: true }).click();
+  await expect(page.getByText(/joined by commit SHA/)).toBeVisible();
+  await expect(page.getByText("Missing code", { exact: true })).toHaveCount(2);
+  await chapter(page, testInfo, "03-commit-evidence");
 
   await page.getByRole("link", { name: "Insights", exact: true }).click();
   await expect(page.getByText(/coverage/i).first()).toBeVisible();
-  await chapter(page, testInfo, "03-coverage-insights");
+  await chapter(page, testInfo, "04-coverage-insights");
   await expectHealthyPage(page);
 });
 
@@ -74,6 +82,7 @@ test.describe("mobile product playback", () => {
     const routes = [
       "./",
       "./#/r/covallaby/covallaby",
+      "./#/r/covallaby/covallaby/commits",
       "./#/r/covallaby/covallaby/uploads",
       "./#/r/covallaby/covallaby/pulls",
       "./#/r/covallaby/covallaby/playbacks",

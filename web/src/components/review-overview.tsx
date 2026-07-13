@@ -18,6 +18,7 @@ import {
   formatPercent,
   shortRepoName,
 } from "../api.js";
+import { buildCommitChecks } from "../checks.js";
 import { Card, CardHeader } from "./ui.js";
 
 function useVisualState(repo?: string) {
@@ -67,8 +68,8 @@ export function PortfolioReviewQueue({ repos }: { repos: RepoOverview[] }) {
     const review: ReviewItem[] = [];
     for (const repo of repos) {
       const state = visual.find((entry) => entry.repo === repo.repo);
-      const run = state?.runs[0];
-      const preview = state?.previews[0];
+      const check = buildCommitChecks([repo.latest], state?.runs ?? [], state?.previews ?? [])[0];
+      const run = check?.journey;
       const previous = repo.trend.at(-2);
       const current = repo.latest.percent;
       if (run?.testsFailed || run?.status === "failed") {
@@ -84,36 +85,18 @@ export function PortfolioReviewQueue({ repos }: { repos: RepoOverview[] }) {
           tone: "bad",
           icon: AlertTriangle,
         });
-      } else if (run?.pr && run.status === "complete") {
+      } else if (check?.status === "partial" && check.commit === repo.latest.commit) {
         review.push({
-          id: `run-${run.id}`,
-          priority: 2,
-          createdAt: run.createdAt,
-          repo: repo.repo,
-          title: `${run.testsPassed} browser tests are ready to watch`,
-          detail: `PR #${run.pr} · recorded journeys`,
-          href: `/r/${repo.repo}/test-runs/${run.id}`,
-          action: "Watch run",
-          tone: "review",
-          icon: CirclePlay,
-        });
-      }
-      if (preview?.pr && preview.status === "complete") {
-        const count = preview.imageCount ?? 0;
-        review.push({
-          id: `preview-${preview.id}`,
+          id: `commit-${check.commit}`,
           priority: 1,
-          createdAt: preview.createdAt,
+          createdAt: check.createdAt,
           repo: repo.repo,
-          title:
-            count > 0
-              ? `${count} component captures are ready to review`
-              : "Component captures are ready to review",
-          detail: `PR #${preview.pr} · ${preview.branch}`,
-          href: `/r/${repo.repo}/storybook-previews/${preview.id}`,
-          action: "Review captures",
+          title: `Commit is missing ${check.missing.join(" and ")}`,
+          detail: `${check.pr ? `PR #${check.pr} · ` : ""}${check.commit.slice(0, 7)}`,
+          href: `/r/${repo.repo}/commits`,
+          action: "Review status",
           tone: "review",
-          icon: Images,
+          icon: AlertTriangle,
         });
       }
       if (current !== null && previous !== null && previous !== undefined && current < previous) {
@@ -186,6 +169,84 @@ export function PortfolioReviewQueue({ repos }: { repos: RepoOverview[] }) {
           })}
         </div>
       )}
+    </Card>
+  );
+}
+
+export function RepositoryCommitStatus({
+  repo,
+  uploads,
+}: { repo: string; uploads: RepoOverview["latest"][] }) {
+  const visual = useVisualState(repo);
+  const checks = buildCommitChecks(uploads, visual?.[0]?.runs ?? [], visual?.[0]?.previews ?? []);
+  const check = checks[0];
+  if (!visual) return <Card className="p-5 text-sm text-(--muted)">Matching commit evidence…</Card>;
+  if (!check) return null;
+  const status =
+    check.status === "ready" ? "Ready" : check.status === "failed" ? "Blocked" : "Incomplete";
+  const statusClass =
+    check.status === "ready"
+      ? "text-(--good)"
+      : check.status === "failed"
+        ? "text-(--bad)"
+        : "text-(--warn)";
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-(--hairline) px-4 py-4 sm:px-5">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`text-lg font-semibold ${statusClass}`}>{status}</span>
+            <span className="font-mono text-xs text-(--muted)">{check.commit.slice(0, 10)}</span>
+            {check.pr ? <span className="text-xs text-(--muted)">PR #{check.pr}</span> : null}
+          </div>
+          <p className="mt-1 text-xs text-(--muted)">
+            One commit, with code, journey, and component evidence matched by SHA
+          </p>
+        </div>
+        <Link
+          to={`/r/${repo}/commits`}
+          className="text-xs font-medium text-(--ink-2) hover:underline"
+        >
+          All commits →
+        </Link>
+      </div>
+      <div className="grid divide-y divide-(--hairline) sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        <SnapshotCell
+          icon={CheckCircle2}
+          label="Code"
+          value={check.coverage ? formatPercent(check.coverage.percent) : "Missing"}
+          detail={
+            check.coverage
+              ? `${check.coverage.linesCovered.toLocaleString()} of ${check.coverage.linesTotal.toLocaleString()} lines`
+              : "No coverage for this SHA"
+          }
+          href={check.coverage ? `/r/${repo}/u/${check.coverage.id}` : `/r/${repo}/uploads`}
+        />
+        <SnapshotCell
+          icon={CirclePlay}
+          label="Journeys"
+          value={
+            check.journey
+              ? `${check.journey.testsPassed} passed${check.journey.testsFailed ? ` · ${check.journey.testsFailed} failed` : ""}`
+              : "Missing"
+          }
+          detail={check.journey ? "Recorded browser evidence" : "No Playwright run for this SHA"}
+          href={check.journey ? `/r/${repo}/test-runs/${check.journey.id}` : `/r/${repo}/playbacks`}
+        />
+        <SnapshotCell
+          icon={Images}
+          label="Components"
+          value={check.components ? `${check.components.imageCount ?? 0} states` : "Missing"}
+          detail={
+            check.components ? "Captured visual evidence" : "No component captures for this SHA"
+          }
+          href={
+            check.components
+              ? `/r/${repo}/storybook-previews/${check.components.id}`
+              : `/r/${repo}/storybook-previews`
+          }
+        />
+      </div>
     </Card>
   );
 }
