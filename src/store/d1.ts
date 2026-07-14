@@ -219,6 +219,27 @@ export class D1Store implements Store {
     return { row: toRow(raw), report: asReport(raw.report) };
   }
 
+  async uploadNeighbors(repo: string, branch: string, id: number) {
+    await this.ensure();
+    // Navigation only: no report blob, and the repo+branch equality prefix
+    // keeps both probes on idx_uploads_repo_branch_time.
+    const prev = await this.db
+      .prepare(
+        `SELECT ${ROW_COLUMNS} FROM uploads
+         WHERE repo = ? AND branch = ? AND id < ? ORDER BY id DESC LIMIT 1`,
+      )
+      .bind(repo, branch, id)
+      .first<RawRow>();
+    const next = await this.db
+      .prepare(
+        `SELECT ${ROW_COLUMNS} FROM uploads
+         WHERE repo = ? AND branch = ? AND id > ? ORDER BY id ASC LIMIT 1`,
+      )
+      .bind(repo, branch, id)
+      .first<RawRow>();
+    return { prev: prev ? toRow(prev) : null, next: next ? toRow(next) : null };
+  }
+
   async branches(repo: string): Promise<string[]> {
     await this.ensure();
     const { results } = await this.db

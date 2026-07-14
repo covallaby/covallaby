@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { type UploadDetail, api, formatPercent, severity } from "../api.js";
 import { ChangesList } from "../components/changes-list.js";
 import { Breadcrumb, Hotspots, TreeOutline, buildTree } from "../components/explorer.js";
+import { LateralNav } from "../components/lateral-nav.js";
 import { PageSkeleton } from "../components/skeleton.js";
 import { Treemap } from "../components/treemap.js";
 import {
@@ -71,7 +72,7 @@ export function Upload() {
   if (error) return <p className="text-sm text-(--bad)">{error}</p>;
   if (!data) return <PageSkeleton />;
 
-  const { row, totals, changes } = data;
+  const { row, totals, changes, neighbors, baseUpload } = data;
   // No hard cap — just don't render thousands of rows unprompted. Default to the
   // worst 200 (they're sorted worst-first); "Show all" reveals the rest.
   const CAP = 200;
@@ -105,6 +106,34 @@ export function Upload() {
                   : `${missed.toLocaleString()} lines need some love.`}
           </p>
           <Meter percent={row.percent} className="mt-3 w-72" />
+          <LateralNav
+            className="mt-2.5"
+            noun="commit"
+            prev={
+              neighbors?.prev
+                ? {
+                    to: `/r/${row.repo}/u/${neighbors.prev.id}`,
+                    title: `${neighbors.prev.commit.slice(0, 10)} on ${row.branch}`,
+                  }
+                : null
+            }
+            next={
+              neighbors?.next
+                ? {
+                    to: `/r/${row.repo}/u/${neighbors.next.id}`,
+                    title: `${neighbors.next.commit.slice(0, 10)} on ${row.branch}`,
+                  }
+                : null
+            }
+            base={
+              row.pr && baseUpload && baseUpload.id !== row.id
+                ? {
+                    to: `/r/${row.repo}/u/${baseUpload.id}`,
+                    title: data.baseline?.message ?? `Base ${baseUpload.commit.slice(0, 10)}`,
+                  }
+                : undefined
+            }
+          />
         </div>
         <div className="flex flex-wrap gap-8 pb-1.5">
           {totals.functions.total > 0 && (

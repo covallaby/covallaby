@@ -795,8 +795,13 @@ export function createApp({
     if (!found || found.run.framework !== "playwright")
       return c.json({ ok: false, error: "Unknown Playwright run." }, 404);
     const expires = Math.floor(Date.now() / 1000) + 3600;
+    // Lateral prev/next across the repo's Playwright runs.
+    const neighbors = store.testRunNeighbors
+      ? await store.testRunNeighbors(found.run.repo, "playwright", found.run.id)
+      : { prev: null, next: null };
     return c.json({
       run: found.run,
+      neighbors,
       artifacts: found.artifacts.map(({ objectKey: _, ...a }) => {
         const url = `/api/v1/test-runs/${found.run.id}/artifacts/${a.id}/content`;
         if (a.kind !== "trace") return { ...a, url };
@@ -1202,11 +1207,16 @@ export function createApp({
       unchanged: captures.filter((capture) => capture.status === "unchanged").length,
       uncompared: captures.filter((capture) => capture.status === "uncompared").length,
     };
+    // Lateral prev/next across the repo's Storybook capture runs.
+    const neighbors = store.testRunNeighbors
+      ? await store.testRunNeighbors(run.repo, "storybook", run.id)
+      : { prev: null, next: null };
     return c.json({
       run,
       previewUrl: `${previewBase}/p/${run.id}/index.html?preview_token=${encodeURIComponent(token)}`,
       baselineRun: baseline?.run ?? null,
       baseline: baselineInfo,
+      neighbors,
       summary,
       captures,
     });
@@ -1545,7 +1555,8 @@ export function createApp({
     const covByPath = new Map(found.report.files.map((f) => [f.path, coverageBitmap(f)]));
 
     // How the unified resolver would pick this upload's baseline, and why —
-    // surfaced in the UI so "compared against what?" is never a mystery.
+    // surfaced in the UI so "compared against what?" is never a mystery. The
+    // resolved base row also powers the "Base build" lateral link on PR uploads.
     const { base: baselineRow, info: baseline } = await resolveCoverageBaseline(
       store,
       found.row,
@@ -1576,6 +1587,9 @@ export function createApp({
         baseline,
       });
     }
+
+    // Lateral prev/next on the same branch (no report blobs — links only).
+    const neighbors = await store.uploadNeighbors(found.row.repo, found.row.branch, found.row.id);
 
     // What changed vs the previous upload on this branch.
     const prev = await store.prevUpload(found.row.repo, found.row.branch, found.row.id);
@@ -1621,6 +1635,8 @@ export function createApp({
       changes,
       baseline,
       verdict,
+      baseUpload: baselineRow,
+      neighbors,
       row: found.row,
       totals: {
         lines: summary.lines,

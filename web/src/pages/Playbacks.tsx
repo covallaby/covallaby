@@ -23,8 +23,9 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { type TestArtifact, type TestRun, api } from "../api.js";
+import { type Neighbors, type TestArtifact, type TestRun, api } from "../api.js";
 import { CommitStrip, commitHref, useCommitSiblings } from "../components/commit-strip.js";
+import { LateralNav } from "../components/lateral-nav.js";
 import { Card, CardHeader, Stat, Td, Th } from "../components/ui.js";
 import { buildPlaybackLibrary, shortJourneyName } from "../playback.js";
 import { useRepo } from "./Repo.js";
@@ -598,7 +599,11 @@ export function JourneyViewer({ artifacts }: { artifacts: TestArtifact[] }) {
 
 export function PlaybackDetail() {
   const { id } = useParams();
-  const [data, setData] = useState<{ run: TestRun; artifacts: TestArtifact[] } | null>(null);
+  const [data, setData] = useState<{
+    run: TestRun;
+    neighbors?: Neighbors<TestRun>;
+    artifacts: TestArtifact[];
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     api
@@ -645,13 +650,36 @@ export function PlaybackDetail() {
           · {when(data.run.createdAt)}
         </p>
       </div>
-      <CommitStrip
-        repo={data.run.repo}
-        commit={data.run.commit}
-        pr={data.run.pr}
-        current="journeys"
-        siblings={siblings}
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <CommitStrip
+            repo={data.run.repo}
+            commit={data.run.commit}
+            pr={data.run.pr}
+            current="journeys"
+            siblings={siblings}
+          />
+        </div>
+        <LateralNav
+          noun="run"
+          prev={
+            data.neighbors?.prev
+              ? {
+                  to: `/r/${data.run.repo}/test-runs/${data.neighbors.prev.id}`,
+                  title: `${data.neighbors.prev.commit.slice(0, 10)} on ${data.neighbors.prev.branch}`,
+                }
+              : null
+          }
+          next={
+            data.neighbors?.next
+              ? {
+                  to: `/r/${data.run.repo}/test-runs/${data.neighbors.next.id}`,
+                  title: `${data.neighbors.next.commit.slice(0, 10)} on ${data.neighbors.next.branch}`,
+                }
+              : null
+          }
+        />
+      </div>
       <Card className="p-5">
         <div className="grid grid-cols-2 gap-5 sm:grid-cols-5">
           <Stat

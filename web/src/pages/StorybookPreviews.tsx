@@ -11,9 +11,10 @@ import {
   Search,
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   type BaselineInfo,
+  type Neighbors,
   type StorybookCapture,
   type StorybookDiffSummary,
   type StorybookPreview,
@@ -21,6 +22,7 @@ import {
 } from "../api.js";
 import { BaselineChip } from "../components/baseline-chip.js";
 import { CommitStrip, commitHref, useCommitSiblings } from "../components/commit-strip.js";
+import { LateralNav } from "../components/lateral-nav.js";
 import { Card, CardHeader, Td, Th } from "../components/ui.js";
 import { useRepo } from "./Repo.js";
 import {
@@ -191,9 +193,11 @@ export function StorybookPreviewDetail() {
     previewUrl: string;
     baselineRun: StorybookPreview | null;
     baseline?: BaselineInfo;
+    neighbors?: Neighbors<StorybookPreview>;
     summary: StorybookDiffSummary;
     captures: StorybookCapture[];
   } | null>(null);
+  const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [request, setRequest] = useState(0);
   const [query, setQuery] = useState("");
@@ -248,6 +252,16 @@ export function StorybookPreviewDetail() {
   useEffect(() => {
     if (!data) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      // [ / ] jump laterally to the previous / next capture run.
+      if (event.key === "[" || event.key === "]") {
+        if (isEditableTarget(event.target) || event.metaKey || event.ctrlKey || event.altKey)
+          return;
+        const target = event.key === "[" ? data.neighbors?.prev : data.neighbors?.next;
+        if (!target) return;
+        event.preventDefault();
+        navigate(`/r/${data.run.repo}/storybook-previews/${target.id}`);
+        return;
+      }
       const action = reviewKeyAction(event.key, {
         editable: isEditableTarget(event.target),
         modifier: event.metaKey || event.ctrlKey || event.altKey,
@@ -335,13 +349,36 @@ export function StorybookPreviewDetail() {
           </span>
         )}
       </div>
-      <CommitStrip
-        repo={data.run.repo}
-        commit={data.run.commit}
-        pr={data.run.pr}
-        current="components"
-        siblings={siblings}
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <CommitStrip
+            repo={data.run.repo}
+            commit={data.run.commit}
+            pr={data.run.pr}
+            current="components"
+            siblings={siblings}
+          />
+        </div>
+        <LateralNav
+          noun="run"
+          prev={
+            data.neighbors?.prev
+              ? {
+                  to: `/r/${data.run.repo}/storybook-previews/${data.neighbors.prev.id}`,
+                  title: `${data.neighbors.prev.commit.slice(0, 10)} on ${data.neighbors.prev.branch}`,
+                }
+              : null
+          }
+          next={
+            data.neighbors?.next
+              ? {
+                  to: `/r/${data.run.repo}/storybook-previews/${data.neighbors.next.id}`,
+                  title: `${data.neighbors.next.commit.slice(0, 10)} on ${data.neighbors.next.branch}`,
+                }
+              : null
+          }
+        />
+      </div>
       {data.run.status === "complete" && data.captures.length > 0 ? (
         <>
           <Card className="overflow-hidden">
@@ -520,6 +557,9 @@ export function StorybookPreviewDetail() {
               </span>
               <span>
                 <Kbd>b</Kbd> flip baseline ↔ new
+              </span>
+              <span>
+                <Kbd>[</Kbd>/<Kbd>]</Kbd> previous / next run
               </span>
             </div>
           </Card>

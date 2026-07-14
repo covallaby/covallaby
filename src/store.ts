@@ -160,6 +160,16 @@ export interface Store {
     branch: string,
     beforeId: number,
   ): Promise<{ row: UploadRow; report: import("./vendor/model.js").CoverageReport } | null>;
+  /**
+   * The uploads immediately before and after `id` on the same repo+branch,
+   * without their reports — lateral prev/next navigation only, so the lookup
+   * stays on the repo+branch index and never touches the report blob.
+   */
+  uploadNeighbors(
+    repo: string,
+    branch: string,
+    id: number,
+  ): Promise<{ prev: UploadRow | null; next: UploadRow | null }>;
   branches(repo: string): Promise<string[]>;
   getUpload(id: number): Promise<{ row: UploadRow; report: CoverageReport } | null>;
   latest(repo: string, branch?: string): Promise<UploadRow | null>;
@@ -182,6 +192,12 @@ export interface Store {
   getTestRunRow?(id: number): Promise<TestRunRow | null>;
   getTestArtifactByName?(runId: number, name: string): Promise<TestArtifactRow | null>;
   listTestRuns?(repo: string, limit: number, framework?: string): Promise<TestRunRow[]>;
+  /** The runs immediately before and after `id` for the same repo+framework — lateral navigation. */
+  testRunNeighbors?(
+    repo: string,
+    framework: string,
+    id: number,
+  ): Promise<{ prev: TestRunRow | null; next: TestRunRow | null }>;
   /** Record a human review verdict on a visual capture run. */
   setTestRunReview?(id: number, state: ReviewState): Promise<TestRunRow | null>;
   deleteTestRun?(id: number): Promise<void>;

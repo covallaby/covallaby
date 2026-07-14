@@ -237,6 +237,20 @@ export class PostgresStore implements Store {
     return { row: toRow(raw), report: unpackReport(raw.report) };
   }
 
+  async uploadNeighbors(repo: string, branch: string, id: number) {
+    // Navigation only: no report blob, and the repo+branch equality prefix
+    // keeps both probes on idx_uploads_repo_branch_time.
+    const [prev] = await this.sql<RawRow[]>`
+      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at
+      FROM uploads WHERE repo = ${repo} AND branch = ${branch} AND id < ${id}
+      ORDER BY id DESC LIMIT 1`;
+    const [next] = await this.sql<RawRow[]>`
+      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at
+      FROM uploads WHERE repo = ${repo} AND branch = ${branch} AND id > ${id}
+      ORDER BY id ASC LIMIT 1`;
+    return { prev: prev ? toRow(prev) : null, next: next ? toRow(next) : null };
+  }
+
   async branches(repo: string): Promise<string[]> {
     const rows = await this.sql<Array<{ branch: string }>>`
       SELECT branch, MAX(id) AS last FROM uploads WHERE repo = ${repo}
@@ -429,6 +443,16 @@ export class PostgresStore implements Store {
           RawTestRun[]
         >`SELECT * FROM test_runs WHERE repo = ${repo} ORDER BY id DESC LIMIT ${limit}`;
     return rows.map(toTestRun);
+  }
+
+  async testRunNeighbors(repo: string, framework: string, id: number) {
+    const [prev] = await this.sql<RawTestRun[]>`
+      SELECT * FROM test_runs WHERE repo = ${repo} AND framework = ${framework} AND id < ${id}
+      ORDER BY id DESC LIMIT 1`;
+    const [next] = await this.sql<RawTestRun[]>`
+      SELECT * FROM test_runs WHERE repo = ${repo} AND framework = ${framework} AND id > ${id}
+      ORDER BY id ASC LIMIT 1`;
+    return { prev: prev ? toTestRun(prev) : null, next: next ? toTestRun(next) : null };
   }
 
   async setTestRunReview(id: number, state: ReviewState): Promise<TestRunRow | null> {

@@ -107,6 +107,77 @@ describe.each(stores)("store contract (%s)", (_name, store) => {
     expect(await store.prevUpload("acme/app", "main", first.id)).toBeNull();
   });
 
+  it("finds upload neighbors on the same branch, clamped at the ends of history", async () => {
+    const rows = [];
+    for (const commit of ["n1", "n2", "n3"] as const) {
+      rows.push(
+        await store.recordUpload({
+          repo: "acme/neighbors",
+          branch: "main",
+          commit,
+          pr: null,
+          report,
+          linesCovered: 1,
+          linesTotal: 2,
+          files: 1,
+        }),
+      );
+    }
+    // Another branch on the same repo must not leak into the lane.
+    const stray = await store.recordUpload({
+      repo: "acme/neighbors",
+      branch: "feat/x",
+      commit: "nx",
+      pr: 4,
+      report,
+      linesCovered: 1,
+      linesTotal: 2,
+      files: 1,
+    });
+
+    const mid = await store.uploadNeighbors("acme/neighbors", "main", rows[1]!.id);
+    expect(mid.prev?.commit).toBe("n1");
+    expect(mid.next?.commit).toBe("n3");
+
+    const first = await store.uploadNeighbors("acme/neighbors", "main", rows[0]!.id);
+    expect(first.prev).toBeNull();
+    expect(first.next?.commit).toBe("n2");
+
+    const last = await store.uploadNeighbors("acme/neighbors", "main", rows[2]!.id);
+    expect(last.prev?.commit).toBe("n2");
+    expect(last.next).toBeNull();
+
+    // The lone upload on its branch has no neighbors in either direction.
+    const lone = await store.uploadNeighbors("acme/neighbors", "feat/x", stray.id);
+    expect(lone).toEqual({ prev: null, next: null });
+  });
+
+  it("finds test run neighbors within a repo and framework", async () => {
+    const run = (commit: string, framework: string, branch = "main") =>
+      store.createTestRun!({
+        repo: "acme/run-neighbors",
+        branch,
+        commit,
+        pr: null,
+        framework,
+        testsPassed: 0,
+        testsFailed: 0,
+        testsSkipped: 0,
+        durationMs: 0,
+      });
+    const first = await run("s1", "storybook");
+    await run("p1", "playwright"); // a different framework between the two storybook runs
+    const second = await run("s2", "storybook", "feat/x");
+
+    const atFirst = await store.testRunNeighbors!("acme/run-neighbors", "storybook", first.id);
+    expect(atFirst.prev).toBeNull();
+    expect(atFirst.next?.commit).toBe("s2"); // skips the playwright run in between
+
+    const atSecond = await store.testRunNeighbors!("acme/run-neighbors", "storybook", second.id);
+    expect(atSecond.prev?.commit).toBe("s1");
+    expect(atSecond.next).toBeNull();
+  });
+
   it("scopes cross-repo reads by account (hosted multi-tenancy)", async () => {
     await store.recordUpload({
       repo: "other-org/thing",

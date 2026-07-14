@@ -283,6 +283,24 @@ export class SqliteStore implements Store {
     return { row: toRow(raw), report: unpackReport(raw.report) };
   }
 
+  async uploadNeighbors(repo: string, branch: string, id: number) {
+    // Navigation only: no report blob, and the repo+branch equality prefix
+    // keeps both probes on idx_uploads_repo_branch_time.
+    const prev = this.db
+      .prepare(
+        `SELECT ${ROW_COLUMNS} FROM uploads
+         WHERE repo = ? AND branch = ? AND id < ? ORDER BY id DESC LIMIT 1`,
+      )
+      .get(repo, branch, id) as unknown as RawRow | undefined;
+    const next = this.db
+      .prepare(
+        `SELECT ${ROW_COLUMNS} FROM uploads
+         WHERE repo = ? AND branch = ? AND id > ? ORDER BY id ASC LIMIT 1`,
+      )
+      .get(repo, branch, id) as unknown as RawRow | undefined;
+    return { prev: prev ? toRow(prev) : null, next: next ? toRow(next) : null };
+  }
+
   async branches(repo: string): Promise<string[]> {
     const rows = this.db
       .prepare(
@@ -549,6 +567,22 @@ export class SqliteStore implements Store {
           )
           .all(repo, limit) as unknown as RawTestRun[]);
     return rows.map(toTestRun);
+  }
+
+  async testRunNeighbors(repo: string, framework: string, id: number) {
+    const prev = this.db
+      .prepare(
+        `SELECT ${TEST_RUN_COLUMNS} FROM test_runs
+         WHERE repo = ? AND framework = ? AND id < ? ORDER BY id DESC LIMIT 1`,
+      )
+      .get(repo, framework, id) as unknown as RawTestRun | undefined;
+    const next = this.db
+      .prepare(
+        `SELECT ${TEST_RUN_COLUMNS} FROM test_runs
+         WHERE repo = ? AND framework = ? AND id > ? ORDER BY id ASC LIMIT 1`,
+      )
+      .get(repo, framework, id) as unknown as RawTestRun | undefined;
+    return { prev: prev ? toTestRun(prev) : null, next: next ? toTestRun(next) : null };
   }
 
   async setTestRunReview(id: number, state: ReviewState): Promise<TestRunRow | null> {

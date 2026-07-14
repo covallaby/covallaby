@@ -83,6 +83,14 @@ test("maintainer discovers browser runs and component previews", async ({ page }
   await page.getByRole("button", { name: "diff", exact: true }).click();
   await expect(page.getByAltText("Pixel diff for With component captures")).toBeVisible();
   await chapter(page, testInfo, "04-component-pixel-diff");
+
+  // Lateral navigation: [ jumps to the previous run; the exhausted end renders disabled.
+  await expect(page.getByRole("link", { name: "Previous run" })).toBeVisible();
+  await page.keyboard.press("[");
+  await expect(page).toHaveURL(/storybook-previews\/17$/);
+  await expect(page.getByRole("link", { name: "Next run" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Previous run" })).toHaveCount(0);
+  await chapter(page, testInfo, "05-lateral-run-navigation");
   await expectHealthyPage(page);
 });
 

@@ -68,6 +68,21 @@ function withCov(detail: UploadDetail): UploadDetail {
   return { ...detail, files: detail.files.map((f) => ({ ...f, cov: f.cov || synthCov(f) })) };
 }
 
+/**
+ * Derive prev/next lateral navigation from the history snapshot, limited to
+ * neighbors that are actually navigable in the demo (their detail fixture
+ * exists). The fixtures predate the neighbors field on the live API.
+ */
+function withNeighbors(detail: UploadDetail): UploadDetail {
+  const lane = (F.history[detail.row.repo]?.history ?? []).filter(
+    (u) => u.branch === detail.row.branch && (u.id === detail.row.id || F.uploads[String(u.id)]),
+  );
+  const at = lane.findIndex((u) => u.id === detail.row.id);
+  if (at === -1) return detail;
+  // History is newest-first, so "previous" is the next index down the list.
+  return { ...detail, neighbors: { prev: lane[at + 1] ?? null, next: lane[at - 1] ?? null } };
+}
+
 function portfolioTrends(): PortfolioTrends {
   const perRepo = F.repos.repos.map((o) =>
     (F.history[o.repo]?.history ?? [])
@@ -234,7 +249,9 @@ export const demoApi = {
     return settle(F.history[key] ?? F.history[repo] ?? notFound(`history for ${key}`));
   },
   upload: (id: string) => {
-    const detail = F.uploads[id] ? withCov(F.uploads[id]!) : notFound(`upload ${id}`);
+    const detail = F.uploads[id]
+      ? withNeighbors(withCov(F.uploads[id]!))
+      : notFound(`upload ${id}`);
     return settle({
       ...detail,
       verdict: demoVerdict(
