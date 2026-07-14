@@ -24,11 +24,13 @@ const fakeGitHub: GitHubClient = {
 };
 
 const upsertPullRequestComment = vi.fn(async () => {});
+const createCommitStatus = vi.fn(async () => {});
 const fakeGitHubApp: GitHubAppClient = {
   getInstallation: async (id) => ({ id, account: id === 999 ? "other" : "acme" }),
   listRepositories: async () => [{ fullName: "acme/app", defaultBranch: "main" }],
   listOpenPullRequests: async () => [7],
   upsertPullRequestComment,
+  createCommitStatus,
 };
 
 const sessionCookieFor = (accounts: string[], secret = config.sessionSecret) =>
@@ -390,5 +392,216 @@ describe("hosted review auth", () => {
     expect(
       json.captures.find((capture: { id: string }) => capture.id === "button--a").review,
     ).toMatchObject({ state: "approved", reviewedBy: "alice" });
+  });
+});
+
+describe("per-signal covallaby/components status (hosted GitHub App)", () => {
+  class MemoryArtifacts implements ArtifactStorage {
+    readonly kind = "local" as const;
+    objects = new Map<string, Uint8Array>();
+    async createUploadUrl() {
+      return null;
+    }
+    async createDownloadUrl() {
+      return null;
+    }
+    async put(key: string, body: Uint8Array) {
+      this.objects.set(key, body);
+    }
+    async get(key: string) {
+      return this.objects.get(key)!;
+    }
+    async exists(key: string, size: number) {
+      return this.objects.get(key)?.byteLength === size;
+    }
+    async delete(key: string) {
+      this.objects.delete(key);
+    }
+  }
+
+  const store = new SqliteStore(":memory:");
+  const appConfig: HostedConfig = {
+    ...config,
+    githubApp: {
+      appId: "123",
+      slug: "covallaby-cloud",
+      privateKey: "injected-in-tests",
+      bootstrapInstallationIds: [],
+    },
+  };
+  const app = createApp({
+    store,
+    uploadToken: "up",
+    hosted: appConfig,
+    hostedDeps: { github: fakeGitHub, githubApp: fakeGitHubApp },
+    artifactStorage: new MemoryArtifacts(),
+    storybookPreviewBaseUrl: "https://previews.test",
+    storybookPreviewSecret: "preview-secret",
+  });
+  const auth = { authorization: "Bearer up", "content-type": "application/json" };
+
+  /** Upload + complete a one-file Storybook preview; returns the run id. */
+  const publishPreview = async (repo: string, commit: string): Promise<number> => {
+    const created = await app.request("/api/v1/storybook-previews", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({
+        repo,
+        branch: "feature/x",
+        commit,
+        pr: 7,
+        files: [{ path: "index.html", contentType: "text/html", sizeBytes: 4 }],
+      }),
+    });
+    expect(created.status).toBe(201);
+    const data = await created.json();
+    const uploaded = await app.request(new URL(data.artifacts[0].uploadUrl).pathname, {
+      method: "PUT",
+      headers: { authorization: "Bearer up", "content-type": "text/html" },
+      body: "<ok>",
+    });
+    expect(uploaded.status).toBe(200);
+    const completed = await app.request(`/api/v1/storybook-previews/${data.run.id}/complete`, {
+      method: "POST",
+      headers: { authorization: "Bearer up" },
+    });
+    expect(completed.status).toBe(200);
+    return data.run.id as number;
+  };
+
+  it("opens a pending status on completion and settles it on the review verdict", async () => {
+    await store.setMeta("github-app:account:acme", "123");
+    createCommitStatus.mockClear();
+
+    const id = await publishPreview("acme/app", "abc1234def");
+    expect(createCommitStatus).toHaveBeenCalledWith(123, "acme/app", "abc1234def", {
+      context: "covallaby/components",
+      state: "pending",
+      description: "Component captures await visual review.",
+      targetUrl: `http://localhost:8080/r/acme/app/storybook-previews/${id}`,
+    });
+
+    const review = (state: string) =>
+      app.request(`/api/v1/storybook-previews/${id}/review`, {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({ state }),
+      });
+
+    createCommitStatus.mockClear();
+    expect((await review("rejected")).status).toBe(200);
+    expect(createCommitStatus).toHaveBeenCalledWith(
+      123,
+      "acme/app",
+      "abc1234def",
+      expect.objectContaining({ context: "covallaby/components", state: "failure" }),
+    );
+
+    createCommitStatus.mockClear();
+    expect((await review("approved")).status).toBe(200);
+    expect(createCommitStatus).toHaveBeenCalledWith(
+      123,
+      "acme/app",
+      "abc1234def",
+      expect.objectContaining({ state: "success" }),
+    );
+  });
+
+  it("skips accounts without an installation and runs without a real SHA", async () => {
+    createCommitStatus.mockClear();
+    await publishPreview("bob/secret", "abc1234def"); // bob never installed the App
+    await publishPreview("acme/app", "unknown"); // no usable commit SHA
+    expect(createCommitStatus).not.toHaveBeenCalled();
+  });
+
+  it("records the verdict even when GitHub is down", async () => {
+    createCommitStatus.mockRejectedValueOnce(new Error("GitHub App /statuses → 502"));
+    const id = await publishPreview("acme/app", "feed42feed");
+    const res = await app.request(`/api/v1/storybook-previews/${id}/review`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ state: "rejected" }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).run.reviewState).toBe("rejected");
+  });
+
+  it("updates the status when per-story verdicts change the run's derived review state", async () => {
+    await store.setMeta("github-app:account:acme", "123");
+    const zeros = {
+      pr: 7,
+      framework: "storybook",
+      testsPassed: 0,
+      testsFailed: 0,
+      testsSkipped: 0,
+      durationMs: 0,
+    };
+    // A mainline baseline so the feature story lands as reviewable ("new").
+    const base = await store.createTestRun({
+      repo: "acme/app",
+      branch: "main",
+      commit: "aaaa1111bbbb",
+      ...zeros,
+      pr: null,
+      reviewState: "auto-accepted",
+    });
+    await store.completeTestRun(base.id);
+    const run = await store.createTestRun({
+      repo: "acme/app",
+      branch: "feature/x",
+      commit: "beef1234cafe",
+      ...zeros,
+    });
+    await store.createTestArtifact({
+      runId: run.id,
+      name: "_covallaby/captures/button--a.png",
+      kind: "screenshot",
+      contentType: "image/png",
+      sizeBytes: 4,
+      objectKey: `k-${run.id}`,
+      testName: JSON.stringify({
+        id: "button--a",
+        title: "Components/Button",
+        name: "a",
+        sha256: "e".repeat(64),
+      }),
+    });
+    await store.completeTestRun(run.id);
+
+    const reviewCaptures = (state: string) =>
+      app.request(`/api/v1/storybook-previews/${run.id}/review-captures`, {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({ stories: ["button--a"], state }),
+      });
+
+    // Approving the only reviewable story flips the run to approved → success.
+    createCommitStatus.mockClear();
+    const approved = await reviewCaptures("approved");
+    expect(approved.status).toBe(200);
+    expect((await approved.json()).run.reviewState).toBe("approved");
+    expect(createCommitStatus).toHaveBeenCalledWith(
+      123,
+      "acme/app",
+      "beef1234cafe",
+      expect.objectContaining({ context: "covallaby/components", state: "success" }),
+    );
+
+    // A verdict that doesn't change the derived run state posts nothing.
+    createCommitStatus.mockClear();
+    expect((await reviewCaptures("approved")).status).toBe(200);
+    expect(createCommitStatus).not.toHaveBeenCalled();
+
+    // Rejecting flips it back → failure.
+    createCommitStatus.mockClear();
+    const rejected = await reviewCaptures("rejected");
+    expect(rejected.status).toBe(200);
+    expect((await rejected.json()).run.reviewState).toBe("rejected");
+    expect(createCommitStatus).toHaveBeenCalledWith(
+      123,
+      "acme/app",
+      "beef1234cafe",
+      expect.objectContaining({ context: "covallaby/components", state: "failure" }),
+    );
   });
 });

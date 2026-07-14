@@ -12,6 +12,18 @@ export interface GitHubInstallationRepo {
   defaultBranch: string;
 }
 
+/** GitHub's commit-status vocabulary (we never send "error" today, but the API allows it). */
+export type CommitStatusState = "success" | "failure" | "pending" | "error";
+
+/** One named entry in a commit's checks list, e.g. covallaby/components. */
+export interface CommitStatusInput {
+  context: string;
+  state: CommitStatusState;
+  description: string;
+  /** Deep link into the dashboard page for this signal ("Details" in the PR UI). */
+  targetUrl?: string;
+}
+
 export interface GitHubAppClient {
   getInstallation(id: number): Promise<GitHubInstallation>;
   listRepositories(id: number): Promise<GitHubInstallationRepo[]>;
@@ -22,6 +34,12 @@ export interface GitHubAppClient {
     pr: number,
     marker: string,
     body: string,
+  ): Promise<void>;
+  createCommitStatus(
+    id: number,
+    repo: string,
+    sha: string,
+    status: CommitStatusInput,
   ): Promise<void>;
 }
 
@@ -152,6 +170,20 @@ export function createGitHubAppClient(config: {
       const token = await installationToken(id);
       const pulls = await paged<{ number: number }>(`/repos/${repo}/pulls?state=open`, token);
       return pulls.map((pr) => pr.number);
+    },
+    async createCommitStatus(id, repo, sha, status) {
+      const token = await installationToken(id);
+      await api(`/repos/${repo}/statuses/${sha}`, token, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          state: status.state,
+          context: status.context,
+          // GitHub rejects descriptions over 140 characters.
+          description: status.description.slice(0, 140),
+          ...(status.targetUrl && { target_url: status.targetUrl }),
+        }),
+      });
     },
     async upsertPullRequestComment(id, repo, pr, marker, body) {
       const token = await installationToken(id);

@@ -10,7 +10,13 @@ import {
   resolveVisualBaseline,
 } from "./baseline.js";
 import { currentSession } from "./hosted/auth.js";
-import { type AppEnv, type HostedConfig, type HostedDeps, mountHosted } from "./hosted/index.js";
+import {
+  type AppEnv,
+  type HostedConfig,
+  type HostedDeps,
+  type HostedHooks,
+  mountHosted,
+} from "./hosted/index.js";
 import {
   type PolicyInput,
   type PolicyViolation,
@@ -472,7 +478,19 @@ export function createApp({
   };
   // Hosted tier (opt-in): sign-in, billing, and per-account read scoping.
   // Mounted before the API routes so its gate runs first. Off in self-hosted.
-  if (hosted) mountHosted(app, store, hosted, hostedDeps, uploadAuthorized);
+  const hostedHooks: HostedHooks = hosted
+    ? mountHosted(app, store, hosted, hostedDeps, uploadAuthorized)
+    : {};
+  // Best-effort per-signal GitHub status: the review/upload must succeed even
+  // when GitHub is down or the App lacks the statuses permission.
+  const reportComponentsStatus = async (run: TestRunRow | null) => {
+    if (!run || !hostedHooks.reportComponentsStatus) return;
+    try {
+      await hostedHooks.reportComponentsStatus(run);
+    } catch (error) {
+      console.error(`covallaby/components status for ${run.repo}@${run.commit} failed:`, error);
+    }
+  };
 
   // Optional read gate for everything except health + upload.
   app.use("*", async (c, next) => {
@@ -1183,6 +1201,9 @@ export function createApp({
         console.error(`Artifact cleanup failed for ${found.run.repo}:`, error);
       }
     }
+    // Open the covallaby/components status for this commit (pending review,
+    // or success when a default-branch build was auto-accepted).
+    await reportComponentsStatus(run);
     return c.json({
       ok: true,
       run,
@@ -1213,7 +1234,12 @@ export function createApp({
         400,
       );
     }
-    return c.json({ ok: true, run: await store.setTestRunReview(run.id, state) });
+    const reviewed = await store.setTestRunReview(run.id, state);
+    // Keep the commit's covallaby/components status truthful: approval turns
+    // it green, rejection fails it — a rejection with no consequence is worse
+    // than none.
+    await reportComponentsStatus(reviewed);
+    return c.json({ ok: true, run: reviewed });
   });
 
   app.get("/api/v1/repos/:owner/:name/storybook-previews", async (c) => {
@@ -1439,6 +1465,9 @@ export function createApp({
     const derived = deriveRunReviewState(updated.captures);
     const freshRun =
       derived === run.reviewState ? run : await store.setTestRunReview(run.id, derived);
+    // Per-story verdicts roll up into the run's review_state; keep the
+    // commit's covallaby/components status truthful whenever that changes.
+    if (derived !== run.reviewState) await reportComponentsStatus(freshRun);
     return c.json({ ok: true, ...updated, run: freshRun ?? updated.run });
   });
 
