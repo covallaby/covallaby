@@ -172,6 +172,17 @@ export interface ActivityFeed {
   runsSupported: boolean;
 }
 
+/** The repo-scoped slice of the unified feed — the repo's Activity tab. */
+export interface RepoActivityFeed {
+  repo: string;
+  /** The branch filter the server applied, or null for all branches. */
+  branch: string | null;
+  /** The merged three-signal feed for this repo, newest first. */
+  items: ActivityItem[];
+  /** False on runtimes without test-run storage (D1): coverage-only feed. */
+  runsSupported: boolean;
+}
+
 /** A capture's review verdict; present only on reviewable (changed/new/removed) captures. */
 export interface CaptureReview {
   state: ReviewState;
@@ -320,6 +331,10 @@ async function fetchMe(): Promise<Me | null> {
 const liveApi = {
   repos: () => get<{ repos: RepoOverview[] }>("/api/v1/repos"),
   activity: () => get<ActivityFeed>("/api/v1/activity"),
+  repoActivity: (repo: string, branch?: string) =>
+    get<RepoActivityFeed>(
+      `/api/v1/repos/${repo}/activity${branch ? `?branch=${encodeURIComponent(branch)}` : ""}`,
+    ),
   history: (repo: string, branch?: string) =>
     get<RepoHistory>(
       `/api/v1/repos/${repo}/history${branch ? `?branch=${encodeURIComponent(branch)}` : ""}`,
@@ -394,6 +409,7 @@ export const api: typeof liveApi = IS_DEMO
   ? {
       repos: (...a) => load().then((d) => d.repos(...a)),
       activity: (...a) => load().then((d) => d.activity(...a)),
+      repoActivity: (...a) => load().then((d) => d.repoActivity(...a)),
       history: (...a) => load().then((d) => d.history(...a)),
       upload: (...a) => load().then((d) => d.upload(...a)),
       me: () => Promise.resolve<Me | null>(null), // the static demo is always "public"

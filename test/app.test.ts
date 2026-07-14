@@ -1192,3 +1192,91 @@ describe("unified activity feed", () => {
     expect(data.items.map((item: { type: string }) => item.type)).toEqual(["coverage"]);
   });
 });
+
+describe("repo-scoped activity feed", () => {
+  const seedUpload = (feedApp: ReturnType<typeof createApp>, query: string) =>
+    feedApp.request(`/api/v1/upload?${query}`, {
+      method: "POST",
+      headers: { authorization: "Bearer sekret" },
+      body: lcov,
+    });
+
+  const seedRun = (db: SqliteStore, input: { branch: string; framework: string; repo?: string }) =>
+    db.createTestRun({
+      repo: input.repo ?? "acme/app",
+      branch: input.branch,
+      commit: `c-${input.framework}-${input.branch}`,
+      pr: null,
+      framework: input.framework,
+      testsPassed: 2,
+      testsFailed: 0,
+      testsSkipped: 0,
+      durationMs: 5,
+    });
+
+  async function seededApp() {
+    const db = new SqliteStore(":memory:");
+    const feedApp = createApp({ store: db, uploadToken: "sekret" });
+    await seedUpload(feedApp, "repo=acme/app&branch=main&commit=m1");
+    await seedUpload(feedApp, "repo=acme/app&branch=feat/x&commit=f1&pr=7");
+    await seedUpload(feedApp, "repo=acme/other&branch=main&commit=o1"); // another repo: never leaks in
+    await seedRun(db, { branch: "main", framework: "playwright" });
+    await seedRun(db, { branch: "feat/x", framework: "storybook" });
+    await seedRun(db, { branch: "main", framework: "storybook", repo: "acme/other" });
+    return feedApp;
+  }
+
+  it("merges all-branch uploads with both run frameworks, scoped to the repo", async () => {
+    const feedApp = await seededApp();
+    const data = await (await feedApp.request("/api/v1/repos/acme/app/activity")).json();
+    expect(data.repo).toBe("acme/app");
+    expect(data.branch).toBeNull();
+    expect(data.runsSupported).toBe(true);
+    expect(data.items.map((item: { type: string }) => item.type).sort()).toEqual([
+      "components",
+      "coverage",
+      "coverage",
+      "journeys",
+    ]);
+    expect(data.items.every((item: { repo: string }) => item.repo === "acme/app")).toBe(true);
+    const times = data.items.map((item: { createdAt: string }) => Date.parse(item.createdAt));
+    expect([...times].sort((a: number, b: number) => b - a)).toEqual(times);
+    // The feed never carries report blobs or artifact rows.
+    expect(data.items.every((item: object) => !("report" in item) && !("artifacts" in item))).toBe(
+      true,
+    );
+  });
+
+  it("narrows both uploads and runs to one lane with ?branch=", async () => {
+    const feedApp = await seededApp();
+    const data = await (
+      await feedApp.request(
+        `/api/v1/repos/acme/app/activity?branch=${encodeURIComponent("feat/x")}`,
+      )
+    ).json();
+    expect(data.branch).toBe("feat/x");
+    expect(data.items.every((item: { branch: string }) => item.branch === "feat/x")).toBe(true);
+    expect(data.items.map((item: { type: string }) => item.type).sort()).toEqual([
+      "components",
+      "coverage",
+    ]);
+  });
+
+  it("degrades to uploads-only on stores without test-run support (D1)", async () => {
+    const db = new SqliteStore(":memory:");
+    Object.defineProperty(db, "listTestRuns", { value: undefined });
+    const feedApp = createApp({ store: db, uploadToken: "sekret" });
+    await seedUpload(feedApp, "repo=acme/app&branch=main&commit=solo");
+
+    const data = await (await feedApp.request("/api/v1/repos/acme/app/activity")).json();
+    expect(data.runsSupported).toBe(false);
+    expect(data.items.map((item: { type: string }) => item.type)).toEqual(["coverage"]);
+  });
+
+  it("returns an empty feed for a repo with no evidence", async () => {
+    const db = new SqliteStore(":memory:");
+    const feedApp = createApp({ store: db, uploadToken: "sekret" });
+    const data = await (await feedApp.request("/api/v1/repos/acme/ghost/activity")).json();
+    expect(data.items).toEqual([]);
+  });
+});

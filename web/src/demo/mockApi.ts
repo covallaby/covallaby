@@ -7,6 +7,7 @@ import type {
   PolicyVerdict,
   PolicyViolation,
   PortfolioTrends,
+  RepoActivityFeed,
   RepoHistory,
   RepoOverview,
   RepoPolicy,
@@ -231,6 +232,32 @@ function activityFeed(): ActivityFeed {
   return { uploads: F.activity.uploads, items, runsSupported: true };
 }
 
+/** The repo-scoped feed behind the Activity tab: history + demo runs, one repo. */
+function repoActivityFeed(repo: string, branch?: string): RepoActivityFeed {
+  // The repo's uploads across every history snapshot (repo and repo@branch
+  // keys overlap), deduplicated by upload id.
+  const byId = new Map<number, UploadRow>();
+  for (const [key, snapshot] of Object.entries(F.history)) {
+    if (key !== repo && !key.startsWith(`${repo}@`)) continue;
+    for (const upload of snapshot.history) byId.set(upload.id, upload);
+  }
+  const uploads = [...byId.values()];
+  const items: ActivityItem[] = [
+    ...uploads.map((upload) => ({ type: "coverage" as const, ...upload })),
+    ...DEMO_RUNS.filter((run) => run.repo === repo).map((run) => ({
+      type: "journeys" as const,
+      ...run,
+    })),
+    ...DEMO_PREVIEWS.filter((preview) => preview.repo === repo).map((preview) => ({
+      type: "components" as const,
+      ...preview,
+    })),
+  ]
+    .filter((item) => !branch || item.branch === branch)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id - a.id);
+  return { repo, branch: branch ?? null, items, runsSupported: true };
+}
+
 // Demo-only sample policies so the Policy page shows both a pass and a fail.
 const DEMO_POLICIES: Record<string, RepoPolicy> = {
   "acme/megarepo": { minProject: 70, maxDrop: 1 },
@@ -330,6 +357,7 @@ export const demoApi = {
   policy: (repo: string) => settle({ repo, policy: DEMO_POLICIES[repo] ?? null }),
   status: (repo: string) => settle(policyStatus(repo)),
   activity: () => settle(activityFeed()),
+  repoActivity: (repo: string, branch?: string) => settle(repoActivityFeed(repo, branch)),
   testRuns: (repo: string) => settle({ runs: repo === "covallaby/covallaby" ? DEMO_RUNS : [] }),
   storybookPreviews: (repo: string) =>
     settle({ previews: repo === "covallaby/covallaby" ? DEMO_PREVIEWS : [] }),

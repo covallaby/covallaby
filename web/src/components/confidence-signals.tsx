@@ -33,7 +33,7 @@ export const SIGNALS: SignalDefinition[] = [
       "Line coverage from your test suite: the share of code lines that actually ran during tests. One signal on its own, never averaged with the others.",
     missingHint:
       "Upload any coverage file (LCOV, JaCoCo, Cobertura, xccov) from CI and it counts right away.",
-    setupHref: (repo) => `/r/${repo}/uploads`,
+    setupHref: (repo) => `/r/${repo}/activity`,
   },
   {
     key: "journeys",
@@ -42,7 +42,7 @@ export const SIGNALS: SignalDefinition[] = [
     definition:
       "Real browser test runs (Playwright) that walk through user flows, with recordings you can replay. Its own signal, never blended into a score.",
     missingHint: "Publish Playwright results from CI and journeys will hop right in.",
-    setupHref: (repo) => `/r/${repo}/playbacks`,
+    setupHref: (repo) => `/r/${repo}/activity`,
   },
   {
     key: "components",
@@ -51,7 +51,7 @@ export const SIGNALS: SignalDefinition[] = [
     definition:
       "Distinct rendered component states captured from Storybook, so you can see every variant at a glance. Its own signal, never mixed into a score.",
     missingHint: "Publish Storybook captures from CI to start counting states.",
-    setupHref: (repo) => `/r/${repo}/storybook-previews`,
+    setupHref: (repo) => `/r/${repo}/activity`,
   },
 ];
 

@@ -1,12 +1,13 @@
 import type { ReactElement } from "react";
 import { matchRoutes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import { buildRoutes, crumbTrail, orgFromPathname } from "../web/src/App.js";
+import { RedirectToActivity, buildRoutes, crumbTrail, orgFromPathname } from "../web/src/App.js";
 import { CompareBranches, PullRequest } from "../web/src/pages/Compare.js";
 import { Home } from "../web/src/pages/Home.js";
 import { PlaybackDetail } from "../web/src/pages/Playbacks.js";
 import { RepoLayout } from "../web/src/pages/Repo.js";
-import { StorybookPreviewDetail, StorybookPreviews } from "../web/src/pages/StorybookPreviews.js";
+import { Activity } from "../web/src/pages/RepoActivity.js";
+import { StorybookPreviewDetail } from "../web/src/pages/StorybookPreviews.js";
 import { Upload } from "../web/src/pages/Upload.js";
 
 const routes = buildRoutes(null);
@@ -22,6 +23,7 @@ describe("repo leaf routes render inside RepoLayout", () => {
   const leaves: [string, ReactElement["type"]][] = [
     ["/r/acme/app/pr/12", PullRequest],
     ["/r/acme/app/compare", CompareBranches],
+    ["/r/acme/app/activity", Activity],
     ["/r/acme/app/u/34", Upload],
     ["/r/acme/app/test-runs/56", PlaybackDetail],
     ["/r/acme/app/storybook-previews/78", StorybookPreviewDetail],
@@ -34,11 +36,25 @@ describe("repo leaf routes render inside RepoLayout", () => {
       expect(types.at(-1)).toBe(component);
     });
   }
+});
 
-  it("keeps the storybook-previews list separate from the detail route", () => {
-    const types = matchedTypes("/r/acme/app/storybook-previews");
-    expect(types[0]).toBe(RepoLayout);
-    expect(types.at(-1)).toBe(StorybookPreviews);
+describe("legacy evidence-list routes redirect into the Activity tab", () => {
+  const legacy = [
+    "/r/acme/app/uploads",
+    "/r/acme/app/playbacks",
+    "/r/acme/app/storybook-previews",
+  ] as const;
+
+  for (const path of legacy) {
+    it(`${path} deep link stays alive as a redirect`, () => {
+      const types = matchedTypes(path);
+      expect(types[0]).toBe(RepoLayout);
+      expect(types.at(-1)).toBe(RedirectToActivity);
+    });
+  }
+
+  it("keeps the capture detail route out of the redirect", () => {
+    expect(matchedTypes("/r/acme/app/storybook-previews/78").at(-1)).toBe(StorybookPreviewDetail);
   });
 });
 
@@ -81,12 +97,10 @@ describe("crumbTrail", () => {
   it("keeps the section and entity tail labels", () => {
     const tail = (rest: string) => crumbTrail(`/r/acme/app/${rest}`).at(-1)?.label;
     expect(tail("insights")).toBe("Insights");
-    expect(tail("uploads")).toBe("Uploads");
+    expect(tail("activity")).toBe("Activity");
     expect(tail("pulls")).toBe("Pull requests");
     expect(tail("policy")).toBe("Policy");
     expect(tail("compare")).toBe("Compare");
-    expect(tail("playbacks")).toBe("Playwright runs");
-    expect(tail("storybook-previews")).toBe("Component captures");
     expect(tail("storybook-previews/4")).toBe("Component capture run 4");
     expect(tail("test-runs/9")).toBe("Playwright run 9");
     expect(tail("u/34")).toBe("upload 34");

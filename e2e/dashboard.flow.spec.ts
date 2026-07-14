@@ -93,21 +93,40 @@ test("merge-gate verdict leads the commit and PR pages", async ({ page }, testIn
   await expectHealthyPage(page);
 });
 
-test("maintainer discovers browser runs and component previews", async ({ page }, testInfo) => {
+test("maintainer reviews all repo evidence through the Activity tab", async ({
+  page,
+}, testInfo) => {
+  // Legacy evidence deep links (uploads/playbacks/storybook-previews lists)
+  // stay alive: they land on the unified Activity tab.
   await page.goto("./#/r/covallaby/covallaby/playbacks");
-  await expect(page.getByText("Playwright runs", { exact: true })).toBeVisible();
-  await expect(page.getByRole("table").getByText("34 passed")).toBeVisible();
-  await expect(page.getByRole("table").getByText("PR #128 Playwright run")).toBeVisible();
-  await chapter(page, testInfo, "01-playwright-runs");
+  await expect(page).toHaveURL(/#\/r\/covallaby\/covallaby\/activity$/);
+  const repoTabs = page.getByRole("navigation", { name: "Repository sections" });
+  await expect(repoTabs.getByRole("link", { name: "Activity", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  // One chronology, three signals: a failed journey run, component changes
+  // awaiting review, and coverage movement — with green noise kept quiet.
+  await expect(page.getByText("1 of 32 journeys failed")).toBeVisible();
+  await expect(page.getByText("component changes need review")).toBeVisible();
+  await expect(page.getByText(/coverage .*→/).first()).toBeVisible();
+  await expect(page.getByText(/quiet update/).first()).toBeVisible();
+  await chapter(page, testInfo, "01-unified-repo-activity");
 
-  await page
-    .getByRole("navigation", { name: "Repository sections" })
-    .getByRole("link", { name: "Captures", exact: true })
-    .click();
-  await expect(page.getByText("Component captures", { exact: true }).first()).toBeVisible();
-  await expect(page.getByRole("table").getByText("PR #128 preview")).toBeVisible();
-  await chapter(page, testInfo, "02-storybook-previews");
-  await page.getByRole("table").getByText("PR #128 preview").click();
+  // Chips narrow the feed to component evidence and share via ?type=.
+  await page.getByRole("button", { name: "Components", exact: true }).click();
+  await expect(page).toHaveURL(/type=components/);
+  await expect(page.getByText("1 of 32 journeys failed")).toHaveCount(0);
+  await expect(page.getByText("component changes need review")).toBeVisible();
+  await chapter(page, testInfo, "02-filtered-to-components");
+
+  // A feed row is one link: straight into the capture review gallery.
+  await page.getByText("component changes need review").click();
+  await expect(page).toHaveURL(/storybook-previews\/18$/);
+  await expect(repoTabs.getByRole("link", { name: "Activity", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
   await expect(page.getByPlaceholder("Search 2 component captures")).toBeVisible();
   await expect(page.getByRole("heading", { name: "With component captures" })).toBeVisible();
   await expect(page.getByText(/2 reviewable changes against main/)).toBeVisible();
@@ -143,11 +162,11 @@ test("maintainer discovers browser runs and component previews", async ({ page }
 test.describe("mobile product playback", () => {
   test.use({ viewport: { width: 390, height: 844 }, screen: { width: 390, height: 844 } });
 
-  test("navigation and browser-run cards remain usable", async ({ page }, testInfo) => {
-    await page.goto("./#/r/covallaby/covallaby/playbacks");
-    await expect(page.getByText("Playwright runs", { exact: true })).toBeVisible();
-    await expect(page.locator(".md\\:hidden").getByText("34 passed")).toBeVisible();
-    await chapter(page, testInfo, "01-mobile-playwright-runs");
+  test("navigation and activity rows remain usable", async ({ page }, testInfo) => {
+    await page.goto("./#/r/covallaby/covallaby/activity");
+    await expect(page.getByText("1 of 32 journeys failed")).toBeVisible();
+    await expect(page.getByText("component changes need review")).toBeVisible();
+    await chapter(page, testInfo, "01-mobile-activity-feed");
 
     await page.getByRole("button", { name: "Open navigation" }).click();
     const drawer = page.locator('aside[aria-label="Dashboard navigation"]');
@@ -162,9 +181,10 @@ test.describe("mobile product playback", () => {
     await expect(page).toHaveURL(/#\/r\/covallaby\/covallaby$/);
     await page
       .getByRole("navigation", { name: "Repository sections" })
-      .getByRole("link", { name: "Captures", exact: true })
+      .getByRole("link", { name: "Activity", exact: true })
       .click();
-    await expect(page.getByText("Component captures", { exact: true }).first()).toBeVisible();
+    await expect(page).toHaveURL(/#\/r\/covallaby\/covallaby\/activity$/);
+    await expect(page.getByText("component changes need review")).toBeVisible();
     await expectHealthyPage(page);
   });
 
@@ -175,10 +195,10 @@ test.describe("mobile product playback", () => {
       "./",
       "./#/r/covallaby/covallaby",
       "./#/r/covallaby/covallaby/commits",
-      "./#/r/covallaby/covallaby/uploads",
+      "./#/r/covallaby/covallaby/activity",
       "./#/r/covallaby/covallaby/pulls",
-      "./#/r/covallaby/covallaby/playbacks",
-      "./#/r/covallaby/covallaby/storybook-previews",
+      // A legacy list deep link: audits the page it redirects to (Activity).
+      "./#/r/covallaby/covallaby/uploads",
       "./#/r/covallaby/covallaby/u/10",
     ];
 
