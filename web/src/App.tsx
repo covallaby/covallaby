@@ -14,12 +14,15 @@ import {
   type GitHubAppStatus,
   IS_DEMO,
   type Me,
+  type OwnerGroup,
   type RepoOverview,
   api,
+  formatPercent,
   groupReposByOwner,
+  severity,
   shortRepoName,
 } from "./api.js";
-import { OwnerAvatar } from "./components/ui.js";
+import { Meter, OwnerAvatar, inkFor } from "./components/ui.js";
 import { Commits } from "./pages/Commits.js";
 import { CompareBranches, PullRequest } from "./pages/Compare.js";
 import { Home } from "./pages/Home.js";
@@ -32,7 +35,7 @@ import { PullRequests } from "./pages/RepoPulls.js";
 import { Summary } from "./pages/RepoSummary.js";
 import { StorybookPreviewDetail } from "./pages/StorybookPreviews.js";
 import { Upload } from "./pages/Upload.js";
-import { readRecentVisits, recordRepoVisit, selectRecentRepos } from "./recent-repos.js";
+import { recordRepoVisit } from "./recent-repos.js";
 
 import logoUrl from "./assets/logo.png";
 
@@ -95,6 +98,70 @@ async function signOut() {
   window.location.href = "/";
 }
 
+/** A repo row in the rail: name + coverage. Sections live in the repo tab bar, not here. */
+function RepoNavItem({ r, pathname }: { r: RepoOverview; pathname: string }) {
+  const base = `/r/${r.repo}`;
+  const active = pathname === base || pathname.startsWith(`${base}/`);
+  return (
+    <Link
+      to={base}
+      className={`block rounded-lg px-2.5 py-2 transition-colors ${
+        active ? "bg-(--accent-wash)" : "hover:bg-(--surface-2)"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-(--ink-2)">
+          {shortRepoName(r.repo)}
+        </span>
+        <span
+          className={`text-[11px] font-semibold tabular-nums ${inkFor[severity(r.latest.percent)]}`}
+        >
+          {formatPercent(r.latest.percent)}
+        </span>
+      </div>
+      <Meter percent={r.latest.percent} className="mt-1.5" />
+    </Link>
+  );
+}
+
+/** A collapsible org/owner section in the rail: avatar + name + repo count. */
+function OrgSection({ group, pathname }: { group: OwnerGroup; pathname: string }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="mt-1.5 first:mt-0">
+      <div className="flex items-center gap-1">
+        <Link
+          to={`/o/${encodeURIComponent(group.owner)}`}
+          title={`${group.owner} overview`}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-(--surface-2)"
+        >
+          <OwnerAvatar owner={group.owner} size={16} />
+          <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{group.owner}</span>
+          <span className="text-[10.5px] tabular-nums text-(--muted)">{group.repos.length}</span>
+        </Link>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-label={open ? "Collapse" : "Expand"}
+          className="shrink-0 rounded-lg p-1.5 transition-colors hover:bg-(--surface-2)"
+        >
+          <ChevronDown
+            size={13}
+            className={`text-(--muted) transition-transform ${open ? "" : "-rotate-90"}`}
+          />
+        </button>
+      </div>
+      {open && (
+        <div className="mt-0.5 ml-[15px] space-y-0.5 border-l border-(--hairline) pl-2">
+          {group.repos.map((r) => (
+            <RepoNavItem key={r.repo} r={r} pathname={pathname} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Sidebar({
   repos,
   me,
@@ -110,12 +177,6 @@ function Sidebar({
 }) {
   const { pathname, search } = useLocation();
   const reviewFocused = new URLSearchParams(search).get("focus") === "review";
-  const currentRepo = repoFromPathname(pathname);
-  const recent = selectRecentRepos({
-    visits: readRecentVisits(),
-    currentRepo,
-    available: (repos ?? []).map((r) => r.repo),
-  });
   return (
     <aside
       aria-label="Dashboard navigation"
@@ -147,32 +208,22 @@ function Sidebar({
         </div>
         <div>
           <div className="px-2.5 pb-1.5 text-[10.5px] font-semibold tracking-widest text-(--muted) uppercase">
-            Recent
+            Repositories
           </div>
           <div className="space-y-0.5">
-            {repos === null && recent.length === 0 && (
+            {repos === null && (
               <div className="space-y-2.5 px-2.5 py-1">
                 <div className="h-7 animate-pulse rounded bg-(--surface-2)" />
                 <div className="h-7 animate-pulse rounded bg-(--surface-2)" />
               </div>
             )}
-            {recent.map((repo) => (
-              <SidebarLink key={repo} to={`/r/${repo}`} active={currentRepo === repo}>
-                <OwnerAvatar owner={repo.split("/")[0] ?? repo} size={16} />
-                <span className="min-w-0 truncate font-mono text-[12px]" title={repo}>
-                  {shortRepoName(repo)}
-                </span>
-              </SidebarLink>
-            ))}
-            {repos?.length === 0 && recent.length === 0 && (
+            {repos !== null &&
+              groupReposByOwner(repos).map((group) => (
+                <OrgSection key={group.owner} group={group} pathname={pathname} />
+              ))}
+            {repos?.length === 0 && (
               <p className="px-2.5 py-1 text-[12px] text-(--muted)">Nothing uploaded yet.</p>
             )}
-            <Link
-              to="/"
-              className="block rounded-lg px-2.5 py-1.5 text-[12px] text-(--muted) transition-colors hover:bg-(--surface-2) hover:text-(--ink)"
-            >
-              All repositories →
-            </Link>
           </div>
         </div>
       </nav>
