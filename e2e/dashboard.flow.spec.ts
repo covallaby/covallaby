@@ -6,7 +6,8 @@ test("maintainer finds repository risk and reviews its coverage", async ({ page 
   await expect(page.getByText("Live demo")).toBeVisible();
   await expect(page.getByText("Overall coverage")).toBeVisible();
   await expect(page.getByText("Risk map")).toBeVisible();
-  await expect(page.getByText("Needs attention", { exact: true })).toBeVisible();
+  // Scoped to main: the sidebar has its own "Needs attention" link now.
+  await expect(page.locator("main").getByText("Needs attention", { exact: true })).toBeVisible();
   await expect(page.getByText("Confidence coverage", { exact: true })).toBeVisible();
   await expect(page.getByText("Journeys", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Components", { exact: true }).first()).toBeVisible();
@@ -14,6 +15,11 @@ test("maintainer finds repository risk and reviews its coverage", async ({ page 
     "Commit is missing journeys and components",
   );
   await chapter(page, testInfo, "01-portfolio-health");
+
+  // The rail's "Needs attention" shortcut lands on Home with the review queue in view.
+  await page.getByRole("link", { name: "Needs attention", exact: true }).click();
+  await expect(page).toHaveURL(/#\/\?focus=review$/);
+  await expect(page.locator("main").getByText("Needs attention", { exact: true })).toBeInViewport();
 
   await page.locator('a[href="#/r/covallaby/covallaby"]').first().click();
   await expect(page).toHaveURL(/#\/r\/covallaby\/covallaby$/);
@@ -80,7 +86,10 @@ test("maintainer discovers browser runs and component previews", async ({ page }
   await expect(page.getByRole("table").getByText("PR #128 Playwright run")).toBeVisible();
   await chapter(page, testInfo, "01-playwright-runs");
 
-  await page.getByRole("link", { name: "Component captures", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Repository sections" })
+    .getByRole("link", { name: "Captures", exact: true })
+    .click();
   await expect(page.getByText("Component captures", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("table").getByText("PR #128 preview")).toBeVisible();
   await chapter(page, testInfo, "02-storybook-previews");
@@ -127,9 +136,20 @@ test.describe("mobile product playback", () => {
     await chapter(page, testInfo, "01-mobile-playwright-runs");
 
     await page.getByRole("button", { name: "Open navigation" }).click();
-    await expect(page.locator('aside[aria-label="Dashboard navigation"]')).toBeVisible();
+    const drawer = page.locator('aside[aria-label="Dashboard navigation"]');
+    await expect(drawer).toBeVisible();
+    // The slim rail: Recent repos instead of the old org→repo tree with sub-links.
+    await expect(drawer.getByText("Recent", { exact: true })).toBeVisible();
+    await expect(drawer.getByRole("link", { name: "Needs attention" })).toBeVisible();
+    await expect(drawer.getByRole("link", { name: "Component captures" })).toHaveCount(0);
     await chapter(page, testInfo, "02-mobile-navigation");
-    await page.getByRole("link", { name: "Component captures", exact: true }).click();
+    // Repo sections live in the tab bar now: hop to the repo via Recent, then tab over.
+    await drawer.getByRole("link", { name: "covallaby", exact: true }).click();
+    await expect(page).toHaveURL(/#\/r\/covallaby\/covallaby$/);
+    await page
+      .getByRole("navigation", { name: "Repository sections" })
+      .getByRole("link", { name: "Captures", exact: true })
+      .click();
     await expect(page.getByText("Component captures", { exact: true }).first()).toBeVisible();
     await expectHealthyPage(page);
   });
