@@ -15,6 +15,7 @@ import {
   type PolicyViolation,
   type RepoPolicy,
   evaluatePolicy,
+  floor1,
   parsePolicy,
   renderStatusBadge,
 } from "./policy.js";
@@ -219,6 +220,47 @@ function judge(
     addedFiles: (cmp.changes?.added ?? []).map((f) => ({ path: f.path, percent: f.percent })),
   };
   return { input, result: evaluatePolicy(policy, input) };
+}
+
+/**
+ * Everything the dashboard's verdict card needs, in one self-contained blob:
+ * the pass/fail answer plus the numbers that produced it (head coverage vs the
+ * floor, the delta vs the baseline, and how new files fared against theirs).
+ */
+export interface PolicyVerdict {
+  configured: boolean;
+  passed: boolean;
+  violations: PolicyViolation[];
+  /** The rules the verdict was judged against — null when no policy is set. */
+  rules: RepoPolicy | null;
+  head: { commit: string; percent: number | null };
+  /** The baseline side, or null when there was nothing to compare against. */
+  base: { commit: string; percent: number | null } | null;
+  /** Files added vs the base, and how many sit under the new-file floor. */
+  newFiles: { total: number; belowFloor: number } | null;
+}
+
+function verdictPayload(policy: RepoPolicy | null, cmp: Comparison): PolicyVerdict {
+  const { result } = judge(policy, cmp);
+  const added = cmp.changes?.added ?? [];
+  const floor = policy?.minNewFile;
+  return {
+    configured: result.configured,
+    passed: result.passed,
+    violations: result.violations,
+    rules: policy,
+    head: { commit: cmp.head.commit, percent: cmp.head.percent },
+    base: cmp.same ? null : { commit: cmp.base.commit, percent: cmp.base.percent },
+    newFiles: cmp.changes
+      ? {
+          total: added.length,
+          belowFloor:
+            floor === undefined
+              ? 0
+              : added.filter((f) => f.percent !== null && floor1(f.percent) < floor).length,
+        }
+      : null,
+  };
 }
 
 export interface StatusResult {
@@ -1292,6 +1334,7 @@ export function createApp({
       changes: cmp.changes,
       baseline: cmp.baseline,
       policy: judge(policy, cmp).result,
+      verdict: verdictPayload(policy, cmp),
     });
   });
 
@@ -1503,11 +1546,36 @@ export function createApp({
 
     // How the unified resolver would pick this upload's baseline, and why —
     // surfaced in the UI so "compared against what?" is never a mystery.
-    const { info: baseline } = await resolveCoverageBaseline(
+    const { base: baselineRow, info: baseline } = await resolveCoverageBaseline(
       store,
       found.row,
       await resolveDefaultBranch(store, found.row.repo, found.row.branch),
     );
+
+    // The merge-gate verdict for this upload, judged against that baseline —
+    // the same evaluation the status endpoint and badge run. The base report
+    // is only loaded when a new-file floor needs the added-files diff.
+    const policy = await loadPolicy(store, found.row.repo);
+    let verdict: PolicyVerdict;
+    if (baselineRow && baselineRow.id !== found.row.id) {
+      const baseUpload =
+        policy?.minNewFile !== undefined ? await store.getUpload(baselineRow.id) : null;
+      verdict = verdictPayload(policy, {
+        head: found.row,
+        base: baselineRow,
+        same: false,
+        changes: baseUpload ? diffReports(found.report, baseUpload.report) : null,
+        baseline,
+      });
+    } else {
+      verdict = verdictPayload(policy, {
+        head: found.row,
+        base: found.row,
+        same: true,
+        changes: null,
+        baseline,
+      });
+    }
 
     // What changed vs the previous upload on this branch.
     const prev = await store.prevUpload(found.row.repo, found.row.branch, found.row.id);
@@ -1552,6 +1620,7 @@ export function createApp({
     return c.json({
       changes,
       baseline,
+      verdict,
       row: found.row,
       totals: {
         lines: summary.lines,

@@ -2,6 +2,7 @@ import type {
   CompareResult,
   DirTrends,
   PolicyStatus,
+  PolicyVerdict,
   PolicyViolation,
   PortfolioTrends,
   RepoHistory,
@@ -175,6 +176,54 @@ function policyStatus(repo: string): PolicyStatus {
   };
 }
 
+/** Mirror the server's verdict payload for the fixture data (same floor-to-0.1 grain). */
+function demoVerdict(
+  repo: string,
+  head: { commit: string; percent: number | null },
+  base: { commit: string; percent: number | null } | null,
+  added: Array<{ path: string; percent: number | null }> | null,
+): PolicyVerdict {
+  const policy = DEMO_POLICIES[repo] ?? null;
+  const floor1 = (n: number) => Math.floor(n * 10 + 1e-9) / 10;
+  const violations: PolicyViolation[] = [];
+  if (policy) {
+    const p = head.percent;
+    if (policy.minProject !== undefined && (p === null || floor1(p) < policy.minProject)) {
+      violations.push({
+        kind: "project",
+        actual: p,
+        required: policy.minProject,
+        message: `Project coverage is ${pct1(p)}, but ${pct1(policy.minProject)} is required.`,
+      });
+    }
+    if (policy.maxDrop !== undefined && base?.percent != null && p !== null) {
+      const drop = base.percent - p;
+      if (floor1(drop) > policy.maxDrop) {
+        violations.push({
+          kind: "drop",
+          actual: drop,
+          required: policy.maxDrop,
+          message: `Project coverage fell ${pct1(drop)} (from ${pct1(base.percent)} to ${pct1(p)}); at most ${pct1(policy.maxDrop)} is allowed.`,
+        });
+      }
+    }
+  }
+  const belowFloor =
+    policy?.minNewFile !== undefined
+      ? (added ?? []).filter((f) => f.percent !== null && floor1(f.percent) < policy.minNewFile!)
+          .length
+      : 0;
+  return {
+    configured: policy !== null,
+    passed: policy === null || violations.length === 0,
+    violations,
+    rules: policy,
+    head,
+    base,
+    newFiles: added ? { total: added.length, belowFloor } : null,
+  };
+}
+
 export const demoApi = {
   repos: () => settle(F.repos),
   policy: (repo: string) => settle({ repo, policy: DEMO_POLICIES[repo] ?? null }),
@@ -184,16 +233,37 @@ export const demoApi = {
     const key = branch ? `${repo}@${branch}` : repo;
     return settle(F.history[key] ?? F.history[repo] ?? notFound(`history for ${key}`));
   },
-  upload: (id: string) =>
-    settle(F.uploads[id] ? withCov(F.uploads[id]!) : notFound(`upload ${id}`)),
+  upload: (id: string) => {
+    const detail = F.uploads[id] ? withCov(F.uploads[id]!) : notFound(`upload ${id}`);
+    return settle({
+      ...detail,
+      verdict: demoVerdict(
+        detail.row.repo,
+        { commit: detail.row.commit, percent: detail.row.percent },
+        detail.changes
+          ? { commit: detail.changes.prevCommit, percent: detail.changes.prevPercent }
+          : null,
+        detail.changes?.added ?? null,
+      ),
+    });
+  },
   trends: () => settle(portfolioTrends()),
   dirTrends: (repo: string, branch?: string) => settle(dirTrends(repo, branch)),
   prs: (repo: string) => settle(F.prs[repo] ?? { prs: [] }),
   compare: (repo: string, q: { pr?: number; head?: string; base?: string }) => {
     const base = q.base ?? "main";
-    if (q.pr !== undefined) {
-      return settle(F.compares[`pr:${repo}:${q.pr}:${base}`] ?? notFound(`compare pr ${q.pr}`));
-    }
-    return settle(F.compares[`pr:${repo}:?:${base}`] ?? notFound("branch compare"));
+    const result =
+      q.pr !== undefined
+        ? (F.compares[`pr:${repo}:${q.pr}:${base}`] ?? notFound(`compare pr ${q.pr}`))
+        : (F.compares[`pr:${repo}:?:${base}`] ?? notFound("branch compare"));
+    return settle({
+      ...result,
+      verdict: demoVerdict(
+        repo,
+        { commit: result.head.commit, percent: result.head.percent },
+        result.same ? null : { commit: result.base.commit, percent: result.base.percent },
+        result.changes?.added ?? null,
+      ),
+    });
   },
 };

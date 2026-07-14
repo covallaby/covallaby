@@ -1,13 +1,4 @@
-import {
-  AlertTriangle,
-  ArrowRight,
-  type BookOpen,
-  CheckCircle2,
-  ChevronDown,
-  CirclePlay,
-  GitPullRequest,
-  Images,
-} from "lucide-react";
+import { AlertTriangle, ArrowRight, type BookOpen, CheckCircle2, ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
@@ -435,67 +426,5 @@ function SnapshotCell({
       </span>
       <span className="mt-1 block truncate text-xs text-(--muted)">{detail}</span>
     </Link>
-  );
-}
-
-export function RepositoryLatestSnapshot({ repo }: { repo: RepoOverview }) {
-  const visual = useVisualState(repo.repo);
-  const run = visual?.[0]?.runs[0];
-  const preview = visual?.[0]?.previews[0];
-  const captureCount = preview?.imageCount ?? 0;
-  return (
-    <Card className="overflow-hidden">
-      <CardHeader
-        title="Latest checks"
-        description="The newest signal reported by each CI surface"
-      />
-      <div className="grid divide-y divide-(--hairline) sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-        <SnapshotCell
-          icon={CheckCircle2}
-          label="Code coverage"
-          value={formatPercent(repo.latest.percent)}
-          detail={`${repo.latest.linesCovered.toLocaleString()} of ${repo.latest.linesTotal.toLocaleString()} lines`}
-          href={`/r/${repo.repo}/u/${repo.latest.id}`}
-        />
-        <SnapshotCell
-          icon={CirclePlay}
-          label="Journey execution"
-          value={
-            run
-              ? run.testsFailed
-                ? `${run.testsFailed} failed`
-                : `${run.testsPassed} passed`
-              : "Not reported"
-          }
-          detail={
-            run
-              ? `${run.pr ? `PR #${run.pr} · ` : ""}${relativeTime(run.createdAt)}`
-              : "Add Playwright results in CI"
-          }
-          href={run ? `/r/${repo.repo}/test-runs/${run.id}` : `/r/${repo.repo}/playbacks`}
-        />
-        <SnapshotCell
-          icon={Images}
-          label="Component coverage"
-          value={
-            preview
-              ? captureCount > 0
-                ? `${captureCount} states captured`
-                : "Ready to review"
-              : "Not reported"
-          }
-          detail={
-            preview
-              ? `${preview.pr ? `PR #${preview.pr} · ` : ""}${relativeTime(preview.createdAt)}`
-              : "Publish Storybook captures in CI"
-          }
-          href={
-            preview
-              ? `/r/${repo.repo}/storybook-previews/${preview.id}`
-              : `/r/${repo.repo}/storybook-previews`
-          }
-        />
-      </div>
-    </Card>
   );
 }
