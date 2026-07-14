@@ -1,79 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { type CompareResult, api, formatPercent, severity } from "../api.js";
-import { BaselineChip } from "../components/baseline-chip.js";
+import { ChangesList } from "../components/changes-list.js";
 import { ScopePicker } from "../components/scope-picker.js";
 import { PageSkeleton } from "../components/skeleton.js";
 import { Card, CardHeader, DeltaChip, Meter, inkFor } from "../components/ui.js";
+import { VerdictCard } from "../components/verdict-card.js";
 import { PatchTreemap } from "../components/viz.js";
-
-function ChangesList({ changes }: { changes: NonNullable<CompareResult["changes"]> }) {
-  return (
-    <div className="space-y-5 px-5 pb-4">
-      {changes.added.length > 0 && (
-        <div>
-          <h3 className="mb-1.5 text-xs font-semibold tracking-wide text-(--muted) uppercase">
-            New files ({changes.added.length})
-          </h3>
-          <div className="space-y-0.5">
-            {changes.added.slice(0, 30).map((f) => (
-              <div
-                key={f.path}
-                className="grid grid-cols-[minmax(0,1fr)_72px_56px_110px] items-center gap-3 rounded-lg px-2 py-1.5"
-              >
-                <span className="truncate font-mono text-[12.5px] text-(--ink-2)">{f.path}</span>
-                <span className="text-right font-mono text-[11.5px] text-(--muted) tabular-nums">
-                  {f.total} lines
-                </span>
-                <span
-                  className={`text-right text-[12px] font-semibold tabular-nums ${inkFor[severity(f.percent)]}`}
-                >
-                  {formatPercent(f.percent)}
-                </span>
-                <Meter percent={f.percent} />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {changes.changed.length > 0 && (
-        <div>
-          <h3 className="mb-1.5 text-xs font-semibold tracking-wide text-(--muted) uppercase">
-            Coverage moved ({changes.changed.length})
-          </h3>
-          <div className="space-y-0.5">
-            {changes.changed.slice(0, 30).map((f) => (
-              <div
-                key={f.path}
-                className="grid grid-cols-[minmax(0,1fr)_150px_80px] items-center gap-3 rounded-lg px-2 py-1.5"
-              >
-                <span className="truncate font-mono text-[12.5px] text-(--ink-2)">{f.path}</span>
-                <span className="text-right font-mono text-[12px] text-(--muted) tabular-nums">
-                  {formatPercent(f.before)} →{" "}
-                  <span className={inkFor[severity(f.after)]}>{formatPercent(f.after)}</span>
-                </span>
-                <span className="text-right">
-                  <DeltaChip current={f.after} previous={f.before} />
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {changes.removed > 0 && (
-        <p className="text-[12.5px] text-(--muted)">
-          {changes.removed} {changes.removed === 1 ? "file" : "files"} on the base{" "}
-          {changes.removed === 1 ? "is" : "are"} gone from the head (deleted or renamed).
-        </p>
-      )}
-      {changes.added.length === 0 && changes.changed.length === 0 && changes.removed === 0 && (
-        <p className="text-sm text-(--muted)">
-          No per-file differences — same code, same coverage.
-        </p>
-      )}
-    </div>
-  );
-}
 
 function CompareBody({
   repo,
@@ -88,6 +21,8 @@ function CompareBody({
   const delta = head.percent !== null && base.percent !== null ? head.percent - base.percent : null;
   return (
     <div className="space-y-4">
+      <VerdictCard repo={repo} verdict={result.verdict} baseline={result.baseline} />
+
       <div className="flex flex-wrap items-end justify-between gap-6">
         <div>
           <div className="text-xs text-(--muted)">
@@ -112,9 +47,6 @@ function CompareBody({
                     : "Neck and neck with the base."}
           </p>
           <Meter percent={head.percent} className="mt-3 w-72" />
-          <div className="mt-2.5">
-            <BaselineChip baseline={result.baseline} />
-          </div>
         </div>
         <div className="flex flex-wrap gap-8 pb-1.5">
           <div>
@@ -164,7 +96,13 @@ function CompareBody({
             title="What this changes"
             description={`Per-file differences vs ${base.branch} — project view, not line-level patch (that lives in the PR comment)`}
           />
-          <ChangesList changes={changes} />
+          <ChangesList
+            changes={changes}
+            removedNote={(n) =>
+              `${n} ${n === 1 ? "file" : "files"} on the base ${n === 1 ? "is" : "are"} gone from the head (deleted or renamed).`
+            }
+            emptyNote="No per-file differences — same code, same coverage."
+          />
         </Card>
       )}
     </div>

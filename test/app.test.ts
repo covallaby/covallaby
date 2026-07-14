@@ -810,6 +810,53 @@ describe("policy and status gate", () => {
     expect(cmp.policy.passed).toBe(false);
   });
 
+  it("ships a self-contained verdict on the compare and upload-detail payloads", async () => {
+    await put({ minProject: 50, maxDrop: 0, minNewFile: 80 });
+    // A second PR upload: a.ts drops to 2/3 and a new b.ts lands at 1/2 = 50%.
+    const withNewFile = `${lcov}SF:src/b.ts
+DA:1,0
+DA:2,5
+end_of_record
+`;
+    const posted = await (
+      await app.request("/api/v1/upload?repo=acme/gate&branch=feat/drop&commit=d2&pr=4", {
+        method: "POST",
+        headers: { authorization: "Bearer sekret" },
+        body: withNewFile,
+      })
+    ).json();
+
+    const cmp = await (await app.request("/api/v1/repos/acme/gate/compare?pr=4&base=main")).json();
+    expect(cmp.verdict.configured).toBe(true);
+    expect(cmp.verdict.passed).toBe(false);
+    expect(cmp.verdict.rules).toEqual({ minProject: 50, maxDrop: 0, minNewFile: 80 });
+    expect(cmp.verdict.head).toMatchObject({ commit: "d2" });
+    expect(cmp.verdict.base).toMatchObject({ commit: "g1" });
+    expect(cmp.verdict.base.percent).toBeCloseTo(66.66, 1);
+    expect(cmp.verdict.newFiles).toEqual({ total: 1, belowFloor: 1 });
+    expect(cmp.verdict.violations.map((v: { kind: string }) => v.kind).sort()).toEqual([
+      "drop",
+      "new-file",
+    ]);
+
+    // The upload detail carries the same verdict, judged against its baseline.
+    const detail = await (await app.request(`/api/v1/uploads/${posted.id}`)).json();
+    expect(detail.verdict.passed).toBe(false);
+    expect(detail.verdict.base).toMatchObject({ commit: "g1" });
+    expect(detail.verdict.newFiles).toEqual({ total: 1, belowFloor: 1 });
+
+    // No policy → the gate is open, and the card can say so kindly.
+    const del = await app.request("/api/v1/repos/acme/gate/policy", {
+      method: "DELETE",
+      headers: { authorization: "Bearer sekret" },
+    });
+    expect(del.status).toBe(200);
+    const open = await (await app.request(`/api/v1/uploads/${posted.id}`)).json();
+    expect(open.verdict).toMatchObject({ configured: false, passed: true, rules: null });
+    // Restore the earlier maxDrop-only policy so the DELETE test below still exercises it.
+    await put({ maxDrop: 0 });
+  });
+
   it("clears the policy on DELETE", async () => {
     const del = await app.request("/api/v1/repos/acme/gate/policy", {
       method: "DELETE",

@@ -42,6 +42,28 @@ test("maintainer finds repository risk and reviews its coverage", async ({ page 
   await expectHealthyPage(page);
 });
 
+test("merge-gate verdict leads the commit and PR pages", async ({ page }, testInfo) => {
+  // covallaby/covallaby's demo policy (floor 90%) fails its latest upload (82%).
+  await page.goto("./#/r/covallaby/covallaby/u/10");
+  await expect(page.getByText("Failed", { exact: true })).toBeVisible();
+  await expect(page.getByText("merge gate", { exact: true })).toBeVisible();
+  await expect(page.getByText("Project coverage").first()).toBeVisible();
+  await expect(page.getByText("Delta vs baseline")).toBeVisible();
+  await expect(page.getByText(/is required/)).toBeVisible();
+  await chapter(page, testInfo, "01-upload-verdict");
+
+  await page.goto("./#/r/covallaby/covallaby/pr/50");
+  await expect(page.getByText("merge gate", { exact: true })).toBeVisible();
+  await chapter(page, testInfo, "02-pr-verdict");
+
+  // A repo without a policy gets a friendly nudge to set one, never a shaming.
+  await page.goto("./#/r/covallaby/server/u/18");
+  await expect(page.getByText("No policy set", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Set a policy →" })).toBeVisible();
+  await chapter(page, testInfo, "03-no-policy-nudge");
+  await expectHealthyPage(page);
+});
+
 test("maintainer discovers browser runs and component previews", async ({ page }, testInfo) => {
   await page.goto("./#/r/covallaby/covallaby/playbacks");
   await expect(page.getByText("Playwright runs", { exact: true })).toBeVisible();

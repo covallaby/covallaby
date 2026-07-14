@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { type UploadDetail, api, formatPercent, severity } from "../api.js";
-import { BaselineChip } from "../components/baseline-chip.js";
+import { ChangesList } from "../components/changes-list.js";
 import { Breadcrumb, Hotspots, TreeOutline, buildTree } from "../components/explorer.js";
 import { PageSkeleton } from "../components/skeleton.js";
 import { Treemap } from "../components/treemap.js";
@@ -16,6 +16,7 @@ import {
   Th,
   inkFor,
 } from "../components/ui.js";
+import { VerdictCard } from "../components/verdict-card.js";
 import { CoverageBarcode } from "../components/viz.js";
 
 const VIEWS = [
@@ -79,6 +80,8 @@ export function Upload() {
 
   return (
     <div className="space-y-4">
+      <VerdictCard repo={row.repo} verdict={data.verdict} baseline={data.baseline} />
+
       <div className="flex flex-wrap items-end justify-between gap-6">
         <div>
           <div className="flex items-center gap-2 text-xs text-(--muted)">
@@ -102,9 +105,6 @@ export function Upload() {
                   : `${missed.toLocaleString()} lines need some love.`}
           </p>
           <Meter percent={row.percent} className="mt-3 w-72" />
-          <div className="mt-2.5">
-            <BaselineChip baseline={data.baseline} />
-          </div>
         </div>
         <div className="flex flex-wrap gap-8 pb-1.5">
           {totals.functions.total > 0 && (
@@ -184,88 +184,21 @@ export function Upload() {
 
           {view === "tree" && <TreeOutline files={data.files} query={query} />}
 
-          {view === "changes" && (
-            <div className="px-5 pb-4">
-              {!changes ? (
-                <p className="text-sm text-(--muted)">
-                  This is the first upload on <span className="font-mono">{row.branch}</span> —
-                  everything is new. The next upload gets a comparison. 🦘
-                </p>
-              ) : (
-                <div className="space-y-5">
-                  {changes.added.length > 0 && (
-                    <div>
-                      <h3 className="mb-1.5 text-xs font-semibold tracking-wide text-(--muted) uppercase">
-                        New files ({changes.added.length})
-                      </h3>
-                      <div className="space-y-0.5">
-                        {changes.added.slice(0, 30).map((f) => (
-                          <div
-                            key={f.path}
-                            className="grid grid-cols-[minmax(0,1fr)_72px_56px_110px] items-center gap-3 rounded-lg px-2 py-1.5"
-                          >
-                            <span className="truncate font-mono text-[12.5px] text-(--ink-2)">
-                              {f.path}
-                            </span>
-                            <span className="text-right font-mono text-[11.5px] text-(--muted) tabular-nums">
-                              {f.total} lines
-                            </span>
-                            <span
-                              className={`text-right text-[12px] font-semibold tabular-nums ${inkFor[severity(f.percent)]}`}
-                            >
-                              {formatPercent(f.percent)}
-                            </span>
-                            <Meter percent={f.percent} />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {changes.changed.length > 0 && (
-                    <div>
-                      <h3 className="mb-1.5 text-xs font-semibold tracking-wide text-(--muted) uppercase">
-                        Coverage moved ({changes.changed.length})
-                      </h3>
-                      <div className="space-y-0.5">
-                        {changes.changed.slice(0, 30).map((f) => (
-                          <div
-                            key={f.path}
-                            className="grid grid-cols-[minmax(0,1fr)_150px_80px] items-center gap-3 rounded-lg px-2 py-1.5"
-                          >
-                            <span className="truncate font-mono text-[12.5px] text-(--ink-2)">
-                              {f.path}
-                            </span>
-                            <span className="text-right font-mono text-[12px] text-(--muted) tabular-nums">
-                              {formatPercent(f.before)} →{" "}
-                              <span className={inkFor[severity(f.after)]}>
-                                {formatPercent(f.after)}
-                              </span>
-                            </span>
-                            <span className="text-right">
-                              <DeltaChip current={f.after} previous={f.before} />
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {changes.removed > 0 && (
-                    <p className="text-[12.5px] text-(--muted)">
-                      {changes.removed} {changes.removed === 1 ? "file" : "files"} from the previous
-                      upload {changes.removed === 1 ? "is" : "are"} gone (deleted or renamed).
-                    </p>
-                  )}
-                  {changes.added.length === 0 &&
-                    changes.changed.length === 0 &&
-                    changes.removed === 0 && (
-                      <p className="text-sm text-(--muted)">
-                        Same files, same coverage — steady as she goes.
-                      </p>
-                    )}
-                </div>
-              )}
-            </div>
-          )}
+          {view === "changes" &&
+            (!changes ? (
+              <p className="px-5 pb-4 text-sm text-(--muted)">
+                This is the first upload on <span className="font-mono">{row.branch}</span> —
+                everything is new. The next upload gets a comparison. 🦘
+              </p>
+            ) : (
+              <ChangesList
+                changes={changes}
+                removedNote={(n) =>
+                  `${n} ${n === 1 ? "file" : "files"} from the previous upload ${n === 1 ? "is" : "are"} gone (deleted or renamed).`
+                }
+                emptyNote="Same files, same coverage — steady as she goes."
+              />
+            ))}
 
           {view === "map" && tree && (
             <>

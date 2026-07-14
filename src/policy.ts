@@ -80,7 +80,7 @@ export function parsePolicy(raw: unknown): RepoPolicy | null {
 
 // Coverage compares are floored to one decimal for display; gate on the same
 // grain so a 84.97% report never fails an 85.0% floor it visually meets.
-const floor1 = (n: number): number => Math.floor(n * 10 + 1e-9) / 10;
+export const floor1 = (n: number): number => Math.floor(n * 10 + 1e-9) / 10;
 
 /** Evaluate a repo's policy against one upload (and its base, when present). */
 export function evaluatePolicy(policy: RepoPolicy | null, input: PolicyInput): PolicyResult {

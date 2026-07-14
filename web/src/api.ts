@@ -61,6 +61,7 @@ export interface CompareResult {
   same: boolean;
   changes: ReportChanges | null;
   baseline?: BaselineInfo;
+  verdict?: PolicyVerdict;
 }
 
 export interface UploadChanges {
@@ -74,6 +75,7 @@ export interface UploadChanges {
 export interface UploadDetail {
   changes: UploadChanges | null;
   baseline?: BaselineInfo;
+  verdict?: PolicyVerdict;
   row: UploadRow;
   totals: { lines: Counter; functions: Counter; branches: Counter; files: number };
   directories: Array<{ path: string; covered: number; total: number; percent: number | null }>;
@@ -193,6 +195,23 @@ export interface PolicyViolation {
   actual: number | null;
   required: number;
   message: string;
+}
+
+/**
+ * The merge-gate verdict for one upload or comparison, plus the numbers that
+ * produced it — mirrors the server's PolicyVerdict payload.
+ */
+export interface PolicyVerdict {
+  configured: boolean;
+  passed: boolean;
+  violations: PolicyViolation[];
+  /** The rules the verdict was judged against — null when no policy is set. */
+  rules: RepoPolicy | null;
+  head: { commit: string; percent: number | null };
+  /** The baseline side, or null when there was nothing to compare against. */
+  base: { commit: string; percent: number | null } | null;
+  /** Files added vs the base, and how many sit under the new-file floor. */
+  newFiles: { total: number; belowFloor: number } | null;
 }
 
 export interface PolicyStatus {
