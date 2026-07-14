@@ -478,6 +478,161 @@ describe("browser test artifacts", () => {
     expect(restored.baselineRun.commit).toBe("base123");
   });
 
+  it("runs the per-story review loop: verdicts, derived run state, carry-over, stale reset", async () => {
+    const png = (red: number) => {
+      const image = new PNG({ width: 2, height: 2 });
+      for (let index = 0; index < image.data.length; index += 4) {
+        image.data.set([red, 20, 30, 255], index);
+      }
+      return PNG.sync.write(image);
+    };
+    const uploadPreview = async (
+      branch: string,
+      commit: string,
+      stories: Array<{ id: string; hash: string; bytes: Uint8Array }>,
+    ) => {
+      const files = [
+        { path: "index.html", contentType: "text/html", sizeBytes: 4 },
+        ...stories.map((story) => ({
+          path: `_covallaby/captures/${story.id}.png`,
+          contentType: "image/png",
+          sizeBytes: story.bytes.byteLength,
+          kind: "screenshot",
+          testName: JSON.stringify({
+            id: story.id,
+            title: "Components/Button",
+            name: story.id.split("--")[1],
+            sha256: story.hash,
+          }),
+        })),
+      ];
+      const created = await (
+        await artifactApp.request("/api/v1/storybook-previews", {
+          method: "POST",
+          headers: { authorization: "Bearer sekret", "content-type": "application/json" },
+          body: JSON.stringify({ repo: "acme/loop", branch, commit, pr: null, files }),
+        })
+      ).json();
+      const bodies = [Buffer.from("home"), ...stories.map((story) => story.bytes)];
+      for (const [index, artifact] of created.artifacts.entries()) {
+        await artifactApp.request(new URL(artifact.uploadUrl).pathname, {
+          method: "PUT",
+          headers: { authorization: "Bearer sekret" },
+          body: bodies[index],
+        });
+      }
+      await artifactApp.request(`/api/v1/storybook-previews/${created.run.id}/complete`, {
+        method: "POST",
+        headers: { authorization: "Bearer sekret" },
+      });
+      return created.run.id as number;
+    };
+    const review = (id: number, stories: string[], state: string, headers = {}) =>
+      artifactApp.request(`/api/v1/storybook-previews/${id}/review-captures`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify({ stories, state }),
+      });
+    const detailOf = async (id: number) =>
+      (await artifactApp.request(`/api/v1/storybook-previews/${id}`)).json();
+    const reviewOf = (detail: { captures: Array<{ id: string; review?: unknown }> }, id: string) =>
+      detail.captures.find((capture) => capture.id === id)?.review as
+        | { state: string; reviewedBy?: string | null; carried?: boolean }
+        | undefined;
+
+    const dark = png(10);
+    const light = png(240);
+    const hash = (letter: string) => letter.repeat(64);
+    const mainId = await uploadPreview("main", "loopbase1", [
+      { id: "button--one", hash: hash("a"), bytes: dark },
+      { id: "button--two", hash: hash("a"), bytes: dark },
+      { id: "button--gone", hash: hash("b"), bytes: dark },
+    ]);
+    const firstId = await uploadPreview("feat/loop", "loophead1", [
+      { id: "button--one", hash: hash("c"), bytes: light },
+      { id: "button--two", hash: hash("c"), bytes: light },
+      { id: "button--fresh", hash: hash("d"), bytes: dark },
+    ]);
+
+    // Every reviewable capture starts pending; the run is pending.
+    const initial = await detailOf(firstId);
+    expect(initial.run.reviewState).toBe("pending");
+    expect(reviewOf(initial, "button--one")).toEqual({ state: "pending" });
+    expect(reviewOf(initial, "button--gone")).toEqual({ state: "pending" });
+    expect(reviewOf(initial, "button--fresh")).toEqual({ state: "pending" });
+
+    // Auth: a presented-but-wrong token always fails; auto-accepted mainline
+    // is read-only; unknown stories and states are rejected.
+    expect(
+      (await review(firstId, ["button--one"], "approved", { authorization: "Bearer nope" })).status,
+    ).toBe(401);
+    expect((await review(mainId, ["button--one"], "approved")).status).toBe(409);
+    expect((await review(firstId, ["button--unknown"], "approved")).status).toBe(400);
+    expect((await review(firstId, ["button--one"], "sideways")).status).toBe(400);
+
+    // A group approval is one call covering both members (identical diff).
+    // With no view token and no hosted tier, the self-hosted server accepts
+    // browser reviews without credentials (single-operator tool).
+    const grouped = await (
+      await review(firstId, ["button--one", "button--two"], "approved")
+    ).json();
+    expect(reviewOf(grouped, "button--one")).toMatchObject({ state: "approved" });
+    expect(reviewOf(grouped, "button--two")).toMatchObject({ state: "approved" });
+    expect(grouped.run.reviewState).toBe("pending"); // fresh + gone still pending
+
+    // Rejecting any story rejects the run; approving everything approves it.
+    const rejected = await (await review(firstId, ["button--fresh"], "rejected")).json();
+    expect(rejected.run.reviewState).toBe("rejected");
+    const reset = await (await review(firstId, ["button--fresh"], "pending")).json();
+    expect(reset.run.reviewState).toBe("pending");
+    await review(firstId, ["button--fresh"], "approved");
+    const approved = await (await review(firstId, ["button--gone"], "approved")).json();
+    expect(approved.run.reviewState).toBe("approved");
+
+    // Carry-over: a later run with the identical (baseline, current) pairs
+    // inherits the approvals at read time.
+    const secondId = await uploadPreview("feat/loop", "loophead2", [
+      { id: "button--one", hash: hash("c"), bytes: light },
+      { id: "button--two", hash: hash("c"), bytes: light },
+      { id: "button--fresh", hash: hash("d"), bytes: dark },
+    ]);
+    const carried = await detailOf(secondId);
+    expect(reviewOf(carried, "button--one")).toMatchObject({ state: "approved", carried: true });
+    expect(reviewOf(carried, "button--fresh")).toMatchObject({ state: "approved", carried: true });
+    // The stored run state only re-derives on a write; one touch approves it.
+    expect(carried.run.reviewState).toBe("pending");
+    const touched = await (await review(secondId, ["button--one"], "approved")).json();
+    expect(touched.run.reviewState).toBe("approved");
+
+    // A different diff hash resets the story to pending automatically.
+    const thirdId = await uploadPreview("feat/loop", "loophead3", [
+      { id: "button--one", hash: hash("e"), bytes: dark },
+      { id: "button--two", hash: hash("c"), bytes: light },
+      { id: "button--fresh", hash: hash("d"), bytes: dark },
+    ]);
+    const stale = await detailOf(thirdId);
+    expect(reviewOf(stale, "button--one")).toEqual({ state: "pending" });
+    expect(reviewOf(stale, "button--two")).toMatchObject({ state: "approved", carried: true });
+
+    // A view-token-gated self-hosted server requires the token for reviews.
+    const gatedApp = createApp({
+      store: artifactDb,
+      uploadToken: "sekret",
+      viewToken: "peek",
+      artifactStorage: artifactStore,
+      storybookPreviewBaseUrl: "https://previews.test",
+      storybookPreviewSecret: "preview-secret",
+    });
+    const gatedReview = (query: string) =>
+      gatedApp.request(`/api/v1/storybook-previews/${thirdId}/review-captures${query}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ stories: ["button--one"], state: "approved" }),
+      });
+    expect((await gatedReview("")).status).toBe(401);
+    expect((await gatedReview("?token=peek")).status).toBe(200);
+  });
+
   it("validates the CI-supplied baseSha on visual run manifests", async () => {
     const bad = await artifactApp.request("/api/v1/storybook-previews", {
       method: "POST",

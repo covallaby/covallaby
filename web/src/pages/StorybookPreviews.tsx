@@ -1,22 +1,25 @@
 import {
   AlertCircle,
   BookOpen,
+  Check,
   ChevronDown,
   ChevronRight,
   ExternalLink,
   GitCommit,
   GitPullRequest,
   Layers,
+  RotateCcw,
   RotateCw,
   Search,
+  X,
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  type BaselineInfo,
-  type Neighbors,
+  type CaptureReview,
+  type StorybookPreviewDetail as PreviewDetailPayload,
+  type ReviewState,
   type StorybookCapture,
-  type StorybookDiffSummary,
   type StorybookPreview,
   api,
 } from "../api.js";
@@ -32,9 +35,12 @@ import {
   isEditableTarget,
   parseReviewFilter,
   parseReviewView,
+  reviewActionState,
   reviewKeyAction,
+  reviewProgress,
   stepStop,
   stopIndexOf,
+  stopReviewState,
 } from "./storybook-review.js";
 
 const when = (iso: string) =>
@@ -103,8 +109,17 @@ export function StorybookPreviews() {
                     <span className="min-w-0 truncate text-sm font-medium">
                       {preview.pr ? `PR #${preview.pr}` : preview.branch}
                     </span>
-                    <span className="shrink-0 rounded-full bg-(--accent-wash) px-2 py-0.5 text-[10px] font-medium text-(--accent)">
-                      {preview.status === "complete" ? "Ready" : "Publishing"}
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {preview.reviewState ? (
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium capitalize ${reviewTone[preview.reviewState]}`}
+                        >
+                          {preview.reviewState}
+                        </span>
+                      ) : null}
+                      <span className="rounded-full bg-(--accent-wash) px-2 py-0.5 text-[10px] font-medium text-(--accent)">
+                        {preview.status === "complete" ? "Ready" : "Publishing"}
+                      </span>
                     </span>
                   </div>
                   <p className="mt-1 truncate font-mono text-[11px] text-(--muted)">
@@ -120,6 +135,7 @@ export function StorybookPreviews() {
               <thead>
                 <tr>
                   <Th>Preview</Th>
+                  <Th>Review</Th>
                   <Th>Commit</Th>
                   <Th>Branch</Th>
                   <Th>Published</Th>
@@ -136,6 +152,17 @@ export function StorybookPreviews() {
                         <BookOpen className="mr-2 inline text-(--accent)" size={16} />
                         {preview.pr ? `PR #${preview.pr} preview` : `${preview.branch} preview`}
                       </Link>
+                    </Td>
+                    <Td>
+                      {preview.reviewState ? (
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[11px] capitalize ${reviewTone[preview.reviewState]}`}
+                        >
+                          {preview.reviewState}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-(--muted)">—</span>
+                      )}
                     </Td>
                     <Td>
                       <Link
@@ -186,20 +213,43 @@ const statusTone: Record<StorybookCapture["status"], string> = {
   uncompared: "bg-(--accent-wash) text-(--accent)",
 };
 
+const reviewTone: Record<ReviewState, string> = {
+  pending: "bg-(--surface-2) text-(--muted)",
+  approved: "bg-(--good)/12 text-(--good)",
+  rejected: "bg-(--bad)/12 text-(--bad)",
+  "auto-accepted": "bg-(--good)/12 text-(--good)",
+};
+
+/** Who reviewed and when — the chip tooltip and the inline byline. */
+function reviewedByLine(review: CaptureReview): string | null {
+  if (review.state === "pending") return null;
+  if (review.state === "auto-accepted") return "Accepted automatically — default-branch build";
+  const verb = review.state === "approved" ? "Approved" : "Rejected";
+  const who = review.reviewedBy ? ` by ${review.reviewedBy}` : "";
+  const at = review.reviewedAt ? ` · ${when(review.reviewedAt)}` : "";
+  const carried = review.carried ? " · carried over from an earlier run" : "";
+  return `${verb}${who}${at}${carried}`;
+}
+
+function ReviewChip({ review }: { review: CaptureReview }) {
+  return (
+    <span
+      title={reviewedByLine(review) ?? "Awaiting review"}
+      className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] capitalize ${reviewTone[review.state]}`}
+    >
+      {review.state}
+    </span>
+  );
+}
+
 export function StorybookPreviewDetail() {
   const { id } = useParams();
-  const [data, setData] = useState<{
-    run: StorybookPreview;
-    previewUrl: string;
-    baselineRun: StorybookPreview | null;
-    baseline?: BaselineInfo;
-    neighbors?: Neighbors<StorybookPreview>;
-    summary: StorybookDiffSummary;
-    captures: StorybookCapture[];
-  } | null>(null);
+  const [data, setData] = useState<PreviewDetailPayload | null>(null);
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [request, setRequest] = useState(0);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewError, setReviewError] = useState(false);
   const [query, setQuery] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
   const [overlay, setOverlay] = useState(50);
@@ -247,6 +297,33 @@ export function StorybookPreviewDetail() {
     null;
   const selectedStop = stops[stopIndexOf(stops, selected?.id ?? null)] ?? null;
 
+  // Whether the current stop accepts a human verdict: reviewable captures on
+  // a complete run that the server didn't auto-accept (mainline is read-only).
+  const canReview =
+    data !== null &&
+    data.run.status === "complete" &&
+    data.run.reviewState !== "auto-accepted" &&
+    selectedStop !== null &&
+    selectedStop.captures.every((capture) => capture.review);
+
+  // Approve/reject/reset the whole stop — a group is one verdict covering
+  // every member. The server answers with the fully re-derived payload.
+  const submitReview = (action: "approve" | "reject" | "unreview") => {
+    if (!data || !selectedStop || !canReview || reviewBusy) return;
+    const state = reviewActionState(action, stopReviewState(selectedStop)?.state);
+    setReviewBusy(true);
+    setReviewError(false);
+    api
+      .reviewCaptures(
+        String(data.run.id),
+        selectedStop.captures.map((capture) => capture.id),
+        state,
+      )
+      .then((result) => setData(result))
+      .catch(() => setReviewError(true))
+      .finally(() => setReviewBusy(false));
+  };
+
   // Keyboard-first review loop. Re-registered every render so the handler
   // always closes over current stops/selection; cleanup keeps it single.
   useEffect(() => {
@@ -278,6 +355,8 @@ export function StorybookPreviewDetail() {
         if (!selected?.baselineImageUrl || !selected.imageUrl) return;
         setParam("view", "overlay");
         setOverlay((value) => (value === 0 ? 100 : 0));
+      } else if (action === "approve" || action === "reject" || action === "unreview") {
+        submitReview(action);
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -303,6 +382,7 @@ export function StorybookPreviewDetail() {
   if (!data) return <p className="text-sm text-(--muted)">Loading component captures…</p>;
   const actionable = data.summary.changed + data.summary.new + data.summary.removed;
   const groupCount = stops.filter((stop) => stop.captures.length > 1).length;
+  const progress = reviewProgress(data.captures);
   return (
     <div className="space-y-4">
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
@@ -407,19 +487,26 @@ export function StorybookPreviewDetail() {
               {data.baselineRun
                 ? `${actionable} reviewable change${actionable === 1 ? "" : "s"} against main ${data.baselineRun.commit.slice(0, 9)}${groupCount > 0 ? ` · ${groupCount} identical-diff group${groupCount === 1 ? "" : "s"}` : ""}`
                 : "No earlier main capture is available yet; this run will establish visual history."}
+              {progress.total > 0 ? (
+                <span className="font-medium text-(--ink-2)">
+                  {" "}
+                  · {progress.reviewed} of {progress.total} reviewed
+                </span>
+              ) : null}
             </div>
           </Card>
           {selected ? (
             <Card className="overflow-hidden">
               <div className="flex flex-col gap-3 border-b border-(--hairline) p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <h2 className="font-medium">{selected.name}</h2>
                     <span
                       className={`rounded-full px-2 py-0.5 text-[11px] capitalize ${statusTone[selected.status]}`}
                     >
                       {selected.status}
                     </span>
+                    {selected.review ? <ReviewChip review={selected.review} /> : null}
                     {selectedStop && selectedStop.captures.length > 1 ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-(--accent-wash) px-2 py-0.5 text-[11px] text-(--accent)">
                         <Layers size={11} /> same change as {selectedStop.captures.length - 1} other
@@ -427,23 +514,86 @@ export function StorybookPreviewDetail() {
                       </span>
                     ) : null}
                   </div>
-                  <p className="mt-1 text-xs text-(--muted)">{selected.title}</p>
+                  <p className="mt-1 text-xs text-(--muted)">
+                    {selected.title}
+                    {selected.review && reviewedByLine(selected.review) ? (
+                      <span className="text-(--muted)"> · {reviewedByLine(selected.review)}</span>
+                    ) : null}
+                  </p>
+                  {reviewError ? (
+                    <p className="mt-1 text-xs text-(--bad)">
+                      The review didn't save. Check your connection (or sign-in) and try again.
+                    </p>
+                  ) : null}
                 </div>
-                {selected.baselineImageUrl && selected.imageUrl ? (
-                  <div className="flex rounded-lg border border-(--border) bg-(--surface-2) p-1 text-xs">
-                    {(["side-by-side", "overlay", "diff"] as const).map((mode) => (
+                <div className="flex flex-wrap items-center gap-2">
+                  {canReview && selectedStop ? (
+                    <div className="flex items-center gap-1.5">
                       <button
-                        key={mode}
                         type="button"
-                        disabled={mode === "diff" && !selected.diffImageUrl}
-                        onClick={() => setView(mode)}
-                        className={`rounded-md px-2.5 py-1.5 capitalize disabled:opacity-35 ${view === mode ? "bg-(--surface) text-(--ink) shadow-sm" : "text-(--muted)"}`}
+                        disabled={reviewBusy}
+                        onClick={() => submitReview("approve")}
+                        title={
+                          selectedStop.captures.length > 1
+                            ? `Approve all ${selectedStop.captures.length} stories with this change (a)`
+                            : "Approve this change (a)"
+                        }
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium disabled:opacity-50 ${
+                          stopReviewState(selectedStop)?.state === "approved"
+                            ? "border-(--good)/40 bg-(--good)/12 text-(--good)"
+                            : "border-(--border) bg-(--surface) hover:border-(--good)/60 hover:text-(--good)"
+                        }`}
                       >
-                        {mode.replace("-", " ")}
+                        <Check size={13} /> Approve
+                        {selectedStop.captures.length > 1 ? ` ${selectedStop.captures.length}` : ""}
                       </button>
-                    ))}
-                  </div>
-                ) : null}
+                      <button
+                        type="button"
+                        disabled={reviewBusy}
+                        onClick={() => submitReview("reject")}
+                        title={
+                          selectedStop.captures.length > 1
+                            ? `Reject all ${selectedStop.captures.length} stories with this change (x)`
+                            : "Reject this change (x)"
+                        }
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium disabled:opacity-50 ${
+                          stopReviewState(selectedStop)?.state === "rejected"
+                            ? "border-(--bad)/40 bg-(--bad)/12 text-(--bad)"
+                            : "border-(--border) bg-(--surface) hover:border-(--bad)/60 hover:text-(--bad)"
+                        }`}
+                      >
+                        <X size={13} /> Reject
+                        {selectedStop.captures.length > 1 ? ` ${selectedStop.captures.length}` : ""}
+                      </button>
+                      {stopReviewState(selectedStop)?.state !== "pending" ? (
+                        <button
+                          type="button"
+                          disabled={reviewBusy}
+                          onClick={() => submitReview("unreview")}
+                          title="Return to pending (u)"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-(--border) bg-(--surface) px-2.5 py-1.5 text-xs font-medium hover:border-(--muted) disabled:opacity-50"
+                        >
+                          <RotateCcw size={13} />
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {selected.baselineImageUrl && selected.imageUrl ? (
+                    <div className="flex rounded-lg border border-(--border) bg-(--surface-2) p-1 text-xs">
+                      {(["side-by-side", "overlay", "diff"] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          disabled={mode === "diff" && !selected.diffImageUrl}
+                          onClick={() => setView(mode)}
+                          className={`rounded-md px-2.5 py-1.5 capitalize disabled:opacity-35 ${view === mode ? "bg-(--surface) text-(--ink) shadow-sm" : "text-(--muted)"}`}
+                        >
+                          {mode.replace("-", " ")}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               </div>
               <div className="bg-(--surface-2) p-3 sm:p-5">
                 {view === "diff" && selected.diffImageUrl ? (
@@ -558,6 +708,11 @@ export function StorybookPreviewDetail() {
               <span>
                 <Kbd>b</Kbd> flip baseline ↔ new
               </span>
+              {canReview ? (
+                <span>
+                  <Kbd>a</Kbd> approve · <Kbd>x</Kbd> reject · <Kbd>u</Kbd> back to pending
+                </span>
+              ) : null}
               <span>
                 <Kbd>[</Kbd>/<Kbd>]</Kbd> previous / next run
               </span>
@@ -650,6 +805,7 @@ function ReviewStopCard({
   const representative =
     stop.captures.find((capture) => capture.id === selectedId) ?? stop.captures[0]!;
   const isGroup = stop.captures.length > 1;
+  const stopReview = stopReviewState(stop);
   return (
     <Card
       className={`group overflow-hidden transition-colors ${active ? "border-(--accent)" : ""}`}
@@ -672,10 +828,13 @@ function ReviewStopCard({
             <p className="truncate text-xs text-(--muted)">{representative.title}</p>
             <p className="mt-0.5 truncate text-sm font-medium">{representative.name}</p>
           </div>
-          <span
-            className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] capitalize ${statusTone[representative.status]}`}
-          >
-            {representative.status}
+          <span className="flex shrink-0 items-center gap-1.5">
+            <span
+              className={`rounded-full px-2 py-0.5 text-[11px] capitalize ${statusTone[representative.status]}`}
+            >
+              {representative.status}
+            </span>
+            {stopReview ? <ReviewChip review={stopReview} /> : null}
           </span>
         </div>
       </button>

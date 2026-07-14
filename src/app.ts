@@ -9,6 +9,7 @@ import {
   resolveDefaultBranch,
   resolveVisualBaseline,
 } from "./baseline.js";
+import { currentSession } from "./hosted/auth.js";
 import { type AppEnv, type HostedConfig, type HostedDeps, mountHosted } from "./hosted/index.js";
 import {
   type PolicyInput,
@@ -354,6 +355,53 @@ async function computeStatus(
   };
 }
 
+/** One capture's review verdict in a preview detail payload. */
+export interface PreviewCaptureReview {
+  state: ReviewState;
+  reviewedBy?: string | null;
+  reviewedAt?: string;
+  /** True when an approval carried over from an identical diff in another run. */
+  carried?: boolean;
+}
+
+export interface PreviewCapture {
+  artifactId: number | null;
+  id: string;
+  title: string;
+  name: string;
+  status: "changed" | "new" | "removed" | "unchanged" | "uncompared";
+  imageUrl: string;
+  baselineImageUrl?: string;
+  diffImageUrl?: string;
+  sha256?: string;
+  baselineSha256?: string;
+  review?: PreviewCaptureReview;
+}
+
+/** Stories in these states need a human verdict; unchanged/uncompared don't. */
+export function reviewableCapture(status: PreviewCapture["status"]): boolean {
+  return status === "changed" || status === "new" || status === "removed";
+}
+
+/**
+ * The run verdict its per-story reviews add up to: any rejection blocks the
+ * run; a run is approved only once every reviewable story is; anything else
+ * is still pending.
+ */
+export function deriveRunReviewState(
+  captures: PreviewCapture[],
+): Extract<ReviewState, "pending" | "approved" | "rejected"> {
+  const reviewable = captures.filter((capture) => reviewableCapture(capture.status));
+  if (reviewable.some((capture) => capture.review?.state === "rejected")) return "rejected";
+  if (
+    reviewable.length > 0 &&
+    reviewable.every((capture) => capture.review?.state === "approved")
+  ) {
+    return "approved";
+  }
+  return "pending";
+}
+
 export function createApp({
   store,
   uploadToken,
@@ -598,6 +646,102 @@ export function createApp({
       baseSha: typeof rawBase === "string" ? rawBase : null,
       reviewState: branch === defaultBr ? "auto-accepted" : "pending",
     };
+  };
+  const captureReviewsReady = () =>
+    Boolean(
+      store.setCaptureReview &&
+        store.clearCaptureReview &&
+        store.listCaptureReviews &&
+        store.findCaptureReviewByPair,
+    );
+  /**
+   * Who may record a review verdict. Three doors, in order:
+   *  - CI: a valid upload token as a Bearer header (a presented-but-wrong
+   *    token always fails — it never falls through to a softer check).
+   *  - Hosted browsers: a signed session whose accounts cover the repo owner.
+   *  - Self-hosted browsers: the view token when one is set; with no view
+   *    token the server is a single-operator tool and reviewing is open.
+   */
+  const reviewAuthorized = async (
+    c: {
+      req: { header(name: string): string | undefined; query(name: string): string | undefined };
+    },
+    repo: string,
+  ): Promise<{ ok: false } | { ok: true; reviewer: string | null }> => {
+    const token = bearer(c.req.header("authorization"));
+    if (token) {
+      return (await uploadAuthorized(repo, token)) ? { ok: true, reviewer: null } : { ok: false };
+    }
+    if (hosted) {
+      const session = currentSession(c.req.header("cookie"), hosted.sessionSecret);
+      const owner = repo.split("/")[0] ?? "";
+      if (session?.accounts.some((account) => account.toLowerCase() === owner.toLowerCase())) {
+        return { ok: true, reviewer: session.login };
+      }
+      return { ok: false };
+    }
+    if (viewToken) {
+      const provided = c.req.query("token") ?? getTokenCookie(c.req.header("cookie")) ?? "";
+      return tokenEquals(provided, viewToken) ? { ok: true, reviewer: null } : { ok: false };
+    }
+    return { ok: true, reviewer: null };
+  };
+  /**
+   * Attach each reviewable capture's verdict. A stored verdict only applies
+   * while the (baseline, current) hash pair it was recorded against still
+   * matches — a different diff resets the story to pending automatically. A
+   * story with no verdict of its own inherits an approval recorded anywhere
+   * else in the repo on the identical pair (carry-over, resolved lazily at
+   * read so ingest stays write-free).
+   */
+  const annotateCaptureReviews = async (
+    run: TestRunRow,
+    captures: PreviewCapture[],
+  ): Promise<void> => {
+    if (!captureReviewsReady()) return;
+    if (run.reviewState === "auto-accepted") {
+      for (const capture of captures) {
+        if (reviewableCapture(capture.status)) capture.review = { state: "auto-accepted" };
+      }
+      return;
+    }
+    const own = new Map(
+      (await store.listCaptureReviews!(run.id)).map((review) => [review.storyId, review]),
+    );
+    for (const capture of captures) {
+      if (!reviewableCapture(capture.status)) continue;
+      const pair = {
+        baseline: capture.baselineSha256 ?? null,
+        current: capture.sha256 ?? null,
+      };
+      const verdict = own.get(capture.id);
+      if (verdict && verdict.baselineSha256 === pair.baseline && verdict.sha256 === pair.current) {
+        capture.review = {
+          state: verdict.state,
+          reviewedBy: verdict.reviewedBy,
+          reviewedAt: verdict.reviewedAt,
+        };
+        continue;
+      }
+      if (pair.baseline !== null || pair.current !== null) {
+        const prior = await store.findCaptureReviewByPair!(
+          run.repo,
+          pair.baseline,
+          pair.current,
+          run.id,
+        );
+        if (prior?.state === "approved") {
+          capture.review = {
+            state: "approved",
+            reviewedBy: prior.reviewedBy,
+            reviewedAt: prior.reviewedAt,
+            carried: true,
+          };
+          continue;
+        }
+      }
+      capture.review = { state: "pending" };
+    }
   };
   app.post("/api/v1/test-runs", async (c) => {
     if (!artifactReady())
@@ -1046,15 +1190,16 @@ export function createApp({
     });
   });
 
-  // Record a human review verdict on a visual capture run. Auto-accepted is
-  // server-assigned only (default-branch builds); humans approve, reject, or
-  // reset to pending. Guarded by the upload token like other write routes.
+  // Record a human review verdict on a whole visual capture run.
+  // Auto-accepted is server-assigned only (default-branch builds); humans
+  // approve, reject, or reset to pending. Reviewable with the upload token
+  // (CI) or from a signed-in browser (see reviewAuthorized).
   app.post("/api/v1/storybook-previews/:id/review", async (c) => {
     if (!previewReady() || !store.setTestRunReview) return c.notFound();
     const run = await store.getTestRunRow!(Number(c.req.param("id")));
     if (!run || run.framework !== "storybook") return c.notFound();
-    if (!(await uploadAuthorized(run.repo, bearer(c.req.header("authorization")))))
-      return c.json({ ok: false, error: "Invalid upload token." }, 401);
+    if (!(await reviewAuthorized(c, run.repo)).ok)
+      return c.json({ ok: false, error: "Sign in (or pass a valid token) to review." }, 401);
     let body: Record<string, unknown>;
     try {
       body = await c.req.json();
@@ -1133,10 +1278,11 @@ export function createApp({
     });
   });
 
-  app.get("/api/v1/storybook-previews/:id", async (c) => {
-    if (!previewReady()) return c.notFound();
-    const found = await store.getTestRun!(Number(c.req.param("id")));
-    if (!found || found.run.framework !== "storybook") return c.notFound();
+  /** The full detail payload for a preview — shared by the GET and the review write. */
+  const buildPreviewDetail = async (found: {
+    run: TestRunRow;
+    artifacts: TestArtifactRow[];
+  }) => {
     const run = found.run;
     const token = previewToken(run.id, Math.floor(Date.now() / 1000) + 3600);
     const { found: baseline, info: baselineInfo } = await storybookBaseline(run);
@@ -1146,18 +1292,7 @@ export function createApp({
     const baselineCaptures = new Map(
       storyCaptures(baseline?.artifacts ?? []).map((capture) => [capture.story.id, capture]),
     );
-    const captures: Array<{
-      artifactId: number | null;
-      id: string;
-      title: string;
-      name: string;
-      status: "changed" | "new" | "removed" | "unchanged" | "uncompared";
-      imageUrl: string;
-      baselineImageUrl?: string;
-      diffImageUrl?: string;
-      sha256?: string;
-      baselineSha256?: string;
-    }> = storyCaptures(found.artifacts).map(({ artifact, story }) => {
+    const captures: PreviewCapture[] = storyCaptures(found.artifacts).map(({ artifact, story }) => {
       const before = baselineCaptures.get(story.id);
       baselineCaptures.delete(story.id);
       const status = !baseline
@@ -1200,6 +1335,7 @@ export function createApp({
         baselineImageUrl: `${previewBase}/p/${baseline!.run.id}/${artifact.name}?preview_token=${encodeURIComponent(baselineToken!)}`,
       });
     }
+    await annotateCaptureReviews(run, captures);
     const summary = {
       changed: captures.filter((capture) => capture.status === "changed").length,
       new: captures.filter((capture) => capture.status === "new").length,
@@ -1211,7 +1347,7 @@ export function createApp({
     const neighbors = store.testRunNeighbors
       ? await store.testRunNeighbors(run.repo, "storybook", run.id)
       : { prev: null, next: null };
-    return c.json({
+    return {
       run,
       previewUrl: `${previewBase}/p/${run.id}/index.html?preview_token=${encodeURIComponent(token)}`,
       baselineRun: baseline?.run ?? null,
@@ -1219,7 +1355,91 @@ export function createApp({
       neighbors,
       summary,
       captures,
-    });
+    };
+  };
+
+  app.get("/api/v1/storybook-previews/:id", async (c) => {
+    if (!previewReady()) return c.notFound();
+    const found = await store.getTestRun!(Number(c.req.param("id")));
+    if (!found || found.run.framework !== "storybook") return c.notFound();
+    return c.json(await buildPreviewDetail(found));
+  });
+
+  // Record per-story review verdicts — the browser's approve/reject/pending
+  // loop, and equally scriptable with the upload token. A group approval is
+  // just multiple story ids in one call. Default-branch runs are
+  // auto-accepted by the server and read-only here. After every write the
+  // run's own review_state is re-derived from its captures, so baseline
+  // eligibility follows the per-story verdicts.
+  app.post("/api/v1/storybook-previews/:id/review-captures", async (c) => {
+    if (!previewReady() || !captureReviewsReady() || !store.setTestRunReview) return c.notFound();
+    const found = await store.getTestRun!(Number(c.req.param("id")));
+    if (!found || found.run.framework !== "storybook") return c.notFound();
+    const run = found.run;
+    const auth = await reviewAuthorized(c, run.repo);
+    if (!auth.ok) {
+      return c.json({ ok: false, error: "Sign in (or pass a valid token) to review." }, 401);
+    }
+    if (run.status !== "complete") {
+      return c.json({ ok: false, error: "This preview has not finished publishing." }, 409);
+    }
+    if (run.reviewState === "auto-accepted") {
+      return c.json(
+        { ok: false, error: "Default-branch runs are auto-accepted and read-only." },
+        409,
+      );
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ ok: false, error: "Body must be JSON." }, 400);
+    }
+    const state = body.state;
+    if (state !== "approved" && state !== "rejected" && state !== "pending") {
+      return c.json(
+        { ok: false, error: 'state must be "approved", "rejected", or "pending".' },
+        400,
+      );
+    }
+    const stories = Array.isArray(body.stories) ? body.stories : null;
+    if (
+      !stories ||
+      stories.length === 0 ||
+      stories.length > 500 ||
+      stories.some((id) => typeof id !== "string" || id.length === 0 || id.length > 500)
+    ) {
+      return c.json({ ok: false, error: "stories must be 1–500 story ids." }, 400);
+    }
+    const detail = await buildPreviewDetail(found);
+    const byId = new Map(detail.captures.map((capture) => [capture.id, capture]));
+    for (const storyId of stories as string[]) {
+      const capture = byId.get(storyId);
+      if (!capture || !reviewableCapture(capture.status)) {
+        return c.json({ ok: false, error: `"${storyId}" is not a reviewable story.` }, 400);
+      }
+    }
+    for (const storyId of stories as string[]) {
+      const capture = byId.get(storyId)!;
+      if (state === "pending") {
+        await store.clearCaptureReview!(run.id, storyId);
+      } else {
+        await store.setCaptureReview!({
+          runId: run.id,
+          repo: run.repo,
+          storyId,
+          state,
+          baselineSha256: capture.baselineSha256 ?? null,
+          sha256: capture.sha256 ?? null,
+          reviewedBy: auth.reviewer,
+        });
+      }
+    }
+    const updated = await buildPreviewDetail(found);
+    const derived = deriveRunReviewState(updated.captures);
+    const freshRun =
+      derived === run.reviewState ? run : await store.setTestRunReview(run.id, derived);
+    return c.json({ ok: true, ...updated, run: freshRun ?? updated.run });
   });
 
   app.get("/p/:id/*", async (c) => {

@@ -1,4 +1,4 @@
-import type { StorybookCapture } from "../api.js";
+import type { ReviewState, StorybookCapture } from "../api.js";
 
 /**
  * Pure logic behind the Storybook visual review loop: which captures are
@@ -136,7 +136,14 @@ export function stepStop(
   return stops[target]!.captures[0]!;
 }
 
-export type ReviewKeyAction = "next" | "prev" | "toggle-diff" | "swap";
+export type ReviewKeyAction =
+  | "next"
+  | "prev"
+  | "toggle-diff"
+  | "swap"
+  | "approve"
+  | "reject"
+  | "unreview";
 
 /**
  * Map a keydown to a review action. Returns null (leave the event alone) when
@@ -159,9 +166,47 @@ export function reviewKeyAction(
       return "toggle-diff";
     case "b":
       return "swap";
+    case "a":
+      return "approve";
+    case "x":
+      return "reject";
+    case "u":
+      return "unreview";
     default:
       return null;
   }
+}
+
+/**
+ * The verdict a review key should submit for the current stop. Re-pressing
+ * the key for the state the stop is already in returns it to pending, so
+ * `a` toggles approve on/off and `x` toggles reject; `u` always resets.
+ */
+export function reviewActionState(
+  action: "approve" | "reject" | "unreview",
+  current: ReviewState | undefined,
+): "approved" | "rejected" | "pending" {
+  if (action === "unreview") return "pending";
+  const target = action === "approve" ? "approved" : "rejected";
+  return current === target ? "pending" : target;
+}
+
+/** The stop's aggregate verdict — the state shared by every member, else pending. */
+export function stopReviewState(stop: ReviewStop): StorybookCapture["review"] {
+  const first = stop.captures[0]?.review;
+  if (!first) return undefined;
+  return stop.captures.every((capture) => capture.review?.state === first.state)
+    ? first
+    : { state: "pending" };
+}
+
+/** Progress over reviewable captures: how many carry a verdict (incl. auto-accepted). */
+export function reviewProgress(captures: StorybookCapture[]): { reviewed: number; total: number } {
+  const reviewable = captures.filter((capture) => capture.review);
+  return {
+    reviewed: reviewable.filter((capture) => capture.review!.state !== "pending").length,
+    total: reviewable.length,
+  };
 }
 
 /** True when a keydown target is a place the user types, so review keys must not fire. */

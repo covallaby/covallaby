@@ -135,7 +135,8 @@ Everything is optional:
 | `GET /api/v1/repos/:owner/:name/prs` | PRs with uploads, latest first |
 | `GET /api/v1/repos/:owner/:name/compare?pr=N` or `?head=<branch>` (+`&base=`) | head vs base: delta + per-file changes, plus `baseline` explaining how the base was chosen |
 | `GET`/`PUT`/`DELETE /api/v1/repos/:owner/:name/default-branch` | read or set (`{"branch": "main"}`, admin token) the branch that baselines and mainline auto-accept key off |
-| `POST /api/v1/storybook-previews/:id/review` | record a review verdict (`{"state": "approved"\|"rejected"\|"pending"}`); default-branch runs are auto-accepted on upload |
+| `POST /api/v1/storybook-previews/:id/review` | record a run-level review verdict (`{"state": "approved"\|"rejected"\|"pending"}`); default-branch runs are auto-accepted on upload |
+| `POST /api/v1/storybook-previews/:id/review-captures` | approve/reject/reset individual stories (`{"stories": ["button--primary"], "state": "approved"}`); the run's verdict is re-derived from its stories, approvals carry over to identical diffs in later runs, and a changed diff resets to pending. Auth: upload token, hosted session, or the view token (open in no-auth self-hosted mode) |
 | `POST /api/v1/repos/:owner/:name/token` | mint/rotate a per-repo upload token (admin token required) |
 | `POST /api/v1/test-runs` · `POST /api/v1/test-runs/:id/complete` | create and finalize a browser-test run; returns direct upload URLs |
 | `GET /api/v1/repos/:owner/:name/test-runs` | recent Playwright runs and playback status |

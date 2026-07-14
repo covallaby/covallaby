@@ -1,11 +1,13 @@
 import postgres from "postgres";
 import {
+  type CaptureReviewRow,
   type CreateTestArtifactInput,
   type CreateTestRunInput,
   type PROverview,
   type RecordUploadInput,
   type RepoOverview,
   type ReviewState,
+  type SetCaptureReviewInput,
   type Store,
   type Subscription,
   type TestArtifactRow,
@@ -59,6 +61,14 @@ CREATE TABLE IF NOT EXISTS test_artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_test_artifacts_run ON test_artifacts(run_id);
 CREATE INDEX IF NOT EXISTS idx_test_artifacts_run_name ON test_artifacts(run_id, name);
+CREATE TABLE IF NOT EXISTS capture_reviews (
+  id BIGSERIAL PRIMARY KEY, run_id BIGINT NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
+  repo TEXT NOT NULL, story_id TEXT NOT NULL, state TEXT NOT NULL,
+  baseline_sha256 TEXT, sha256 TEXT, reviewed_by TEXT,
+  reviewed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(run_id, story_id)
+);
+CREATE INDEX IF NOT EXISTS idx_capture_reviews_pair ON capture_reviews(repo, baseline_sha256, sha256);
 -- Additive migrations for databases created before these columns existed.
 ALTER TABLE uploads ADD COLUMN IF NOT EXISTS base_sha TEXT;
 ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS base_sha TEXT;
@@ -146,6 +156,30 @@ const toTestRun = (r: RawTestRun): TestRunRow => ({
   createdAt: iso(r.created_at),
   completedAt: r.completed_at ? iso(r.completed_at) : null,
 });
+interface RawCaptureReview {
+  id: string | number;
+  run_id: string | number;
+  repo: string;
+  story_id: string;
+  state: CaptureReviewRow["state"];
+  baseline_sha256: string | null;
+  sha256: string | null;
+  reviewed_by: string | null;
+  reviewed_at: Date | string;
+}
+
+const toCaptureReview = (r: RawCaptureReview): CaptureReviewRow => ({
+  id: Number(r.id),
+  runId: Number(r.run_id),
+  repo: r.repo,
+  storyId: r.story_id,
+  state: r.state,
+  baselineSha256: r.baseline_sha256,
+  sha256: r.sha256,
+  reviewedBy: r.reviewed_by,
+  reviewedAt: iso(r.reviewed_at),
+});
+
 const toArtifact = (r: RawArtifact): TestArtifactRow => ({
   id: Number(r.id),
   runId: Number(r.run_id),
@@ -459,6 +493,44 @@ export class PostgresStore implements Store {
     const [row] = await this.sql<RawTestRun[]>`
       UPDATE test_runs SET review_state = ${state} WHERE id = ${id} RETURNING *`;
     return row ? toTestRun(row) : null;
+  }
+
+  async setCaptureReview(input: SetCaptureReviewInput): Promise<CaptureReviewRow> {
+    const [row] = await this.sql<RawCaptureReview[]>`
+      INSERT INTO capture_reviews (run_id, repo, story_id, state, baseline_sha256, sha256, reviewed_by)
+      VALUES (${input.runId}, ${input.repo}, ${input.storyId}, ${input.state},
+        ${input.baselineSha256}, ${input.sha256}, ${input.reviewedBy})
+      ON CONFLICT (run_id, story_id) DO UPDATE SET
+        state = EXCLUDED.state, baseline_sha256 = EXCLUDED.baseline_sha256,
+        sha256 = EXCLUDED.sha256, reviewed_by = EXCLUDED.reviewed_by, reviewed_at = now()
+      RETURNING *`;
+    return toCaptureReview(row!);
+  }
+
+  async clearCaptureReview(runId: number, storyId: string): Promise<void> {
+    await this.sql`DELETE FROM capture_reviews WHERE run_id = ${runId} AND story_id = ${storyId}`;
+  }
+
+  async listCaptureReviews(runId: number): Promise<CaptureReviewRow[]> {
+    const rows = await this.sql<RawCaptureReview[]>`
+      SELECT * FROM capture_reviews WHERE run_id = ${runId} ORDER BY id`;
+    return rows.map(toCaptureReview);
+  }
+
+  async findCaptureReviewByPair(
+    repo: string,
+    baselineSha256: string | null,
+    sha256: string | null,
+    excludeRunId: number,
+  ): Promise<CaptureReviewRow | null> {
+    const [row] = await this.sql<RawCaptureReview[]>`
+      SELECT * FROM capture_reviews
+      WHERE repo = ${repo}
+        AND baseline_sha256 IS NOT DISTINCT FROM ${baselineSha256}
+        AND sha256 IS NOT DISTINCT FROM ${sha256}
+        AND run_id != ${excludeRunId}
+      ORDER BY id DESC LIMIT 1`;
+    return row ? toCaptureReview(row) : null;
   }
 
   async deleteTestRun(id: number): Promise<void> {
