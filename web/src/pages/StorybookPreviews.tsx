@@ -13,11 +13,13 @@ import {
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
+  type BaselineInfo,
   type StorybookCapture,
   type StorybookDiffSummary,
   type StorybookPreview,
   api,
 } from "../api.js";
+import { BaselineChip } from "../components/baseline-chip.js";
 import { CommitStrip, commitHref, useCommitSiblings } from "../components/commit-strip.js";
 import { Card, CardHeader, Td, Th } from "../components/ui.js";
 import { useRepo } from "./Repo.js";
@@ -188,6 +190,7 @@ export function StorybookPreviewDetail() {
     run: StorybookPreview;
     previewUrl: string;
     baselineRun: StorybookPreview | null;
+    baseline?: BaselineInfo;
     summary: StorybookDiffSummary;
     captures: StorybookCapture[];
   } | null>(null);
@@ -313,6 +316,9 @@ export function StorybookPreviewDetail() {
             </Link>{" "}
             · {when(data.run.createdAt)}
           </p>
+          <div className="mt-2">
+            <BaselineChip baseline={data.baseline} />
+          </div>
         </div>
         {data.run.status === "complete" ? (
           <a

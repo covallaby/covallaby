@@ -8,8 +8,28 @@ export interface UploadRow {
   linesTotal: number;
   percent: number | null;
   files: number;
+  /** CI-supplied base commit for baseline resolution, when provided. */
+  baseSha?: string | null;
   createdAt: string;
 }
+
+/** Why a baseline was (or wasn't) chosen for a comparison or capture review. */
+export interface BaselineInfo {
+  reason:
+    | "base-sha"
+    | "previous-on-branch"
+    | "latest-on-base"
+    | "newer-on-base"
+    | "first-on-branch"
+    | "base-branch-empty";
+  /** Friendly one-liner, e.g. `Baseline: abc1234 (latest on main)`. */
+  message: string;
+  baseBranch: string;
+  commit: string | null;
+}
+
+/** Review verdict on a visual capture run; mainline builds are auto-accepted. */
+export type ReviewState = "pending" | "approved" | "rejected" | "auto-accepted";
 
 export interface RepoOverview {
   repo: string;
@@ -40,6 +60,7 @@ export interface CompareResult {
   base: UploadRow;
   same: boolean;
   changes: ReportChanges | null;
+  baseline?: BaselineInfo;
 }
 
 export interface UploadChanges {
@@ -52,6 +73,7 @@ export interface UploadChanges {
 
 export interface UploadDetail {
   changes: UploadChanges | null;
+  baseline?: BaselineInfo;
   row: UploadRow;
   totals: { lines: Counter; functions: Counter; branches: Counter; files: number };
   directories: Array<{ path: string; covered: number; total: number; percent: number | null }>;
@@ -98,6 +120,8 @@ export interface TestRun {
   testsFailed: number;
   testsSkipped: number;
   durationMs: number;
+  baseSha?: string | null;
+  reviewState?: ReviewState;
   createdAt: string;
   completedAt: string | null;
 }
@@ -246,6 +270,7 @@ const liveApi = {
       run: StorybookPreview;
       previewUrl: string;
       baselineRun: StorybookPreview | null;
+      baseline?: BaselineInfo;
       summary: StorybookDiffSummary;
       captures: StorybookCapture[];
     }>(`/api/v1/storybook-previews/${id}`),

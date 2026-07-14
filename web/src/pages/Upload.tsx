@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { type UploadDetail, api, formatPercent, severity } from "../api.js";
+import { BaselineChip } from "../components/baseline-chip.js";
 import { Breadcrumb, Hotspots, TreeOutline, buildTree } from "../components/explorer.js";
 import { PageSkeleton } from "../components/skeleton.js";
 import { Treemap } from "../components/treemap.js";
@@ -101,6 +102,9 @@ export function Upload() {
                   : `${missed.toLocaleString()} lines need some love.`}
           </p>
           <Meter percent={row.percent} className="mt-3 w-72" />
+          <div className="mt-2.5">
+            <BaselineChip baseline={data.baseline} />
+          </div>
         </div>
         <div className="flex flex-wrap gap-8 pb-1.5">
           {totals.functions.total > 0 && (

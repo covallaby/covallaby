@@ -1,6 +1,14 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { type ArtifactStorage, artifactObjectKey } from "./artifacts.js";
+import {
+  type BaselineInfo,
+  SHA_RE,
+  defaultBranchKey,
+  resolveCoverageBaseline,
+  resolveDefaultBranch,
+  resolveVisualBaseline,
+} from "./baseline.js";
 import { type AppEnv, type HostedConfig, type HostedDeps, mountHosted } from "./hosted/index.js";
 import {
   type PolicyInput,
@@ -11,7 +19,7 @@ import {
   renderStatusBadge,
 } from "./policy.js";
 import { type ArtifactRetentionConfig, cleanupRepoArtifacts } from "./retention.js";
-import type { Store, TestArtifactRow, TestRunRow, UploadRow } from "./store.js";
+import type { ReviewState, Store, TestArtifactRow, TestRunRow, UploadRow } from "./store.js";
 import type { TestArtifactKind } from "./store.js";
 import { createVisualDiff, parseStoryCaptureMetadata } from "./storybook-diff.js";
 import { renderBadge } from "./vendor/badge.js";
@@ -124,11 +132,6 @@ function coverageBitmap(file: CoverageReport["files"][number]): string {
   return out;
 }
 
-/** Prefer the conventional default branch, else whatever the store lists first. */
-function defaultBranch(branches: string[], fallback: string): string {
-  return branches.find((b) => b === "main" || b === "master") ?? branches[0] ?? fallback;
-}
-
 /** Where a repo's policy lives in the meta KV — one JSON blob per repo. */
 const policyKey = (repo: string): string => `policy:${repo}`;
 
@@ -147,20 +150,23 @@ export interface Comparison {
   base: UploadRow;
   same: boolean;
   changes: ReportChanges | null;
+  /** How the base was chosen (or why it couldn't be) — see src/baseline.ts. */
+  baseline: BaselineInfo;
 }
 
 /**
  * Resolve the head/base pair a compare or status check runs on. Head is the
- * latest upload of `?pr=N` or `?head=<branch>`; base is the latest on
- * `?base=<branch>` (default main). Returns a friendly error + HTTP status when
- * either side can't be found, so callers just forward it.
+ * latest upload of `?pr=N` or `?head=<branch>`; base comes from the unified
+ * baseline resolver against `?base=<branch>` (default: the repo's default
+ * branch). Returns a friendly error + HTTP status when either side can't be
+ * found, so callers just forward it.
  */
 async function resolveComparison(
   store: Store,
   repo: string,
   q: { base?: string | undefined; pr?: string | undefined; head?: string | undefined },
-): Promise<Comparison | { error: string; status: 404 }> {
-  const baseBranch = q.base ?? "main";
+): Promise<Comparison | { error: string; status: 404; baseline?: BaselineInfo }> {
+  const baseBranch = q.base ?? (await resolveDefaultBranch(store, repo));
 
   let headRow: UploadRow | null = null;
   if (q.pr && /^\d+$/.test(q.pr)) {
@@ -171,12 +177,21 @@ async function resolveComparison(
   }
   if (!headRow) return { error: "No uploads found for that head.", status: 404 };
 
-  const baseRow = await store.latest(repo, baseBranch);
+  const { base: baseRow, info: baseline } = await resolveCoverageBaseline(
+    store,
+    headRow,
+    baseBranch,
+  );
   if (!baseRow) {
-    return { error: `No uploads found on base branch "${baseBranch}".`, status: 404 };
+    // The head's own branch is the base and it's the first upload there:
+    // nothing to diff yet, but that's a state, not an error.
+    if (baseline.reason === "first-on-branch") {
+      return { head: headRow, base: headRow, same: true, changes: null, baseline };
+    }
+    return { error: baseline.message, status: 404, baseline };
   }
   if (baseRow.id === headRow.id) {
-    return { head: headRow, base: baseRow, same: true, changes: null };
+    return { head: headRow, base: baseRow, same: true, changes: null, baseline };
   }
   const head = await store.getUpload(headRow.id);
   const base = await store.getUpload(baseRow.id);
@@ -186,6 +201,7 @@ async function resolveComparison(
     base: baseRow,
     same: false,
     changes: diffReports(head.report, base.report),
+    baseline,
   };
 }
 
@@ -240,24 +256,25 @@ async function computeStatus(
     if ("error" in resolved) error = resolved.error;
     else cmp = resolved;
   } else {
-    const branches = await store.branches(repo);
-    const branch = branches.find((b) => b === "main" || b === "master") ?? branches[0];
-    const headRow = branch ? await store.latest(repo, branch) : null;
+    const branch = await resolveDefaultBranch(store, repo);
+    const headRow = await store.latest(repo, branch);
     if (!headRow) {
       error = "No uploads found for this repository.";
     } else {
-      const prev = await store.prevUpload(repo, headRow.branch, headRow.id);
+      const { base, info } = await resolveCoverageBaseline(store, headRow, headRow.branch);
       const head = await store.getUpload(headRow.id);
+      const prev = base ? await store.getUpload(base.id) : null;
       cmp =
-        prev && head
+        base && prev && head
           ? {
               head: headRow,
-              base: prev.row,
+              base,
               same: false,
               changes: diffReports(head.report, prev.report),
+              baseline: info,
             }
           : // A repo's very first upload: judge the project floor with no base.
-            { head: headRow, base: headRow, same: true, changes: null };
+            { head: headRow, base: headRow, same: true, changes: null, baseline: info };
     }
   }
 
@@ -419,7 +436,18 @@ export function createApp({
       );
     }
     const branch = (c.req.query("branch") ?? "main").slice(0, 200);
-    const commit = (c.req.query("commit") ?? "unknown").slice(0, 64);
+    // CI overrides for squash/ephemeral-merge-commit workflows: `commit-sha`
+    // is a validated alias for `commit`, and `base-sha` records the merge-base
+    // the baseline resolver should prefer.
+    const commitSha = c.req.query("commit-sha");
+    if (commitSha !== undefined && !SHA_RE.test(commitSha)) {
+      return c.json({ ok: false, error: "commit-sha must be a 7–64 character hex SHA." }, 400);
+    }
+    const commit = commitSha ?? (c.req.query("commit") ?? "unknown").slice(0, 64);
+    const baseSha = c.req.query("base-sha") ?? null;
+    if (baseSha !== null && !SHA_RE.test(baseSha)) {
+      return c.json({ ok: false, error: "base-sha must be a 7–64 character hex SHA." }, 400);
+    }
     const prRaw = c.req.query("pr");
     const pr = prRaw && /^\d+$/.test(prRaw) ? Number(prRaw) : null;
 
@@ -464,7 +492,7 @@ export function createApp({
       };
       const row = existing
         ? await store.updateReport(existing.row.id, counts)
-        : await store.recordUpload({ repo, branch, commit, pr, ...counts });
+        : await store.recordUpload({ repo, branch, commit, pr, baseSha, ...counts });
       return c.json({
         ok: true,
         id: row.id,
@@ -499,13 +527,35 @@ export function createApp({
         artifact,
         story: parseStoryCaptureMetadata(artifact.testName, artifact.name),
       }));
+  // The unified resolver decides which earlier run screenshots diff against
+  // (and can explain why); this wraps it with the run's artifact set.
   const storybookBaseline = async (run: TestRunRow) => {
-    const candidates = await store.listTestRuns!(run.repo, 50, "storybook");
-    const baselineRun = candidates.find(
-      (candidate) =>
-        candidate.id < run.id && candidate.branch === "main" && candidate.status === "complete",
-    );
-    return baselineRun ? await store.getTestRun!(baselineRun.id) : null;
+    const baseBranch = await resolveDefaultBranch(store, run.repo);
+    const { baseline, info } = await resolveVisualBaseline(store, run, baseBranch);
+    return { found: baseline ? await store.getTestRun!(baseline.id) : null, info };
+  };
+  /**
+   * Shared visual-run creation fields: the optional CI-supplied base SHA
+   * (validated) and the review state — default-branch builds are
+   * auto-accepted, so mainline never sits in a review queue and is
+   * immediately baseline-eligible.
+   */
+  const visualRunFields = async (
+    repo: string,
+    body: Record<string, unknown>,
+    branch: string,
+  ): Promise<{ baseSha: string | null; reviewState: ReviewState } | { error: string }> => {
+    const rawBase = body.baseSha ?? body["base-sha"];
+    if (rawBase !== undefined && rawBase !== null) {
+      if (typeof rawBase !== "string" || !SHA_RE.test(rawBase)) {
+        return { error: "baseSha must be a 7–64 character hex commit SHA." };
+      }
+    }
+    const defaultBr = await resolveDefaultBranch(store, repo);
+    return {
+      baseSha: typeof rawBase === "string" ? rawBase : null,
+      reviewState: branch === defaultBr ? "auto-accepted" : "pending",
+    };
   };
   app.post("/api/v1/test-runs", async (c) => {
     if (!artifactReady())
@@ -578,9 +628,12 @@ export function createApp({
       return c.json({ ok: false, error: "Run artifacts exceed the 2 GB limit." }, 413);
     const count = (name: string) =>
       Number.isSafeInteger(Number(body[name])) && Number(body[name]) >= 0 ? Number(body[name]) : 0;
+    const branch = typeof body.branch === "string" ? body.branch.slice(0, 200) : "main";
+    const extra = await visualRunFields(repo, body, branch);
+    if ("error" in extra) return c.json({ ok: false, error: extra.error }, 400);
     const run = await store.createTestRun!({
       repo,
-      branch: typeof body.branch === "string" ? body.branch.slice(0, 200) : "main",
+      branch,
       commit: typeof body.commit === "string" ? body.commit.slice(0, 64) : "unknown",
       pr: Number.isSafeInteger(Number(body.pr)) && Number(body.pr) > 0 ? Number(body.pr) : null,
       framework: typeof body.framework === "string" ? body.framework.slice(0, 80) : "playwright",
@@ -588,6 +641,7 @@ export function createApp({
       testsFailed: count("testsFailed"),
       testsSkipped: count("testsSkipped"),
       durationMs: count("durationMs"),
+      ...extra,
     });
     const origin = new URL(c.req.url).origin;
     const artifacts = [];
@@ -849,9 +903,12 @@ export function createApp({
     if (totalBytes > MAX_STORYBOOK_BYTES)
       return c.json({ ok: false, error: "Storybook preview exceeds the 1 GB limit." }, 413);
 
+    const branch = typeof body.branch === "string" ? body.branch.slice(0, 200) : "main";
+    const extra = await visualRunFields(repo, body, branch);
+    if ("error" in extra) return c.json({ ok: false, error: extra.error }, 400);
     const run = await store.createTestRun!({
       repo,
-      branch: typeof body.branch === "string" ? body.branch.slice(0, 200) : "main",
+      branch,
       commit: typeof body.commit === "string" ? body.commit.slice(0, 64) : "unknown",
       pr: Number.isSafeInteger(Number(body.pr)) && Number(body.pr) > 0 ? Number(body.pr) : null,
       framework: "storybook",
@@ -859,6 +916,7 @@ export function createApp({
       testsFailed: 0,
       testsSkipped: 0,
       durationMs: 0,
+      ...extra,
     });
     const origin = new URL(c.req.url).origin;
     const artifacts = await Promise.all(
@@ -941,6 +999,31 @@ export function createApp({
     });
   });
 
+  // Record a human review verdict on a visual capture run. Auto-accepted is
+  // server-assigned only (default-branch builds); humans approve, reject, or
+  // reset to pending. Guarded by the upload token like other write routes.
+  app.post("/api/v1/storybook-previews/:id/review", async (c) => {
+    if (!previewReady() || !store.setTestRunReview) return c.notFound();
+    const run = await store.getTestRunRow!(Number(c.req.param("id")));
+    if (!run || run.framework !== "storybook") return c.notFound();
+    if (!(await uploadAuthorized(run.repo, bearer(c.req.header("authorization")))))
+      return c.json({ ok: false, error: "Invalid upload token." }, 401);
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ ok: false, error: "Body must be JSON." }, 400);
+    }
+    const state = body.state;
+    if (state !== "approved" && state !== "rejected" && state !== "pending") {
+      return c.json(
+        { ok: false, error: 'state must be "approved", "rejected", or "pending".' },
+        400,
+      );
+    }
+    return c.json({ ok: true, run: await store.setTestRunReview(run.id, state) });
+  });
+
   app.get("/api/v1/repos/:owner/:name/storybook-previews", async (c) => {
     if (!previewReady()) return c.json({ previews: [] });
     const previews = await store.listTestRuns!(
@@ -1009,7 +1092,7 @@ export function createApp({
     if (!found || found.run.framework !== "storybook") return c.notFound();
     const run = found.run;
     const token = previewToken(run.id, Math.floor(Date.now() / 1000) + 3600);
-    const baseline = await storybookBaseline(run);
+    const { found: baseline, info: baselineInfo } = await storybookBaseline(run);
     const baselineToken = baseline
       ? previewToken(baseline.run.id, Math.floor(Date.now() / 1000) + 3600)
       : null;
@@ -1081,6 +1164,7 @@ export function createApp({
       run,
       previewUrl: `${previewBase}/p/${run.id}/index.html?preview_token=${encodeURIComponent(token)}`,
       baselineRun: baseline?.run ?? null,
+      baseline: baselineInfo,
       summary,
       captures,
     });
@@ -1123,7 +1207,7 @@ export function createApp({
         (artifact) => artifact.id === Number(diffMatch[1]) && artifact.kind === "screenshot",
       );
       if (!found || !current) return c.notFound();
-      const baseline = await storybookBaseline(found.run);
+      const { found: baseline } = await storybookBaseline(found.run);
       if (!baseline) return c.notFound();
       const story = parseStoryCaptureMetadata(current.testName, current.name);
       const before = storyCaptures(baseline.artifacts).find(
@@ -1197,15 +1281,63 @@ export function createApp({
       pr: c.req.query("pr"),
       head: c.req.query("head"),
     });
-    if ("error" in cmp) return c.json({ ok: false, error: cmp.error }, cmp.status);
+    if ("error" in cmp) {
+      return c.json({ ok: false, error: cmp.error, baseline: cmp.baseline ?? null }, cmp.status);
+    }
     const policy = await loadPolicy(store, repo);
     return c.json({
       head: cmp.head,
       base: cmp.base,
       same: cmp.same,
       changes: cmp.changes,
+      baseline: cmp.baseline,
       policy: judge(policy, cmp).result,
     });
+  });
+
+  // The repo's default branch: an explicit setting when configured, otherwise
+  // resolved from GitHub App sync data or the main/master heuristic. The
+  // baseline resolver and mainline auto-accept both key off this.
+  app.get("/api/v1/repos/:owner/:name/default-branch", async (c) => {
+    const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
+    const configured = (await store.getMeta(defaultBranchKey(repo)))?.trim() || null;
+    return c.json({
+      repo,
+      branch: await resolveDefaultBranch(store, repo),
+      configured: configured !== null,
+    });
+  });
+
+  app.put("/api/v1/repos/:owner/:name/default-branch", async (c) => {
+    const token = bearer(c.req.header("authorization"));
+    if (!token || !tokenEquals(token, uploadToken)) {
+      return c.json({ ok: false, error: "Admin upload token required." }, 401);
+    }
+    const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
+    if (!REPO_RE.test(repo)) return c.json({ ok: false, error: "Bad repository name." }, 400);
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ ok: false, error: 'Body must be JSON: {"branch": "main"}.' }, 400);
+    }
+    const branch = typeof body.branch === "string" ? body.branch.trim() : "";
+    if (!branch || branch.length > 200 || /\s/.test(branch)) {
+      return c.json({ ok: false, error: "branch must be 1–200 characters, no whitespace." }, 400);
+    }
+    await store.setMeta(defaultBranchKey(repo), branch);
+    return c.json({ ok: true, repo, branch });
+  });
+
+  app.delete("/api/v1/repos/:owner/:name/default-branch", async (c) => {
+    const token = bearer(c.req.header("authorization"));
+    if (!token || !tokenEquals(token, uploadToken)) {
+      return c.json({ ok: false, error: "Admin upload token required." }, 401);
+    }
+    const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
+    // The meta KV has no delete; empty means "not configured".
+    await store.setMeta(defaultBranchKey(repo), "");
+    return c.json({ ok: true, repo, branch: await resolveDefaultBranch(store, repo) });
   });
 
   // Per-repo policy — the "can I merge?" gate. Reading is public (or behind the
@@ -1279,8 +1411,7 @@ export function createApp({
     const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
     const branches = await store.branches(repo);
     if (branches.length === 0) return c.json({ ok: false, error: "Unknown repository." }, 404);
-    const preferred = branches.find((b) => b === "main" || b === "master") ?? branches[0]!;
-    const branch = c.req.query("branch") ?? preferred;
+    const branch = c.req.query("branch") ?? (await resolveDefaultBranch(store, repo));
     return c.json({
       repo,
       branch,
@@ -1297,7 +1428,7 @@ export function createApp({
     const overviews = await store.listRepos(1, accounts);
     const perRepo = await Promise.all(
       overviews.map(async (o) => {
-        const branch = defaultBranch(await store.branches(o.repo), o.latest.branch);
+        const branch = await resolveDefaultBranch(store, o.repo, o.latest.branch);
         const hist = await store.history(o.repo, branch, 60);
         return hist
           .map((u) => ({
@@ -1336,7 +1467,7 @@ export function createApp({
     const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
     const branches = await store.branches(repo);
     if (branches.length === 0) return c.json({ ok: false, error: "Unknown repository." }, 404);
-    const branch = c.req.query("branch") ?? defaultBranch(branches, "main");
+    const branch = c.req.query("branch") ?? (await resolveDefaultBranch(store, repo));
     const hist = (await store.history(repo, branch, 12)).slice().reverse(); // oldest → newest
     const steps: Array<{ t: number; commit: string }> = [];
     const byDir = new Map<string, number[]>();
@@ -1369,6 +1500,14 @@ export function createApp({
       found.report.files.map((f) => [f.path, formatRanges(uncoveredRanges(f))]),
     );
     const covByPath = new Map(found.report.files.map((f) => [f.path, coverageBitmap(f)]));
+
+    // How the unified resolver would pick this upload's baseline, and why —
+    // surfaced in the UI so "compared against what?" is never a mystery.
+    const { info: baseline } = await resolveCoverageBaseline(
+      store,
+      found.row,
+      await resolveDefaultBranch(store, found.row.repo, found.row.branch),
+    );
 
     // What changed vs the previous upload on this branch.
     const prev = await store.prevUpload(found.row.repo, found.row.branch, found.row.id);
@@ -1412,6 +1551,7 @@ export function createApp({
     }
     return c.json({
       changes,
+      baseline,
       row: found.row,
       totals: {
         lines: summary.lines,

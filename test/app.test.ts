@@ -38,6 +38,20 @@ describe("upload API", () => {
     expect(json.url).toBe(`/r/acme/app/u/${json.id}`);
   });
 
+  it("accepts commit-sha and base-sha CI overrides and validates their format", async () => {
+    const head = "a".repeat(40);
+    const base = "b".repeat(40);
+    const ok = await upload(
+      `repo=acme/overrides&branch=feat/squash&commit-sha=${head}&base-sha=${base}&pr=9`,
+    );
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).commit).toBe(head);
+
+    expect((await upload("repo=acme/overrides&base-sha=not-hex")).status).toBe(400);
+    expect((await upload("repo=acme/overrides&commit-sha=xyz")).status).toBe(400);
+    expect((await upload(`repo=acme/overrides&base-sha=${"c".repeat(65)}`)).status).toBe(400);
+  });
+
   it("gives a friendly 422 for unparseable bodies", async () => {
     const res = await app.request("/api/v1/upload?repo=acme/app", {
       method: "POST",
@@ -413,6 +427,78 @@ describe("browser test artifacts", () => {
     });
   });
 
+  it("auto-accepts default-branch capture runs and honors human review verdicts", async () => {
+    // From the diff test above: acme/diffs has a main run and a PR run.
+    const previews = await (
+      await artifactApp.request("/api/v1/repos/acme/diffs/storybook-previews")
+    ).json();
+    const mainRun = previews.previews.find((p: { branch: string }) => p.branch === "main");
+    const featureRun = previews.previews.find((p: { branch: string }) => p.branch !== "main");
+    expect(mainRun.reviewState).toBe("auto-accepted"); // mainline never needs review
+    expect(featureRun.reviewState).toBe("pending");
+
+    const detail = await (
+      await artifactApp.request(`/api/v1/storybook-previews/${featureRun.id}`)
+    ).json();
+    expect(detail.baseline).toMatchObject({
+      reason: "latest-on-base",
+      commit: "base123",
+      baseBranch: "main",
+    });
+    expect(detail.baseline.message).toContain("latest on main");
+
+    const review = (id: number, state: string, token = "sekret") =>
+      artifactApp.request(`/api/v1/storybook-previews/${id}/review`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ state }),
+      });
+    expect((await review(mainRun.id, "rejected", "wrong")).status).toBe(401);
+    expect((await review(mainRun.id, "auto-accepted")).status).toBe(400); // server-assigned only
+
+    // Rejecting the main run removes it from baseline eligibility.
+    const rejected = await review(mainRun.id, "rejected");
+    expect(rejected.status).toBe(200);
+    expect((await rejected.json()).run.reviewState).toBe("rejected");
+    const orphaned = await (
+      await artifactApp.request(`/api/v1/storybook-previews/${featureRun.id}`)
+    ).json();
+    expect(orphaned.baselineRun).toBeNull();
+    expect(orphaned.baseline.reason).toBe("base-branch-empty");
+    expect(orphaned.baseline.message).toContain("No baseline");
+    expect(orphaned.captures.every((c: { status: string }) => c.status === "uncompared")).toBe(
+      true,
+    );
+
+    // A human approval restores it.
+    expect((await review(mainRun.id, "approved")).status).toBe(200);
+    const restored = await (
+      await artifactApp.request(`/api/v1/storybook-previews/${featureRun.id}`)
+    ).json();
+    expect(restored.baselineRun.commit).toBe("base123");
+  });
+
+  it("validates the CI-supplied baseSha on visual run manifests", async () => {
+    const bad = await artifactApp.request("/api/v1/storybook-previews", {
+      method: "POST",
+      headers: { authorization: "Bearer sekret", "content-type": "application/json" },
+      body: JSON.stringify({
+        repo: "acme/app",
+        baseSha: "not-a-sha",
+        files: [{ path: "index.html", contentType: "text/html", sizeBytes: 1 }],
+      }),
+    });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toContain("baseSha");
+
+    const badRun = await artifactApp.request("/api/v1/test-runs", {
+      method: "POST",
+      headers: { authorization: "Bearer sekret", "content-type": "application/json" },
+      body: JSON.stringify({ ...manifest, baseSha: "nope" }),
+    });
+    expect(badRun.status).toBe(400);
+  });
+
   it("rejects unsafe or incomplete Storybook manifests", async () => {
     const response = await artifactApp.request("/api/v1/storybook-previews", {
       method: "POST",
@@ -589,6 +675,79 @@ describe("PRs and compare", () => {
 
     const missing = await app.request("/api/v1/repos/acme/app/compare?pr=999");
     expect(missing.status).toBe(404);
+  });
+
+  it("explains how the base was chosen, and prefers a CI-supplied base-sha", async () => {
+    const cmp = await (await app.request("/api/v1/repos/acme/app/compare?pr=7&base=main")).json();
+    expect(cmp.baseline).toMatchObject({ reason: "latest-on-base", baseBranch: "main" });
+    expect(cmp.baseline.message).toContain("latest on main");
+    expect(cmp.baseline.commit).toBe(cmp.base.commit);
+
+    // Pin the PR's base to an older main commit via base-sha.
+    await app.request(
+      "/api/v1/upload?repo=acme/app&branch=feat/x&commit=pr1c&pr=7&base-sha=abc1234",
+      {
+        method: "POST",
+        headers: { authorization: "Bearer sekret" },
+        body: lcov,
+      },
+    );
+    const pinned = await (
+      await app.request("/api/v1/repos/acme/app/compare?pr=7&base=main")
+    ).json();
+    expect(pinned.head.commit).toBe("pr1c");
+    expect(pinned.base.commit).toBe("abc1234");
+    expect(pinned.baseline.reason).toBe("base-sha");
+
+    // No uploads on the base branch: friendly explanation, not a bare 404.
+    // (pr=7's head carries a base-sha, which would override even a bad ?base.)
+    const orphan = await app.request("/api/v1/repos/acme/app/compare?head=main&base=ghost");
+    expect(orphan.status).toBe(404);
+    const body = await orphan.json();
+    expect(body.baseline.reason).toBe("base-branch-empty");
+    expect(body.error).toContain("ghost has no builds yet");
+  });
+});
+
+describe("upload detail baseline transparency", () => {
+  it("labels the first build on a branch, then the previous upload", async () => {
+    const first = await (await upload("repo=base/app&branch=main&commit=b1")).json();
+    const d1 = await (await app.request(`/api/v1/uploads/${first.id}`)).json();
+    expect(d1.baseline).toMatchObject({ reason: "first-on-branch", commit: null });
+    expect(d1.baseline.message).toBe("No baseline — first build on main");
+
+    const second = await (await upload("repo=base/app&branch=main&commit=b2")).json();
+    const d2 = await (await app.request(`/api/v1/uploads/${second.id}`)).json();
+    expect(d2.baseline).toMatchObject({ reason: "previous-on-branch", commit: "b1" });
+  });
+});
+
+describe("default branch setting", () => {
+  it("reads the heuristic, accepts an admin override, and clears it", async () => {
+    await upload("repo=acme/defbr&branch=master&commit=m1");
+    const before = await (await app.request("/api/v1/repos/acme/defbr/default-branch")).json();
+    expect(before).toMatchObject({ branch: "master", configured: false });
+
+    const put = (body: unknown, token = "sekret") =>
+      app.request("/api/v1/repos/acme/defbr/default-branch", {
+        method: "PUT",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    expect((await put({ branch: "develop" }, "wrong")).status).toBe(401);
+    expect((await put({ branch: "has space" })).status).toBe(400);
+    expect((await put({})).status).toBe(400);
+    expect((await put({ branch: "develop" })).status).toBe(200);
+
+    const after = await (await app.request("/api/v1/repos/acme/defbr/default-branch")).json();
+    expect(after).toMatchObject({ branch: "develop", configured: true });
+
+    const del = await app.request("/api/v1/repos/acme/defbr/default-branch", {
+      method: "DELETE",
+      headers: { authorization: "Bearer sekret" },
+    });
+    expect(del.status).toBe(200);
+    expect((await del.json()).branch).toBe("master");
   });
 });
 

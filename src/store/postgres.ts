@@ -5,6 +5,7 @@ import {
   type PROverview,
   type RecordUploadInput,
   type RepoOverview,
+  type ReviewState,
   type Store,
   type Subscription,
   type TestArtifactRow,
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS uploads (
   files INTEGER NOT NULL,
   report BYTEA NOT NULL,
   account TEXT NOT NULL DEFAULT '',
+  base_sha TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_repo_branch_time
@@ -46,6 +48,7 @@ CREATE TABLE IF NOT EXISTS test_runs (
   pr INTEGER, framework TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'uploading',
   tests_passed INTEGER NOT NULL DEFAULT 0, tests_failed INTEGER NOT NULL DEFAULT 0,
   tests_skipped INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
+  base_sha TEXT, review_state TEXT NOT NULL DEFAULT 'pending',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(), completed_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_test_runs_repo_time ON test_runs(repo, created_at DESC);
@@ -56,6 +59,14 @@ CREATE TABLE IF NOT EXISTS test_artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_test_artifacts_run ON test_artifacts(run_id);
 CREATE INDEX IF NOT EXISTS idx_test_artifacts_run_name ON test_artifacts(run_id, name);
+-- Additive migrations for databases created before these columns existed.
+ALTER TABLE uploads ADD COLUMN IF NOT EXISTS base_sha TEXT;
+ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS base_sha TEXT;
+ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS review_state TEXT NOT NULL DEFAULT 'pending';
+-- Mainline never needs review: conventional default-branch runs recorded
+-- before (or without) the auto-accept logic become baseline-eligible.
+UPDATE test_runs SET review_state = 'auto-accepted'
+  WHERE review_state = 'pending' AND branch IN ('main', 'master');
 `;
 
 interface RawRow {
@@ -67,6 +78,7 @@ interface RawRow {
   lines_covered: number;
   lines_total: number;
   files: number;
+  base_sha: string | null;
   created_at: Date | string;
 }
 
@@ -81,6 +93,7 @@ function toRow(raw: RawRow): UploadRow {
     linesTotal: raw.lines_total,
     percent: percentOf(raw.lines_covered, raw.lines_total),
     files: raw.files,
+    baseSha: raw.base_sha,
     createdAt: raw.created_at instanceof Date ? raw.created_at.toISOString() : raw.created_at,
   };
 }
@@ -97,6 +110,8 @@ interface RawTestRun {
   tests_failed: number;
   tests_skipped: number;
   duration_ms: number;
+  base_sha: string | null;
+  review_state: ReviewState;
   created_at: Date | string;
   completed_at: Date | string | null;
 }
@@ -126,6 +141,8 @@ const toTestRun = (r: RawTestRun): TestRunRow => ({
   testsFailed: r.tests_failed,
   testsSkipped: r.tests_skipped,
   durationMs: r.duration_ms,
+  baseSha: r.base_sha,
+  reviewState: r.review_state,
   createdAt: iso(r.created_at),
   completedAt: r.completed_at ? iso(r.completed_at) : null,
 });
@@ -155,11 +172,11 @@ export class PostgresStore implements Store {
 
   async recordUpload(input: RecordUploadInput): Promise<UploadRow> {
     const [raw] = await this.sql<RawRow[]>`
-      INSERT INTO uploads (repo, branch, commit_sha, pr, lines_covered, lines_total, files, report, account)
+      INSERT INTO uploads (repo, branch, commit_sha, pr, lines_covered, lines_total, files, report, account, base_sha)
       VALUES (${input.repo}, ${input.branch}, ${input.commit}, ${input.pr},
               ${input.linesCovered}, ${input.linesTotal}, ${input.files},
-              ${Buffer.from(packReport(input.report))}, ${accountOf(input.repo)})
-      RETURNING id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at`;
+              ${Buffer.from(packReport(input.report))}, ${accountOf(input.repo)}, ${input.baseSha ?? null})
+      RETURNING id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at`;
     return toRow(raw!);
   }
 
@@ -171,7 +188,7 @@ export class PostgresStore implements Store {
           ? this.sql`WHERE false`
           : this.sql`WHERE account = ANY(${accounts})`;
     const latest = await this.sql<RawRow[]>`
-      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at
+      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at
       FROM uploads WHERE id IN (
         SELECT DISTINCT ON (repo) id FROM uploads ${sub}
         ORDER BY repo, (branch IN ('main', 'master')) DESC, id DESC
@@ -192,7 +209,7 @@ export class PostgresStore implements Store {
 
   async history(repo: string, branch: string, limit: number): Promise<UploadRow[]> {
     const rows = await this.sql<RawRow[]>`
-      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at
+      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at
       FROM uploads WHERE repo = ${repo} AND branch = ${branch}
       ORDER BY id DESC LIMIT ${limit}`;
     return rows.map(toRow);
@@ -206,14 +223,14 @@ export class PostgresStore implements Store {
           ? this.sql`WHERE false`
           : this.sql`WHERE account = ANY(${accounts})`;
     const rows = await this.sql<RawRow[]>`
-      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at
+      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at
       FROM uploads ${sub} ORDER BY id DESC LIMIT ${limit}`;
     return rows.map(toRow);
   }
 
   async prevUpload(repo: string, branch: string, beforeId: number) {
     const [raw] = await this.sql<Array<RawRow & { report: Buffer }>>`
-      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at, report
+      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at, report
       FROM uploads WHERE repo = ${repo} AND branch = ${branch} AND id < ${beforeId}
       ORDER BY id DESC LIMIT 1`;
     if (!raw) return null;
@@ -229,7 +246,7 @@ export class PostgresStore implements Store {
 
   async getUpload(id: number) {
     const [raw] = await this.sql<Array<RawRow & { report: Buffer }>>`
-      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at, report
+      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at, report
       FROM uploads WHERE id = ${id}`;
     if (!raw) return null;
     return { row: toRow(raw), report: unpackReport(raw.report) };
@@ -237,7 +254,7 @@ export class PostgresStore implements Store {
 
   async findByCommit(repo: string, commit: string) {
     const [raw] = await this.sql<Array<RawRow & { report: Buffer }>>`
-      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at, report
+      SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at, report
       FROM uploads WHERE repo = ${repo} AND commit_sha = ${commit}
       ORDER BY id DESC LIMIT 1`;
     if (!raw) return null;
@@ -250,17 +267,17 @@ export class PostgresStore implements Store {
         lines_covered = ${patch.linesCovered}, lines_total = ${patch.linesTotal},
         files = ${patch.files}
       WHERE id = ${id}
-      RETURNING id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at`;
+      RETURNING id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at`;
     return toRow(raw!);
   }
 
   async latest(repo: string, branch?: string): Promise<UploadRow | null> {
     const rows = branch
       ? await this.sql<RawRow[]>`
-          SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at
+          SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at
           FROM uploads WHERE repo = ${repo} AND branch = ${branch} ORDER BY id DESC LIMIT 1`
       : await this.sql<RawRow[]>`
-          SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at
+          SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at
           FROM uploads WHERE repo = ${repo} ORDER BY id DESC LIMIT 1`;
     return rows[0] ? toRow(rows[0]) : null;
   }
@@ -272,7 +289,7 @@ export class PostgresStore implements Store {
     const out: PROverview[] = [];
     for (const g of groups) {
       const [raw] = await this.sql<RawRow[]>`
-        SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at
+        SELECT id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at
         FROM uploads WHERE id = ${g.latest_id}`;
       out.push({ pr: g.pr, latest: toRow(raw!), uploads: Number(g.uploads) });
     }
@@ -357,9 +374,10 @@ export class PostgresStore implements Store {
 
   async createTestRun(input: CreateTestRunInput): Promise<TestRunRow> {
     const [row] = await this.sql<RawTestRun[]>`
-      INSERT INTO test_runs (repo, branch, commit_sha, pr, framework, tests_passed, tests_failed, tests_skipped, duration_ms)
+      INSERT INTO test_runs (repo, branch, commit_sha, pr, framework, tests_passed, tests_failed, tests_skipped, duration_ms, base_sha, review_state)
       VALUES (${input.repo}, ${input.branch}, ${input.commit}, ${input.pr}, ${input.framework},
-        ${input.testsPassed}, ${input.testsFailed}, ${input.testsSkipped}, ${input.durationMs})
+        ${input.testsPassed}, ${input.testsFailed}, ${input.testsSkipped}, ${input.durationMs},
+        ${input.baseSha ?? null}, ${input.reviewState ?? "pending"})
       RETURNING *`;
     return toTestRun(row!);
   }
@@ -411,6 +429,12 @@ export class PostgresStore implements Store {
           RawTestRun[]
         >`SELECT * FROM test_runs WHERE repo = ${repo} ORDER BY id DESC LIMIT ${limit}`;
     return rows.map(toTestRun);
+  }
+
+  async setTestRunReview(id: number, state: ReviewState): Promise<TestRunRow | null> {
+    const [row] = await this.sql<RawTestRun[]>`
+      UPDATE test_runs SET review_state = ${state} WHERE id = ${id} RETURNING *`;
+    return row ? toTestRun(row) : null;
   }
 
   async deleteTestRun(id: number): Promise<void> {
