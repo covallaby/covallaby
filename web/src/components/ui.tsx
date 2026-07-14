@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from "react";
+import { Link } from "react-router-dom";
 import { type Severity, formatPercent, severity } from "../api.js";
 
 /** A GitHub org/user avatar (github.com/:owner.png), with a monogram fallback. */
@@ -200,18 +201,37 @@ export function Td({
 /**
  * A branch/PR pill. The default branch (main/master) reads neutral; a PR or any
  * other branch reads amber — so "is this main?" is answerable at a glance.
+ * With a PR and a repo context, the pill links to the PR's Covallaby view.
  */
-export function BranchTag({ branch, pr }: { branch: string; pr?: number | null }) {
+export function BranchTag({
+  branch,
+  pr,
+  repo,
+}: {
+  branch: string;
+  pr?: number | null;
+  /** owner/name — enables the PR pill to link to /r/:owner/:name/pr/:pr. */
+  repo?: string | null;
+}) {
   const isDefault = !pr && (branch === "main" || branch === "master");
+  const className = `inline-block max-w-full truncate rounded-full border px-2 py-0.5 align-middle font-mono text-[11px] ${
+    isDefault
+      ? "border-(--hairline) bg-(--surface-2) text-(--ink-2)"
+      : "border-(--warn) text-(--warn)"
+  }`;
+  if (pr && repo) {
+    return (
+      <Link
+        to={`/r/${repo}/pr/${pr}`}
+        title={`Open PR #${pr}`}
+        className={`${className} hover:underline`}
+      >
+        PR #{pr}
+      </Link>
+    );
+  }
   return (
-    <span
-      title={isDefault ? "Default branch" : "Not the default branch"}
-      className={`inline-block max-w-full truncate rounded-full border px-2 py-0.5 align-middle font-mono text-[11px] ${
-        isDefault
-          ? "border-(--hairline) bg-(--surface-2) text-(--ink-2)"
-          : "border-(--warn) text-(--warn)"
-      }`}
-    >
+    <span title={isDefault ? "Default branch" : "Not the default branch"} className={className}>
       {pr ? `PR #${pr}` : branch}
     </span>
   );

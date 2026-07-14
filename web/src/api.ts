@@ -145,6 +145,14 @@ export interface ReviewSignals {
   previews: StorybookPreview[];
 }
 
+/** Everything reported for one commit SHA — the envelope its artifact pages share. */
+export interface CommitSiblings {
+  commit: string;
+  upload: UploadRow | null;
+  run: TestRun | null;
+  preview: StorybookPreview | null;
+}
+
 /** A repo's merge policy — the "can I merge?" gate. */
 export interface RepoPolicy {
   minProject?: number;
@@ -241,6 +249,8 @@ const liveApi = {
     get<{ repositories: ReviewSignals[] }>(
       `/api/v1/review-signals${repo ? `?repo=${encodeURIComponent(repo)}` : ""}`,
     ),
+  commitSiblings: (repo: string, sha: string) =>
+    get<CommitSiblings>(`/api/v1/repos/${repo}/commits/${encodeURIComponent(sha)}`),
   compare: (repo: string, q: { pr?: number; head?: string; base?: string }) => {
     const params = new URLSearchParams();
     if (q.pr !== undefined) params.set("pr", String(q.pr));
@@ -422,6 +432,20 @@ export const api: typeof liveApi = IS_DEMO
               previews: (await api.storybookPreviews(name)).previews,
             })),
           ),
+        };
+      },
+      commitSiblings: async (repo: string, sha: string) => {
+        // Derived client-side in the demo: join the fixture surfaces on the SHA.
+        const [runs, previews, history] = await Promise.all([
+          api.testRuns(repo),
+          api.storybookPreviews(repo),
+          api.history(repo).catch(() => null),
+        ]);
+        return {
+          commit: sha,
+          upload: history?.history.find((u) => u.commit === sha) ?? null,
+          run: runs.runs.find((r) => r.commit === sha) ?? null,
+          preview: previews.previews.find((p) => p.commit === sha) ?? null,
         };
       },
       compare: (...a) => load().then((d) => d.compare(...a)),

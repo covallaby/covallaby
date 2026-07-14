@@ -15,6 +15,7 @@ import {
   type StorybookPreview,
   api,
 } from "../api.js";
+import { CommitStrip, commitHref, useCommitSiblings } from "../components/commit-strip.js";
 import { Card, CardHeader, Td, Th } from "../components/ui.js";
 import { useRepo } from "./Repo.js";
 
@@ -24,7 +25,7 @@ const when = (iso: string) =>
   );
 
 export function StorybookPreviews() {
-  const { repo } = useRepo();
+  const { repo, data } = useRepo();
   const [previews, setPreviews] = useState<StorybookPreview[] | null>(null);
   const [error, setError] = useState(false);
   const [request, setRequest] = useState(0);
@@ -119,7 +120,13 @@ export function StorybookPreviews() {
                       </Link>
                     </Td>
                     <Td>
-                      <span className="font-mono text-xs">{preview.commit.slice(0, 10)}</span>
+                      <Link
+                        className="font-mono text-xs hover:underline"
+                        to={commitHref(repo, preview.commit, data.history)}
+                        title="Open this commit in Covallaby"
+                      >
+                        {preview.commit.slice(0, 10)}
+                      </Link>
                       <a
                         className="ml-2 inline-flex text-(--muted) hover:text-(--ink)"
                         href={`https://github.com/${repo}/commit/${preview.commit}`}
@@ -185,6 +192,7 @@ export function StorybookPreviewDetail() {
       })
       .catch((reason) => setError(String(reason)));
   }, [id, request]);
+  const siblings = useCommitSiblings(data?.run.repo, data?.run.commit);
   if (error)
     return (
       <div className="rounded-xl border border-(--bad)/25 bg-(--bad)/5 p-5">
@@ -236,7 +244,18 @@ export function StorybookPreviewDetail() {
             {data.run.pr ? `PR #${data.run.pr}` : data.run.branch} component captures
           </h1>
           <p className="mt-1 font-mono text-xs text-(--muted)">
-            {data.run.commit} · {when(data.run.createdAt)}
+            <Link
+              to={
+                siblings?.upload
+                  ? `/r/${data.run.repo}/u/${siblings.upload.id}`
+                  : `/r/${data.run.repo}/commits`
+              }
+              title="Open this commit in Covallaby"
+              className="hover:text-(--ink) hover:underline"
+            >
+              {data.run.commit}
+            </Link>{" "}
+            · {when(data.run.createdAt)}
           </p>
         </div>
         {data.run.status === "complete" ? (
@@ -254,6 +273,13 @@ export function StorybookPreviewDetail() {
           </span>
         )}
       </div>
+      <CommitStrip
+        repo={data.run.repo}
+        commit={data.run.commit}
+        pr={data.run.pr}
+        current="components"
+        siblings={siblings}
+      />
       {data.run.status === "complete" && data.captures.length > 0 ? (
         <>
           <Card className="overflow-hidden">
