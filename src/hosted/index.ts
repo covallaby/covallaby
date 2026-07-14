@@ -1,7 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Hono } from "hono";
+import { SHA_RE } from "../baseline.js";
 import { recordPRRetentionState, recordRepoRetentionState } from "../retention.js";
-import type { Store } from "../store.js";
+import type { Store, TestRunRow } from "../store.js";
 import { authRoutes, currentSession } from "./auth.js";
 import { billingRoutes } from "./billing.js";
 import type { HostedConfig } from "./config.js";
@@ -14,6 +15,7 @@ import {
   recordInstallation,
 } from "./github-app.js";
 import { type GitHubClient, createGitHubClient } from "./github.js";
+import { componentsStatus } from "./signal-status.js";
 
 export { loadHostedConfig, type HostedConfig } from "./config.js";
 
@@ -24,6 +26,21 @@ export type AppEnv = { Variables: { accounts?: string[] } };
 export interface HostedDeps {
   github?: GitHubClient; // injectable for tests
   githubApp?: GitHubAppClient;
+}
+
+/**
+ * Callbacks the hosted tier hands back to the core app so runtime-agnostic
+ * routes (visual-run completion, review verdicts) can report per-signal
+ * GitHub commit statuses without knowing about the GitHub App. Empty when
+ * self-hosted or when no GitHub App is configured.
+ */
+export interface HostedHooks {
+  /**
+   * Post/update the covallaby/components status for a visual capture run's
+   * commit. Returns true when a status was actually sent (App installed for
+   * the repo's account and the run has a real SHA).
+   */
+  reportComponentsStatus?(run: TestRunRow): Promise<boolean>;
 }
 
 /**
@@ -40,7 +57,7 @@ export function mountHosted(
   config: HostedConfig,
   deps: HostedDeps = {},
   uploadAuthorized?: (repo: string, token: string) => Promise<boolean>,
-): void {
+): HostedHooks {
   const github = deps.github ?? createGitHubClient(config);
   const githubApp =
     deps.githubApp ??
@@ -55,7 +72,25 @@ export function mountHosted(
   app.route("/", authRoutes(config, github));
   app.route("/", billingRoutes(config, store));
 
+  const hooks: HostedHooks = {};
+
   if (githubApp && config.githubApp) {
+    // The server owns the covallaby/components status: review verdicts land
+    // after CI is long gone, so only the server can keep the check truthful.
+    hooks.reportComponentsStatus = async (run) => {
+      if (run.framework !== "storybook" || !SHA_RE.test(run.commit)) return false;
+      const owner = run.repo.split("/")[0]!;
+      const installationId = Number(await store.getMeta(installationAccountKey(owner)));
+      if (!Number.isSafeInteger(installationId) || installationId <= 0) return false;
+      await githubApp.createCommitStatus(
+        installationId,
+        run.repo,
+        run.commit,
+        componentsStatus(run, config.baseUrl),
+      );
+      return true;
+    };
+
     for (const installationId of config.githubApp.bootstrapInstallationIds) {
       void githubApp
         .getInstallation(installationId)
@@ -244,4 +279,6 @@ export function mountHosted(
     c.set("accounts", session.accounts);
     return next();
   });
+
+  return hooks;
 }
