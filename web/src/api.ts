@@ -134,6 +134,8 @@ export interface TestRun {
   durationMs: number;
   baseSha?: string | null;
   reviewState?: ReviewState;
+  /** Denormalized screenshot count; null/absent on runs recorded before it existed. */
+  imageCount?: number | null;
   createdAt: string;
   completedAt: string | null;
 }
@@ -151,9 +153,23 @@ export interface TestArtifact {
   viewerUrl?: string;
 }
 
-export interface StorybookPreview extends TestRun {
-  artifactCount?: number;
-  imageCount?: number;
+export type StorybookPreview = TestRun;
+
+/**
+ * One row of the unified activity feed — a discriminated union over the three
+ * confidence signals, mirroring the server's ActivityItem.
+ */
+export type ActivityItem =
+  | ({ type: "coverage" } & UploadRow)
+  | ({ type: "journeys" | "components" } & TestRun);
+
+export interface ActivityFeed {
+  /** Coverage-only list, kept for older consumers of /api/v1/activity. */
+  uploads: UploadRow[];
+  /** The merged three-signal feed, newest first. */
+  items: ActivityItem[];
+  /** False on runtimes without test-run storage (D1): coverage-only feed. */
+  runsSupported: boolean;
 }
 
 /** A capture's review verdict; present only on reviewable (changed/new/removed) captures. */
@@ -303,7 +319,7 @@ async function fetchMe(): Promise<Me | null> {
 
 const liveApi = {
   repos: () => get<{ repos: RepoOverview[] }>("/api/v1/repos"),
-  activity: () => get<{ uploads: UploadRow[] }>("/api/v1/activity"),
+  activity: () => get<ActivityFeed>("/api/v1/activity"),
   history: (repo: string, branch?: string) =>
     get<RepoHistory>(
       `/api/v1/repos/${repo}/history${branch ? `?branch=${encodeURIComponent(branch)}` : ""}`,
@@ -387,91 +403,9 @@ export const api: typeof liveApi = IS_DEMO
       prs: (...a) => load().then((d) => d.prs(...a)),
       policy: (...a) => load().then((d) => d.policy(...a)),
       status: (...a) => load().then((d) => d.status(...a)),
-      testRuns: (repo: string) =>
-        Promise.resolve({
-          ...(repo !== "covallaby/covallaby"
-            ? { runs: [] }
-            : {
-                runs: [
-                  {
-                    id: 42,
-                    repo,
-                    branch: "feature/checkout-polish",
-                    commit: "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
-                    pr: 128,
-                    framework: "playwright",
-                    status: "complete" as const,
-                    testsPassed: 34,
-                    testsFailed: 0,
-                    testsSkipped: 2,
-                    durationMs: 48210,
-                    createdAt: "2026-07-11T18:42:00.000Z",
-                    completedAt: "2026-07-11T18:43:02.000Z",
-                  },
-                  {
-                    id: 41,
-                    repo,
-                    branch: "main",
-                    commit: "72d41f0dd8e6abfe280d9e340c277421f3607184",
-                    pr: null,
-                    framework: "playwright",
-                    status: "complete" as const,
-                    testsPassed: 31,
-                    testsFailed: 1,
-                    testsSkipped: 1,
-                    durationMs: 55900,
-                    createdAt: "2026-07-10T16:14:00.000Z",
-                    completedAt: "2026-07-10T16:15:12.000Z",
-                  },
-                ],
-              }),
-        }),
+      testRuns: (...a) => load().then((d) => d.testRuns(...a)),
       testRun: () => Promise.reject(new Error("Playbacks are not included in the static demo.")),
-      storybookPreviews: (repo: string) =>
-        Promise.resolve({
-          ...(repo !== "covallaby/covallaby"
-            ? { previews: [] }
-            : {
-                previews: [
-                  {
-                    id: 18,
-                    repo,
-                    branch: "feature/checkout-polish",
-                    commit: "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
-                    pr: 128,
-                    framework: "storybook",
-                    status: "complete" as const,
-                    testsPassed: 0,
-                    testsFailed: 0,
-                    testsSkipped: 0,
-                    durationMs: 0,
-                    createdAt: "2026-07-11T18:42:00.000Z",
-                    completedAt: "2026-07-11T18:43:02.000Z",
-                    reviewState: "pending" as const,
-                    artifactCount: 28,
-                    imageCount: 24,
-                  },
-                  {
-                    id: 17,
-                    repo,
-                    branch: "main",
-                    commit: "72d41f0dd8e6abfe280d9e340c277421f3607184",
-                    pr: null,
-                    framework: "storybook",
-                    status: "complete" as const,
-                    testsPassed: 0,
-                    testsFailed: 0,
-                    testsSkipped: 0,
-                    durationMs: 0,
-                    createdAt: "2026-07-10T16:14:00.000Z",
-                    completedAt: "2026-07-10T16:15:12.000Z",
-                    reviewState: "auto-accepted" as const,
-                    artifactCount: 22,
-                    imageCount: 19,
-                  },
-                ],
-              }),
-        }),
+      storybookPreviews: (...a) => load().then((d) => d.storybookPreviews(...a)),
       storybookPreview: (id: string) =>
         Promise.resolve(
           demoAnnotate({
@@ -489,7 +423,6 @@ export const api: typeof liveApi = IS_DEMO
               durationMs: 0,
               createdAt: "2026-07-11T18:42:00.000Z",
               completedAt: "2026-07-11T18:43:02.000Z",
-              artifactCount: 3,
               imageCount: 2,
             },
             previewUrl: "https://example.invalid/storybook",

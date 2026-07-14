@@ -60,6 +60,15 @@ export interface AppOptions {
   storybookPreviewSecret?: string;
 }
 
+/**
+ * One row of the unified activity feed — a discriminated union over the three
+ * confidence signals. Coverage rows are UploadRows; journey (Playwright) and
+ * component (Storybook) rows are TestRunRows.
+ */
+export type ActivityItem =
+  | ({ type: "coverage" } & UploadRow)
+  | ({ type: "journeys" | "components" } & TestRunRow);
+
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_ARTIFACT_BYTES = 500 * 1024 * 1024;
@@ -628,6 +637,20 @@ export function createApp({
     store.listTestRuns;
   const previewReady = () =>
     artifactReady() && previewBase && store.getTestRunRow && store.getTestArtifactByName;
+  /**
+   * The run's screenshot count from the denormalized column when present,
+   * falling back to counting artifacts for rows recorded before the column
+   * existed — and writing the count back so the fallback runs once per row.
+   */
+  const withImageCount = async (run: TestRunRow): Promise<TestRunRow> => {
+    if (run.imageCount !== null) return run;
+    const found = await store.getTestRun!(run.id);
+    const imageCount = (found?.artifacts ?? []).filter(
+      (artifact) => artifact.kind === "screenshot",
+    ).length;
+    await store.setTestRunImageCount?.(run.id, imageCount);
+    return { ...run, imageCount };
+  };
   const storyCaptures = (artifacts: TestArtifactRow[]) =>
     artifacts
       .filter((artifact) => artifact.kind === "screenshot")
@@ -845,6 +868,7 @@ export function createApp({
       testsFailed: count("testsFailed"),
       testsSkipped: count("testsSkipped"),
       durationMs: count("durationMs"),
+      imageCount: parsed.filter((item) => item.kind === "screenshot").length,
       ...extra,
     });
     const origin = new URL(c.req.url).origin;
@@ -1125,6 +1149,7 @@ export function createApp({
       testsFailed: 0,
       testsSkipped: 0,
       durationMs: 0,
+      imageCount: files.filter((file) => file.kind === "screenshot").length,
       ...extra,
     });
     const origin = new URL(c.req.url).origin;
@@ -1249,19 +1274,7 @@ export function createApp({
       50,
       "storybook",
     );
-    return c.json({
-      previews: await Promise.all(
-        previews.map(async (preview) => {
-          const found = await store.getTestRun!(preview.id);
-          const artifacts = found?.artifacts ?? [];
-          return {
-            ...preview,
-            artifactCount: artifacts.length,
-            imageCount: artifacts.filter((artifact) => artifact.kind === "screenshot").length,
-          };
-        }),
-      ),
-    });
+    return c.json({ previews: await Promise.all(previews.map(withImageCount)) });
   });
 
   app.get("/api/v1/review-signals", async (c) => {
@@ -1287,17 +1300,7 @@ export function createApp({
           return {
             repo,
             runs,
-            previews: await Promise.all(
-              previews.map(async (preview) => {
-                const found = await store.getTestRun!(preview.id);
-                const artifacts = found?.artifacts ?? [];
-                return {
-                  ...preview,
-                  artifactCount: artifacts.length,
-                  imageCount: artifacts.filter((artifact) => artifact.kind === "screenshot").length,
-                };
-              }),
-            ),
+            previews: await Promise.all(previews.map(withImageCount)),
           };
         }),
       ),
@@ -1551,9 +1554,28 @@ export function createApp({
     c.json({ repos: await store.listRepos(12, c.get("accounts")) }),
   );
 
-  app.get("/api/v1/activity", async (c) =>
-    c.json({ uploads: await store.recentUploads(15, c.get("accounts")) }),
-  );
+  // The unified three-signal feed: coverage uploads plus Playwright (journey)
+  // and Storybook (component) runs, merged newest-first. Both sides read fixed
+  // columns off indexed tables — never artifact rows or report blobs. The
+  // legacy `uploads` key stays for older dashboards; `runsSupported` is false
+  // on runtimes without test-run storage (D1), where the feed degrades to
+  // uploads-only instead of failing.
+  app.get("/api/v1/activity", async (c) => {
+    const accounts = c.get("accounts");
+    const uploads = await store.recentUploads(40, accounts);
+    const runsSupported = Boolean(store.recentRuns);
+    const runs = runsSupported ? await store.recentRuns!(40, accounts) : [];
+    const items: ActivityItem[] = [
+      ...uploads.map((upload) => ({ type: "coverage" as const, ...upload })),
+      ...runs.map((run) => ({
+        type: run.framework === "storybook" ? ("components" as const) : ("journeys" as const),
+        ...run,
+      })),
+    ]
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id - a.id)
+      .slice(0, 60);
+    return c.json({ uploads, items, runsSupported });
+  });
 
   // Mint (or rotate) a per-repo upload token. Admin token required.
   app.post("/api/v1/repos/:owner/:name/token", async (c) => {

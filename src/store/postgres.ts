@@ -51,9 +51,11 @@ CREATE TABLE IF NOT EXISTS test_runs (
   tests_passed INTEGER NOT NULL DEFAULT 0, tests_failed INTEGER NOT NULL DEFAULT 0,
   tests_skipped INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
   base_sha TEXT, review_state TEXT NOT NULL DEFAULT 'pending',
+  account TEXT NOT NULL DEFAULT '', image_count INTEGER,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(), completed_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_test_runs_repo_time ON test_runs(repo, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_test_runs_account ON test_runs(account);
 CREATE TABLE IF NOT EXISTS test_artifacts (
   id BIGSERIAL PRIMARY KEY, run_id BIGINT NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
   name TEXT NOT NULL, kind TEXT NOT NULL, content_type TEXT NOT NULL, size_bytes BIGINT NOT NULL,
@@ -73,6 +75,11 @@ CREATE INDEX IF NOT EXISTS idx_capture_reviews_pair ON capture_reviews(repo, bas
 ALTER TABLE uploads ADD COLUMN IF NOT EXISTS base_sha TEXT;
 ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS base_sha TEXT;
 ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS review_state TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS account TEXT NOT NULL DEFAULT '';
+ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS image_count INTEGER;
+-- Backfill the tenant column for runs recorded before it existed, so the
+-- account-scoped feed query never misses old rows.
+UPDATE test_runs SET account = split_part(repo, '/', 1) WHERE account = '';
 -- Mainline never needs review: conventional default-branch runs recorded
 -- before (or without) the auto-accept logic become baseline-eligible.
 UPDATE test_runs SET review_state = 'auto-accepted'
@@ -122,6 +129,7 @@ interface RawTestRun {
   duration_ms: number;
   base_sha: string | null;
   review_state: ReviewState;
+  image_count: number | null;
   created_at: Date | string;
   completed_at: Date | string | null;
 }
@@ -153,6 +161,7 @@ const toTestRun = (r: RawTestRun): TestRunRow => ({
   durationMs: r.duration_ms,
   baseSha: r.base_sha,
   reviewState: r.review_state,
+  imageCount: r.image_count,
   createdAt: iso(r.created_at),
   completedAt: r.completed_at ? iso(r.completed_at) : null,
 });
@@ -422,10 +431,11 @@ export class PostgresStore implements Store {
 
   async createTestRun(input: CreateTestRunInput): Promise<TestRunRow> {
     const [row] = await this.sql<RawTestRun[]>`
-      INSERT INTO test_runs (repo, branch, commit_sha, pr, framework, tests_passed, tests_failed, tests_skipped, duration_ms, base_sha, review_state)
+      INSERT INTO test_runs (repo, branch, commit_sha, pr, framework, tests_passed, tests_failed, tests_skipped, duration_ms, base_sha, review_state, account, image_count)
       VALUES (${input.repo}, ${input.branch}, ${input.commit}, ${input.pr}, ${input.framework},
         ${input.testsPassed}, ${input.testsFailed}, ${input.testsSkipped}, ${input.durationMs},
-        ${input.baseSha ?? null}, ${input.reviewState ?? "pending"})
+        ${input.baseSha ?? null}, ${input.reviewState ?? "pending"}, ${accountOf(input.repo)},
+        ${input.imageCount ?? null})
       RETURNING *`;
     return toTestRun(row!);
   }
@@ -477,6 +487,24 @@ export class PostgresStore implements Store {
           RawTestRun[]
         >`SELECT * FROM test_runs WHERE repo = ${repo} ORDER BY id DESC LIMIT ${limit}`;
     return rows.map(toTestRun);
+  }
+
+  async recentRuns(limit: number, accounts?: string[]): Promise<TestRunRow[]> {
+    // Feed query: fixed columns only (never the artifact table), newest first
+    // on the primary key — the same shape and scope as recentUploads.
+    const sub =
+      accounts === undefined
+        ? this.sql``
+        : accounts.length === 0
+          ? this.sql`WHERE false`
+          : this.sql`WHERE account = ANY(${accounts})`;
+    const rows = await this.sql<RawTestRun[]>`
+      SELECT * FROM test_runs ${sub} ORDER BY id DESC LIMIT ${limit}`;
+    return rows.map(toTestRun);
+  }
+
+  async setTestRunImageCount(id: number, imageCount: number): Promise<void> {
+    await this.sql`UPDATE test_runs SET image_count = ${imageCount} WHERE id = ${id}`;
   }
 
   async testRunNeighbors(repo: string, framework: string, id: number) {
