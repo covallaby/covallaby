@@ -1,4 +1,4 @@
-import { Check, Copy, GitBranch } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   Link,
@@ -16,6 +16,7 @@ import {
   formatPercent,
   severity,
 } from "../api.js";
+import { ScopePicker } from "../components/scope-picker.js";
 import { PageSkeleton } from "../components/skeleton.js";
 import {
   Card,
@@ -212,6 +213,7 @@ export function UploadsTable({
 
 export function RepoHeader({ repo, data }: { repo: string; data: RepoHistory }) {
   const [, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const latest = data.history[0];
   const setBranch = (b: string) =>
     setParams((prev) => {
@@ -230,25 +232,15 @@ export function RepoHeader({ repo, data }: { repo: string; data: RepoHistory }) 
         </p>
       </div>
       <div className="flex min-w-0 items-center gap-2">
-        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-(--border) bg-(--surface) px-2.5 text-(--ink-2) sm:w-64 sm:flex-none">
-          <GitBranch size={14} className="shrink-0 text-(--muted)" />
-          <span className="sr-only">Branch</span>
-          <select
-            aria-label="Branch"
-            value={data.branch}
-            onChange={(event) => setBranch(event.target.value)}
-            className="min-w-0 flex-1 appearance-none bg-transparent py-2 pr-4 font-mono text-xs font-medium text-(--ink) outline-none"
-          >
-            {data.branches.map((branch) => (
-              <option key={branch} value={branch}>
-                {branch}
-              </option>
-            ))}
-          </select>
-          <span className="shrink-0 text-[10px] text-(--muted)">
-            {data.branches.length} {data.branches.length === 1 ? "branch" : "branches"}
-          </span>
-        </label>
+        <ScopePicker
+          label="Branch or pull request"
+          current={data.branch}
+          branches={data.branches}
+          onSelectBranch={setBranch}
+          loadPullRequests={() => api.prs(repo).then((d) => d.prs)}
+          onSelectPullRequest={(pr) => navigate(`/r/${repo}/pr/${pr}`)}
+          className="flex-1 sm:w-64 sm:flex-none"
+        />
         <Link
           to={`/r/${repo}/compare?head=${encodeURIComponent(data.branch)}&base=main`}
           className="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-xs font-medium text-(--ink-2) transition-colors hover:border-(--muted) hover:text-(--ink)"
