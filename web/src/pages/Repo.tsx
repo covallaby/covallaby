@@ -16,6 +16,7 @@ import {
   formatPercent,
   severity,
 } from "../api.js";
+import { RepoTabs } from "../components/repo-tabs.js";
 import { ScopePicker } from "../components/scope-picker.js";
 import { PageSkeleton } from "../components/skeleton.js";
 import {
@@ -276,6 +277,7 @@ export function RepoLayout() {
   return (
     <div className="space-y-4">
       <RepoHeader repo={repo} data={data} />
+      <RepoTabs repo={repo} />
       <Outlet context={{ repo, data } satisfies RepoContext} />
     </div>
   );
