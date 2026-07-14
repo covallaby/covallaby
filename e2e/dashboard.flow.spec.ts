@@ -8,8 +8,8 @@ test("maintainer finds repository risk and reviews its coverage", async ({ page 
   await expect(page.getByText("Risk map")).toBeVisible();
   await expect(page.getByText("Needs attention", { exact: true })).toBeVisible();
   await expect(page.getByText("Confidence coverage", { exact: true })).toBeVisible();
-  await expect(page.getByText("Journey execution", { exact: true })).toBeVisible();
-  await expect(page.getByText("Component coverage", { exact: true })).toBeVisible();
+  await expect(page.getByText("Journeys", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Components", { exact: true }).first()).toBeVisible();
   await expect(page.locator('a[href="#/r/covallaby/server/commits"]')).toContainText(
     "Commit is missing journeys and components",
   );
