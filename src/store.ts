@@ -95,6 +95,12 @@ export interface TestRunRow {
   /** CI-supplied base commit (merge-base) for visual baseline resolution. */
   baseSha: string | null;
   reviewState: ReviewState;
+  /**
+   * Denormalized count of screenshot artifacts on the run. Written on create;
+   * null on rows recorded before the column existed (backfilled lazily on
+   * read), so list endpoints never need the per-run artifact N+1.
+   */
+  imageCount: number | null;
   createdAt: string;
   completedAt: string | null;
 }
@@ -125,6 +131,8 @@ export interface CreateTestRunInput {
   baseSha?: string | null;
   /** Defaults to "pending"; default-branch runs are created "auto-accepted". */
   reviewState?: ReviewState;
+  /** Number of screenshot artifacts in the run's manifest, when known. */
+  imageCount?: number | null;
 }
 
 /**
@@ -228,6 +236,16 @@ export interface Store {
   getTestRunRow?(id: number): Promise<TestRunRow | null>;
   getTestArtifactByName?(runId: number, name: string): Promise<TestArtifactRow | null>;
   listTestRuns?(repo: string, limit: number, framework?: string): Promise<TestRunRow[]>;
+  /**
+   * Latest test runs across every repo, newest first — the activity feed's
+   * runs side, account-scoped in SQL exactly like recentUploads. Never
+   * selects artifact rows or blobs. Optional: runtimes without test-run
+   * support (currently D1) leave it undefined and the feed degrades to
+   * uploads-only.
+   */
+  recentRuns?(limit: number, accounts?: string[]): Promise<TestRunRow[]>;
+  /** Lazy backfill for the denormalized screenshot count on pre-column rows. */
+  setTestRunImageCount?(id: number, imageCount: number): Promise<void>;
   /** The runs immediately before and after `id` for the same repo+framework — lateral navigation. */
   testRunNeighbors?(
     repo: string,

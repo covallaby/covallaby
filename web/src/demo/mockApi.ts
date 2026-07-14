@@ -1,4 +1,6 @@
 import type {
+  ActivityFeed,
+  ActivityItem,
   CompareResult,
   DirTrends,
   PolicyStatus,
@@ -8,6 +10,8 @@ import type {
   RepoHistory,
   RepoOverview,
   RepoPolicy,
+  StorybookPreview,
+  TestRun,
   UploadDetail,
   UploadRow,
 } from "../api.js";
@@ -145,6 +149,88 @@ function dirTrends(repo: string, branch?: string): DirTrends {
   return { repo, branch: resolved, steps, dirs };
 }
 
+// Demo Playwright (journey) and Storybook (component) runs for the flagship
+// repo, so the portfolio feed and the review pages exercise mixed-type rows.
+const DEMO_RUNS: TestRun[] = [
+  {
+    id: 42,
+    repo: "covallaby/covallaby",
+    branch: "feature/checkout-polish",
+    commit: "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
+    pr: 128,
+    framework: "playwright",
+    status: "complete",
+    testsPassed: 34,
+    testsFailed: 0,
+    testsSkipped: 2,
+    durationMs: 48210,
+    createdAt: "2026-07-11T18:42:00.000Z",
+    completedAt: "2026-07-11T18:43:02.000Z",
+  },
+  {
+    id: 41,
+    repo: "covallaby/covallaby",
+    branch: "main",
+    commit: "72d41f0dd8e6abfe280d9e340c277421f3607184",
+    pr: null,
+    framework: "playwright",
+    status: "complete",
+    testsPassed: 31,
+    testsFailed: 1,
+    testsSkipped: 1,
+    durationMs: 55900,
+    createdAt: "2026-07-10T16:14:00.000Z",
+    completedAt: "2026-07-10T16:15:12.000Z",
+  },
+];
+
+const DEMO_PREVIEWS: StorybookPreview[] = [
+  {
+    id: 18,
+    repo: "covallaby/covallaby",
+    branch: "feature/checkout-polish",
+    commit: "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
+    pr: 128,
+    framework: "storybook",
+    status: "complete",
+    testsPassed: 0,
+    testsFailed: 0,
+    testsSkipped: 0,
+    durationMs: 0,
+    createdAt: "2026-07-11T18:42:00.000Z",
+    completedAt: "2026-07-11T18:43:02.000Z",
+    reviewState: "pending",
+    imageCount: 24,
+  },
+  {
+    id: 17,
+    repo: "covallaby/covallaby",
+    branch: "main",
+    commit: "72d41f0dd8e6abfe280d9e340c277421f3607184",
+    pr: null,
+    framework: "storybook",
+    status: "complete",
+    testsPassed: 0,
+    testsFailed: 0,
+    testsSkipped: 0,
+    durationMs: 0,
+    createdAt: "2026-07-10T16:14:00.000Z",
+    completedAt: "2026-07-10T16:15:12.000Z",
+    reviewState: "auto-accepted",
+    imageCount: 19,
+  },
+];
+
+/** The demo's unified three-signal feed: fixtures + demo runs, newest first. */
+function activityFeed(): ActivityFeed {
+  const items: ActivityItem[] = [
+    ...F.activity.uploads.map((upload) => ({ type: "coverage" as const, ...upload })),
+    ...DEMO_RUNS.map((run) => ({ type: "journeys" as const, ...run })),
+    ...DEMO_PREVIEWS.map((preview) => ({ type: "components" as const, ...preview })),
+  ].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id - a.id);
+  return { uploads: F.activity.uploads, items, runsSupported: true };
+}
+
 // Demo-only sample policies so the Policy page shows both a pass and a fail.
 const DEMO_POLICIES: Record<string, RepoPolicy> = {
   "acme/megarepo": { minProject: 70, maxDrop: 1 },
@@ -243,7 +329,10 @@ export const demoApi = {
   repos: () => settle(F.repos),
   policy: (repo: string) => settle({ repo, policy: DEMO_POLICIES[repo] ?? null }),
   status: (repo: string) => settle(policyStatus(repo)),
-  activity: () => settle(F.activity),
+  activity: () => settle(activityFeed()),
+  testRuns: (repo: string) => settle({ runs: repo === "covallaby/covallaby" ? DEMO_RUNS : [] }),
+  storybookPreviews: (repo: string) =>
+    settle({ previews: repo === "covallaby/covallaby" ? DEMO_PREVIEWS : [] }),
   history: (repo: string, branch?: string) => {
     const key = branch ? `${repo}@${branch}` : repo;
     return settle(F.history[key] ?? F.history[repo] ?? notFound(`history for ${key}`));

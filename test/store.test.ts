@@ -243,6 +243,73 @@ describe.each(stores)("store contract (%s)", (_name, store) => {
     ]);
   });
 
+  it("serves recent runs across repos, newest first, scoped by account", async () => {
+    const run = (repo: string, commit: string, framework: string) =>
+      store.createTestRun!({
+        repo,
+        branch: "main",
+        commit,
+        pr: null,
+        framework,
+        testsPassed: 1,
+        testsFailed: 0,
+        testsSkipped: 0,
+        durationMs: 10,
+      });
+    await run("feed-org/api", "f1", "playwright");
+    await run("feed-org/web", "f2", "storybook");
+    await run("feed-other/app", "f3", "playwright");
+
+    // Unscoped: every account, newest first, regardless of repo or framework.
+    const recent = await store.recentRuns!(3);
+    expect(recent.map((r) => r.commit)).toEqual(["f3", "f2", "f1"]);
+
+    // Scoped like recentUploads: only the named accounts…
+    const scoped = await store.recentRuns!(50, ["feed-org"]);
+    expect(scoped.length).toBeGreaterThanOrEqual(2);
+    expect(scoped.every((r) => r.repo.startsWith("feed-org/"))).toBe(true);
+    expect(scoped[0]!.commit).toBe("f2");
+    // …and an empty scope sees nothing.
+    expect(await store.recentRuns!(50, [])).toEqual([]);
+  });
+
+  it("stores the denormalized image count on runs and backfills it lazily", async () => {
+    const withCount = await store.createTestRun!({
+      repo: "feed-org/images",
+      branch: "main",
+      commit: "img1",
+      pr: null,
+      framework: "storybook",
+      testsPassed: 0,
+      testsFailed: 0,
+      testsSkipped: 0,
+      durationMs: 0,
+      imageCount: 7,
+    });
+    expect(withCount.imageCount).toBe(7);
+    expect((await store.getTestRunRow!(withCount.id))?.imageCount).toBe(7);
+
+    // Omitted → null, the pre-column state the lazy backfill repairs.
+    const legacy = await store.createTestRun!({
+      repo: "feed-org/images",
+      branch: "main",
+      commit: "img2",
+      pr: null,
+      framework: "storybook",
+      testsPassed: 0,
+      testsFailed: 0,
+      testsSkipped: 0,
+      durationMs: 0,
+    });
+    expect(legacy.imageCount).toBeNull();
+    await store.setTestRunImageCount!(legacy.id, 3);
+    expect((await store.getTestRunRow!(legacy.id))?.imageCount).toBe(3);
+
+    // The feed read carries the column too.
+    const recent = await store.recentRuns!(2, ["feed-org"]);
+    expect(recent.map((r) => r.imageCount)).toEqual([3, 7]);
+  });
+
   it("round-trips the CI-supplied base SHA on uploads", async () => {
     const row = await store.recordUpload({
       repo: "acme/base-sha",

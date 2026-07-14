@@ -13,6 +13,20 @@ test("maintainer finds repository risk and reviews its coverage", async ({ page 
   await expect(page.locator('a[href="#/r/covallaby/server/commits"]')).toContainText(
     "Commit is missing journeys and components",
   );
+
+  // The unified activity feed mixes all three signals: a pinned review item,
+  // a failed journey run, and coverage rows — with green noise kept quiet.
+  await expect(page.getByText("Recent activity", { exact: true })).toBeVisible();
+  await expect(page.getByText("Component changes await review")).toBeVisible();
+  await expect(page.getByText("1 of 32 journeys failed")).toBeVisible();
+  await expect(page.getByText(/quiet update/).first()).toBeVisible();
+
+  // Filter chips narrow the chronology to one signal and share via ?type=.
+  await page.getByRole("button", { name: "Journeys", exact: true }).click();
+  await expect(page).toHaveURL(/type=journeys/);
+  await expect(page.getByText("1 of 32 journeys failed")).toBeVisible();
+  await page.getByRole("button", { name: "All", exact: true }).click();
+  await expect(page).not.toHaveURL(/type=/);
   await chapter(page, testInfo, "01-portfolio-health");
 
   await page.locator('a[href="#/r/covallaby/covallaby"]').first().click();

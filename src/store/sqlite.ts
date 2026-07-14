@@ -53,9 +53,11 @@ CREATE TABLE IF NOT EXISTS test_runs (
   tests_passed INTEGER NOT NULL DEFAULT 0, tests_failed INTEGER NOT NULL DEFAULT 0,
   tests_skipped INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
   base_sha TEXT, review_state TEXT NOT NULL DEFAULT 'pending',
+  account TEXT NOT NULL DEFAULT '', image_count INTEGER,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), completed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_test_runs_repo_time ON test_runs(repo, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_test_runs_account ON test_runs(account);
 CREATE TABLE IF NOT EXISTS test_artifacts (
   id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
   name TEXT NOT NULL, kind TEXT NOT NULL, content_type TEXT NOT NULL, size_bytes INTEGER NOT NULL,
@@ -107,7 +109,7 @@ const ROW_COLUMNS =
   "id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at";
 
 const TEST_RUN_COLUMNS =
-  "id, repo, branch, commit_sha, pr, framework, status, tests_passed, tests_failed, tests_skipped, duration_ms, base_sha, review_state, created_at, completed_at";
+  "id, repo, branch, commit_sha, pr, framework, status, tests_passed, tests_failed, tests_skipped, duration_ms, base_sha, review_state, image_count, created_at, completed_at";
 
 type RawTestRun = {
   id: number;
@@ -123,6 +125,7 @@ type RawTestRun = {
   duration_ms: number;
   base_sha: string | null;
   review_state: ReviewState;
+  image_count: number | null;
   created_at: string;
   completed_at: string | null;
 };
@@ -154,6 +157,7 @@ function toTestRun(r: RawTestRun): TestRunRow {
     durationMs: r.duration_ms,
     baseSha: r.base_sha,
     reviewState: r.review_state,
+    imageCount: r.image_count,
     createdAt: r.created_at,
     completedAt: r.completed_at,
   };
@@ -220,6 +224,8 @@ export class SqliteStore implements Store {
       "ALTER TABLE uploads ADD COLUMN base_sha TEXT",
       "ALTER TABLE test_runs ADD COLUMN base_sha TEXT",
       "ALTER TABLE test_runs ADD COLUMN review_state TEXT NOT NULL DEFAULT 'pending'",
+      "ALTER TABLE test_runs ADD COLUMN account TEXT NOT NULL DEFAULT ''",
+      "ALTER TABLE test_runs ADD COLUMN image_count INTEGER",
     ]) {
       try {
         this.db.exec(ddl);
@@ -227,6 +233,13 @@ export class SqliteStore implements Store {
         // column already exists
       }
     }
+    // Backfill the tenant column for runs recorded before it existed, so the
+    // account-scoped feed query never misses old rows.
+    this.db.exec(
+      `UPDATE test_runs SET account = CASE
+         WHEN instr(repo, '/') > 0 THEN substr(repo, 1, instr(repo, '/') - 1) ELSE repo
+       END WHERE account = ''`,
+    );
     // Mainline never needs review: conventional default-branch runs recorded
     // before (or without) the auto-accept logic become baseline-eligible.
     this.db.exec(
@@ -502,8 +515,8 @@ export class SqliteStore implements Store {
   async createTestRun(input: CreateTestRunInput): Promise<TestRunRow> {
     const result = this.db
       .prepare(
-        `INSERT INTO test_runs (repo, branch, commit_sha, pr, framework, tests_passed, tests_failed, tests_skipped, duration_ms, base_sha, review_state)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO test_runs (repo, branch, commit_sha, pr, framework, tests_passed, tests_failed, tests_skipped, duration_ms, base_sha, review_state, account, image_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.repo,
@@ -517,6 +530,8 @@ export class SqliteStore implements Store {
         input.durationMs,
         input.baseSha ?? null,
         input.reviewState ?? "pending",
+        accountOf(input.repo),
+        input.imageCount ?? null,
       );
     const row = this.db
       .prepare(`SELECT ${TEST_RUN_COLUMNS} FROM test_runs WHERE id = ?`)
@@ -603,6 +618,20 @@ export class SqliteStore implements Store {
           )
           .all(repo, limit) as unknown as RawTestRun[]);
     return rows.map(toTestRun);
+  }
+
+  async recentRuns(limit: number, accounts?: string[]): Promise<TestRunRow[]> {
+    // Feed query: fixed columns only (never the artifact table), newest first
+    // on the primary key — the same shape and scope as recentUploads.
+    const scope = accountFilter(accounts);
+    const rows = this.db
+      .prepare(`SELECT ${TEST_RUN_COLUMNS} FROM test_runs ${scope.sub} ORDER BY id DESC LIMIT ?`)
+      .all(...scope.params, limit) as unknown as RawTestRun[];
+    return rows.map(toTestRun);
+  }
+
+  async setTestRunImageCount(id: number, imageCount: number): Promise<void> {
+    this.db.prepare("UPDATE test_runs SET image_count = ? WHERE id = ?").run(imageCount, id);
   }
 
   async testRunNeighbors(repo: string, framework: string, id: number) {

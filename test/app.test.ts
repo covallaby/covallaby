@@ -258,13 +258,13 @@ describe("browser test artifacts", () => {
     ).json();
     expect(previews.previews).toHaveLength(1);
     expect(previews.previews[0].framework).toBe("storybook");
-    expect(previews.previews[0]).toMatchObject({ artifactCount: 3, imageCount: 1 });
+    expect(previews.previews[0]).toMatchObject({ imageCount: 1 });
     const reviewSignals = await (
       await artifactApp.request("/api/v1/review-signals?repo=acme/app")
     ).json();
     expect(reviewSignals.repositories[0]).toMatchObject({
       repo: "acme/app",
-      previews: [{ artifactCount: 3, imageCount: 1 }],
+      previews: [{ imageCount: 1 }],
     });
 
     const detail = await (
@@ -1115,5 +1115,80 @@ describe("ignore paths on upload", () => {
     const detail = await (await app.request(`/api/v1/uploads/${id}`)).json();
     expect(detail.files.map((f: { path: string }) => f.path)).toEqual(["src/a.ts"]);
     expect(detail.totals.lines.total).toBe(2); // only src/a.ts counted
+  });
+});
+
+describe("unified activity feed", () => {
+  const seedUpload = (feedApp: ReturnType<typeof createApp>, query: string) =>
+    feedApp.request(`/api/v1/upload?${query}`, {
+      method: "POST",
+      headers: { authorization: "Bearer sekret" },
+      body: lcov,
+    });
+
+  it("merges uploads and runs into a typed, newest-first feed", async () => {
+    const db = new SqliteStore(":memory:");
+    const feedApp = createApp({ store: db, uploadToken: "sekret" });
+    await seedUpload(feedApp, "repo=acme/app&branch=main&commit=c1");
+    await db.createTestRun({
+      repo: "acme/app",
+      branch: "main",
+      commit: "c2",
+      pr: null,
+      framework: "playwright",
+      testsPassed: 3,
+      testsFailed: 1,
+      testsSkipped: 0,
+      durationMs: 5,
+    });
+    await db.createTestRun({
+      repo: "acme/web",
+      branch: "feat/x",
+      commit: "c3",
+      pr: 7,
+      framework: "storybook",
+      testsPassed: 0,
+      testsFailed: 0,
+      testsSkipped: 0,
+      durationMs: 0,
+      imageCount: 4,
+    });
+
+    const data = await (await feedApp.request("/api/v1/activity")).json();
+    expect(data.runsSupported).toBe(true);
+    // The legacy coverage-only key survives for older consumers.
+    expect(data.uploads).toHaveLength(1);
+    expect(data.items.map((item: { type: string }) => item.type).sort()).toEqual([
+      "components",
+      "coverage",
+      "journeys",
+    ]);
+    const times = data.items.map((item: { createdAt: string }) => Date.parse(item.createdAt));
+    expect([...times].sort((a: number, b: number) => b - a)).toEqual(times);
+    expect(data.items.find((item: { type: string }) => item.type === "components")).toMatchObject({
+      repo: "acme/web",
+      pr: 7,
+      imageCount: 4,
+      reviewState: "pending",
+    });
+    expect(data.items.find((item: { type: string }) => item.type === "journeys")).toMatchObject({
+      repo: "acme/app",
+      testsFailed: 1,
+    });
+    // The feed never carries report blobs or artifact rows.
+    expect(data.items.every((item: object) => !("report" in item) && !("artifacts" in item))).toBe(
+      true,
+    );
+  });
+
+  it("degrades to uploads-only on stores without test-run support (D1)", async () => {
+    const db = new SqliteStore(":memory:");
+    Object.defineProperty(db, "recentRuns", { value: undefined });
+    const feedApp = createApp({ store: db, uploadToken: "sekret" });
+    await seedUpload(feedApp, "repo=acme/app&branch=main&commit=solo");
+
+    const data = await (await feedApp.request("/api/v1/activity")).json();
+    expect(data.runsSupported).toBe(false);
+    expect(data.items.map((item: { type: string }) => item.type)).toEqual(["coverage"]);
   });
 });

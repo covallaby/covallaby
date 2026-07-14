@@ -100,6 +100,23 @@ export function PortfolioReviewQueue({ repos }: { repos: RepoOverview[] }) {
           tone: "bad",
           icon: AlertTriangle,
         });
+      } else if (
+        check?.components?.reviewState === "pending" &&
+        check.components.status === "complete"
+      ) {
+        const preview = check.components;
+        review.push({
+          id: `preview-${preview.id}`,
+          priority: 0,
+          createdAt: preview.createdAt,
+          repo: repo.repo,
+          title: "Component changes await review",
+          detail: preview.pr ? `PR #${preview.pr} · ${preview.branch}` : preview.branch,
+          href: `/r/${repo.repo}/storybook-previews/${preview.id}`,
+          action: "Review captures",
+          tone: "review",
+          icon: AlertTriangle,
+        });
       } else if (check?.status === "partial" && check.commit === repo.latest.commit) {
         review.push({
           id: `commit-${check.commit}`,
@@ -135,15 +152,14 @@ export function PortfolioReviewQueue({ repos }: { repos: RepoOverview[] }) {
   }, [repos, visual]);
 
   return (
-    <Card className="mb-4 overflow-hidden">
-      <CardHeader
-        title="Needs attention"
-        description="The newest changes worth reviewing across your repositories"
-      />
+    <section aria-label="Needs attention" className="border-b border-(--hairline)">
+      <div className="px-5 pt-3 pb-1 text-xs font-semibold tracking-tight text-(--ink-2)">
+        Needs attention
+      </div>
       {!items ? (
-        <p className="px-5 pb-5 text-sm text-(--muted)">Checking the latest CI activity…</p>
+        <p className="px-5 pb-3 text-sm text-(--muted)">Checking the latest CI activity…</p>
       ) : items.length === 0 ? (
-        <div className="flex items-center gap-3 px-5 pb-5 text-sm text-(--ink-2)">
+        <div className="flex items-center gap-3 px-5 pb-3 text-sm text-(--ink-2)">
           <CheckCircle2 size={18} className="text-(--good)" /> Nothing needs review right now.
         </div>
       ) : (
@@ -184,7 +200,7 @@ export function PortfolioReviewQueue({ repos }: { repos: RepoOverview[] }) {
           })}
         </div>
       )}
-    </Card>
+    </section>
   );
 }
 
