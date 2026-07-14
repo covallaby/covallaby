@@ -8,8 +8,8 @@ test("maintainer finds repository risk and reviews its coverage", async ({ page 
   await expect(page.getByText("Risk map")).toBeVisible();
   await expect(page.getByText("Needs attention", { exact: true })).toBeVisible();
   await expect(page.getByText("Confidence coverage", { exact: true })).toBeVisible();
-  await expect(page.getByText("Journey execution", { exact: true })).toBeVisible();
-  await expect(page.getByText("Component coverage", { exact: true })).toBeVisible();
+  await expect(page.getByText("Journeys", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Components", { exact: true }).first()).toBeVisible();
   await expect(page.locator('a[href="#/r/covallaby/server/commits"]')).toContainText(
     "Commit is missing journeys and components",
   );
@@ -21,11 +21,9 @@ test("maintainer finds repository risk and reviews its coverage", async ({ page 
   await expect(page.getByLabel("Branch")).toHaveValue("main");
   await expect(page.getByRole("link", { name: "Compare", exact: true })).toBeVisible();
   await expect(page.getByText("Incomplete", { exact: true })).toBeVisible();
-  await expect(
-    page.getByText(/One commit, with code, journey, and component evidence/),
-  ).toBeVisible();
-  await expect(page.getByRole("link", { name: /Journeys 34 passed/ })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Components 24 states/ })).toBeVisible();
+  await expect(page.getByText(/One commit, three independent signals/)).toBeVisible();
+  await expect(page.getByRole("link", { name: /Journeys.*34 passed/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Components.*24 states/ })).toBeVisible();
   await chapter(page, testInfo, "02-repository-summary");
 
   await page.getByRole("link", { name: "Commits", exact: true }).click();

@@ -3,22 +3,32 @@ import {
   ArrowRight,
   type BookOpen,
   CheckCircle2,
+  ChevronDown,
   CirclePlay,
   GitPullRequest,
   Images,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   type RepoOverview,
   type ReviewSignals,
-  type StorybookPreview,
-  type TestRun,
   api,
   formatPercent,
   shortRepoName,
 } from "../api.js";
 import { buildCommitChecks } from "../checks.js";
+import {
+  InfoHint,
+  SIGNALS,
+  STATES_HINT,
+  type SignalBreakdown,
+  type SignalDefinition,
+  type SignalKey,
+  isSignalKey,
+  signalByKey,
+  summarizeSignals,
+} from "./confidence-signals.js";
 import { Card, CardHeader } from "./ui.js";
 
 function useVisualState(repo?: string) {
@@ -200,7 +210,7 @@ export function RepositoryCommitStatus({
             {check.pr ? <span className="text-xs text-(--muted)">PR #{check.pr}</span> : null}
           </div>
           <p className="mt-1 text-xs text-(--muted)">
-            One commit, with code, journey, and component evidence matched by SHA
+            One commit, three independent signals (Code · Journeys · Components) matched by SHA
           </p>
         </div>
         <Link
@@ -212,8 +222,9 @@ export function RepositoryCommitStatus({
       </div>
       <div className="grid divide-y divide-(--hairline) sm:grid-cols-3 sm:divide-x sm:divide-y-0">
         <SnapshotCell
-          icon={CheckCircle2}
-          label="Code"
+          icon={signalByKey.code.icon}
+          label={signalByKey.code.label}
+          info={signalByKey.code.definition}
           value={check.coverage ? formatPercent(check.coverage.percent) : "Missing"}
           detail={
             check.coverage
@@ -223,8 +234,9 @@ export function RepositoryCommitStatus({
           href={check.coverage ? `/r/${repo}/u/${check.coverage.id}` : `/r/${repo}/uploads`}
         />
         <SnapshotCell
-          icon={CirclePlay}
-          label="Journeys"
+          icon={signalByKey.journeys.icon}
+          label={signalByKey.journeys.label}
+          info={signalByKey.journeys.definition}
           value={
             check.journey
               ? `${check.journey.testsPassed} passed${check.journey.testsFailed ? ` · ${check.journey.testsFailed} failed` : ""}`
@@ -234,11 +246,14 @@ export function RepositoryCommitStatus({
           href={check.journey ? `/r/${repo}/test-runs/${check.journey.id}` : `/r/${repo}/playbacks`}
         />
         <SnapshotCell
-          icon={Images}
-          label="Components"
+          icon={signalByKey.components.icon}
+          label={signalByKey.components.label}
+          info={`${signalByKey.components.definition} ${STATES_HINT}`}
           value={check.components ? `${check.components.imageCount ?? 0} states` : "Missing"}
           detail={
-            check.components ? "Captured visual evidence" : "No component captures for this SHA"
+            check.components
+              ? "Rendered states captured from Storybook"
+              : "No component captures for this SHA"
           }
           href={
             check.components
@@ -253,17 +268,36 @@ export function RepositoryCommitStatus({
 
 export function PortfolioConfidenceCoverage({ repos }: { repos: RepoOverview[] }) {
   const visual = useVisualState();
+  const [params, setParams] = useSearchParams();
   if (!visual) return null;
-  const states = repos.map((repo) => visual.find((entry) => entry.repo === repo.repo));
-  const latestRuns = states.map((state) => state?.runs[0]).filter(Boolean) as TestRun[];
-  const latestPreviews = states
-    .map((state) => state?.previews[0])
-    .filter(Boolean) as StorybookPreview[];
-  const journeys = latestRuns.reduce(
-    (total, run) => total + run.testsPassed + run.testsFailed + run.testsSkipped,
-    0,
-  );
-  const captures = latestPreviews.reduce((total, preview) => total + (preview.imageCount ?? 0), 0);
+  const summary = summarizeSignals(repos, visual);
+  const rawSignal = params.get("signal");
+  const selected: SignalKey | null = isSignalKey(rawSignal) ? rawSignal : null;
+  const toggle = (key: SignalKey) => {
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (selected === key) next.delete("signal");
+        else next.set("signal", key);
+        return next;
+      },
+      { replace: true },
+    );
+  };
+  const headline: Record<SignalKey, { value: string; sub: string }> = {
+    code: {
+      value: `${summary.breakdown.code.reporting.length}/${repos.length}`,
+      sub: "repositories reporting line coverage",
+    },
+    journeys: {
+      value: summary.journeyTests.toLocaleString(),
+      sub: `tests across ${summary.breakdown.journeys.reporting.length}/${repos.length} repositories`,
+    },
+    components: {
+      value: summary.componentStates.toLocaleString(),
+      sub: `states across ${summary.breakdown.components.reporting.length}/${repos.length} repositories`,
+    },
+  };
   return (
     <Card className="mb-4 overflow-hidden">
       <CardHeader
@@ -271,41 +305,122 @@ export function PortfolioConfidenceCoverage({ repos }: { repos: RepoOverview[] }
         description="Three independent signals—never rolled into a misleading combined score"
       />
       <div className="grid divide-y divide-(--hairline) sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-        <div className="p-4 sm:p-5">
-          <div className="text-xs font-medium text-(--muted)">Code coverage</div>
-          <div className="mt-2 text-2xl font-semibold">
-            {repos.length}/{repos.length}
-          </div>
-          <div className="mt-1 text-xs text-(--muted)">repositories reporting line coverage</div>
-        </div>
-        <div className="p-4 sm:p-5">
-          <div className="text-xs font-medium text-(--muted)">Journey execution</div>
-          <div className="mt-2 text-2xl font-semibold">{journeys}</div>
-          <div className="mt-1 text-xs text-(--muted)">
-            tests across {latestRuns.length}/{repos.length} repositories
-          </div>
-        </div>
-        <div className="p-4 sm:p-5">
-          <div className="text-xs font-medium text-(--muted)">Component coverage</div>
-          <div className="mt-2 text-2xl font-semibold">{captures}</div>
-          <div className="mt-1 text-xs text-(--muted)">
-            states across {latestPreviews.length}/{repos.length} repositories
-          </div>
-        </div>
+        {SIGNALS.map((signal) => {
+          const Icon = signal.icon;
+          const open = selected === signal.key;
+          return (
+            <button
+              key={signal.key}
+              type="button"
+              onClick={() => toggle(signal.key)}
+              aria-expanded={open}
+              aria-controls="confidence-signal-drilldown"
+              title={signal.definition}
+              className={`p-4 text-left transition-colors hover:bg-(--surface-2) sm:p-5 ${
+                open ? "bg-(--surface-2)" : ""
+              }`}
+            >
+              <span className="flex items-center gap-1.5 text-xs font-medium text-(--muted)">
+                <Icon size={14} /> {signal.label}
+                <ChevronDown
+                  size={13}
+                  className={`ml-auto transition-transform ${open ? "rotate-180" : ""}`}
+                  aria-hidden="true"
+                />
+              </span>
+              <span className="mt-2 block text-2xl font-semibold">
+                {headline[signal.key].value}
+              </span>
+              <span className="mt-1 block text-xs text-(--muted)">{headline[signal.key].sub}</span>
+            </button>
+          );
+        })}
       </div>
+      {selected ? (
+        <SignalDrilldown
+          signal={signalByKey[selected]}
+          breakdown={summary.breakdown[selected]}
+          total={repos.length}
+        />
+      ) : null}
     </Card>
+  );
+}
+
+function RepoChipLink({ repo, href }: { repo: string; href: string }) {
+  return (
+    <Link
+      to={href}
+      className="rounded-full border border-(--hairline) bg-(--surface) px-2.5 py-1 font-mono text-[11px] text-(--ink-2) transition-colors hover:border-(--muted) hover:text-(--ink)"
+    >
+      {repo}
+    </Link>
+  );
+}
+
+/** The expandable "which repos?" panel under a selected confidence tile. */
+function SignalDrilldown({
+  signal,
+  breakdown,
+  total,
+}: {
+  signal: SignalDefinition;
+  breakdown: SignalBreakdown;
+  total: number;
+}) {
+  return (
+    <div
+      id="confidence-signal-drilldown"
+      className="border-t border-(--hairline) px-4 py-4 sm:px-5"
+    >
+      <p className="text-xs text-(--ink-2)">
+        <span className="font-semibold">{signal.label}:</span> {signal.definition}
+      </p>
+      {breakdown.missing.length === 0 ? (
+        <p className="mt-3 flex items-center gap-2 text-xs text-(--ink-2)">
+          <CheckCircle2 size={14} className="shrink-0 text-(--good)" />
+          {total === 1 ? "Your repository reports" : `All ${total} repositories report`} this
+          signal. Lovely.
+        </p>
+      ) : (
+        <div className="mt-3">
+          <p className="text-xs font-medium text-(--muted)">
+            Not reporting yet ({breakdown.missing.length} of {total}) · {signal.missingHint}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {breakdown.missing.map((repo) => (
+              <RepoChipLink key={repo} repo={repo} href={signal.setupHref(repo)} />
+            ))}
+          </div>
+        </div>
+      )}
+      {breakdown.reporting.length > 0 && breakdown.missing.length > 0 ? (
+        <div className="mt-3">
+          <p className="text-xs font-medium text-(--muted)">
+            Reporting ({breakdown.reporting.length})
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {breakdown.reporting.map((repo) => (
+              <RepoChipLink key={repo} repo={repo} href={`/r/${repo}`} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
 function SnapshotCell({
   icon: Icon,
   label,
+  info,
   value,
   detail,
   href,
 }: {
   icon: typeof BookOpen;
   label: string;
+  info?: string;
   value: string;
   detail: string;
   href: string;
@@ -313,7 +428,7 @@ function SnapshotCell({
   return (
     <Link to={href} className="group min-w-0 p-4 transition-colors hover:bg-(--surface-2) sm:p-5">
       <span className="flex items-center gap-2 text-xs font-medium text-(--muted)">
-        <Icon size={14} /> {label}
+        <Icon size={14} /> {label} {info ? <InfoHint text={info} /> : null}
       </span>
       <span className="mt-2 block truncate text-[15px] font-semibold group-hover:underline">
         {value}
