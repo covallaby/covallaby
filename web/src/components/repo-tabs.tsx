@@ -12,9 +12,13 @@ export interface RepoTab {
 export const REPO_TABS: RepoTab[] = [
   { label: "Overview", to: "" },
   { label: "Commits", to: "commits" },
-  { label: "Uploads", to: "uploads", match: ["u"] },
-  { label: "Journeys", to: "playbacks", match: ["test-runs"] },
-  { label: "Captures", to: "storybook-previews" },
+  {
+    label: "Activity",
+    to: "activity",
+    // Evidence details (uploads, journey runs, capture previews) highlight
+    // Activity; the legacy list segments keep it lit while they redirect here.
+    match: ["u", "test-runs", "storybook-previews", "uploads", "playbacks"],
+  },
   { label: "Pull requests", to: "pulls", match: ["pr", "compare"] },
   { label: "Insights", to: "insights" },
   { label: "Policy", to: "policy" },

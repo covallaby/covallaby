@@ -1577,6 +1577,34 @@ export function createApp({
     return c.json({ uploads, items, runsSupported });
   });
 
+  // The same unified feed, scoped to one repository — the repo's Activity tab.
+  // All branches by default; `?branch=` narrows both sides to one lane. Built
+  // from the existing per-repo queries (history for uploads, listTestRuns for
+  // both frameworks), so it reads fixed indexed columns and never selects
+  // report blobs or artifact rows.
+  app.get("/api/v1/repos/:owner/:name/activity", async (c) => {
+    const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
+    const branch = c.req.query("branch") ?? null;
+    const branches = branch ? [branch] : await store.branches(repo);
+    const lanes = await Promise.all(branches.map((lane) => store.history(repo, lane, 40)));
+    const runsSupported = Boolean(store.listTestRuns);
+    const runs = runsSupported
+      ? (await store.listTestRuns!(repo, 60)).filter(
+          (run) => branch === null || run.branch === branch,
+        )
+      : [];
+    const items: ActivityItem[] = [
+      ...lanes.flat().map((upload) => ({ type: "coverage" as const, ...upload })),
+      ...runs.map((run) => ({
+        type: run.framework === "storybook" ? ("components" as const) : ("journeys" as const),
+        ...run,
+      })),
+    ]
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id - a.id)
+      .slice(0, 60);
+    return c.json({ repo, branch, items, runsSupported });
+  });
+
   // Mint (or rotate) a per-repo upload token. Admin token required.
   app.post("/api/v1/repos/:owner/:name/token", async (c) => {
     const token = bearer(c.req.header("authorization"));

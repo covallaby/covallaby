@@ -252,7 +252,7 @@ export function RepositoryCommitStatus({
               ? `${check.coverage.linesCovered.toLocaleString()} of ${check.coverage.linesTotal.toLocaleString()} lines`
               : "No coverage for this SHA"
           }
-          href={check.coverage ? `/r/${repo}/u/${check.coverage.id}` : `/r/${repo}/uploads`}
+          href={check.coverage ? `/r/${repo}/u/${check.coverage.id}` : `/r/${repo}/activity`}
         />
         <SnapshotCell
           icon={signalByKey.journeys.icon}
@@ -264,7 +264,7 @@ export function RepositoryCommitStatus({
               : "Missing"
           }
           detail={check.journey ? "Recorded browser evidence" : "No Playwright run for this SHA"}
-          href={check.journey ? `/r/${repo}/test-runs/${check.journey.id}` : `/r/${repo}/playbacks`}
+          href={check.journey ? `/r/${repo}/test-runs/${check.journey.id}` : `/r/${repo}/activity`}
         />
         <SnapshotCell
           icon={signalByKey.components.icon}
@@ -281,7 +281,7 @@ export function RepositoryCommitStatus({
           href={
             check.components
               ? `/r/${repo}/storybook-previews/${check.components.id}`
-              : `/r/${repo}/storybook-previews`
+              : `/r/${repo}/activity`
           }
         />
       </div>

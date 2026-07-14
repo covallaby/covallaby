@@ -1,20 +1,15 @@
 import {
-  AlertCircle,
   Bug,
   Camera,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  CirclePlay,
   Download,
   FileArchive,
-  GitCommit,
-  GitPullRequest,
   Images,
   Maximize2,
   Monitor,
   Play,
-  RotateCw,
   Scan,
   StretchHorizontal,
   XCircle,
@@ -24,183 +19,16 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { type Neighbors, type TestArtifact, type TestRun, api } from "../api.js";
-import { CommitStrip, commitHref, useCommitSiblings } from "../components/commit-strip.js";
+import { CommitStrip, useCommitSiblings } from "../components/commit-strip.js";
 import { LateralNav } from "../components/lateral-nav.js";
-import { Card, CardHeader, Stat, Td, Th } from "../components/ui.js";
+import { Card, CardHeader, Stat } from "../components/ui.js";
 import { buildPlaybackLibrary, shortJourneyName } from "../playback.js";
-import { useRepo } from "./Repo.js";
 
 const when = (iso: string) =>
   new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
     new Date(iso),
   );
 const duration = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
-
-export function Playbacks() {
-  const { repo, data } = useRepo();
-  const [runs, setRuns] = useState<TestRun[] | null>(null);
-  const [error, setError] = useState(false);
-  const [request, setRequest] = useState(0);
-  useEffect(() => {
-    void request;
-    setRuns(null);
-    setError(false);
-    api
-      .testRuns(repo)
-      .then((r) => setRuns(r.runs))
-      .catch(() => setError(true));
-  }, [repo, request]);
-  return (
-    <Card>
-      <CardHeader
-        title="Playwright runs"
-        description="Watch the browser flows CI exercised, with traces and screenshots beside them."
-      />
-      {error ? (
-        <div className="mx-5 mb-5 flex items-start justify-between gap-4 rounded-xl border border-(--bad)/25 bg-(--bad)/5 p-4">
-          <div className="flex gap-3">
-            <AlertCircle className="mt-0.5 shrink-0 text-(--bad)" size={18} />
-            <div>
-              <p className="text-sm font-medium">We couldn't load Playwright runs.</p>
-              <p className="mt-1 text-xs text-(--muted)">
-                Your recordings are still safe. Check the connection and try again.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setRequest((value) => value + 1)}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-(--border) bg-(--surface) px-2.5 py-1.5 text-xs font-medium hover:border-(--muted)"
-          >
-            <RotateCw size={13} /> Retry
-          </button>
-        </div>
-      ) : !runs ? (
-        <p className="px-5 pb-5 text-sm text-(--muted)">Loading Playwright runs…</p>
-      ) : runs.length === 0 ? (
-        <div className="px-5 pb-6 text-sm text-(--muted)">
-          <p>
-            No Playwright runs yet. Add{" "}
-            <code className="rounded bg-(--surface-2) px-1.5 py-0.5">playwright-results</code> to
-            the Covallaby Action and the first run will appear here.
-          </p>
-        </div>
-      ) : (
-        <>
-          <div className="space-y-2 px-3 pb-3 md:hidden">
-            {runs.map((run) => (
-              <Link
-                key={run.id}
-                to={`/r/${repo}/test-runs/${run.id}`}
-                className="block rounded-xl border border-(--border) bg-(--surface-2)/45 p-3.5 active:bg-(--surface-2)"
-              >
-                <div className="flex items-start gap-2.5">
-                  {run.testsFailed ? (
-                    <XCircle className="mt-0.5 shrink-0 text-(--bad)" size={18} />
-                  ) : (
-                    <CirclePlay className="mt-0.5 shrink-0 text-(--good)" size={18} />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="min-w-0 truncate text-sm font-medium">
-                        {run.pr ? `PR #${run.pr}` : run.branch}
-                      </span>
-                      <span className="shrink-0 text-[11px] text-(--muted)">
-                        {duration(run.durationMs)}
-                      </span>
-                    </div>
-                    <p className="mt-1 truncate font-mono text-[11px] text-(--muted)">
-                      {run.commit.slice(0, 10)} · {when(run.createdAt)}
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-                      <span className="text-(--good)">{run.testsPassed} passed</span>
-                      {run.testsFailed ? (
-                        <span className="text-(--bad)">{run.testsFailed} failed</span>
-                      ) : null}
-                      {run.testsSkipped ? (
-                        <span className="text-(--muted)">{run.testsSkipped} skipped</span>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </div>
-          <div className="hidden overflow-x-auto md:block">
-            <table className="w-full min-w-[760px] text-[13.5px]">
-              <thead>
-                <tr>
-                  <Th>Run</Th>
-                  <Th>Commit</Th>
-                  <Th>When</Th>
-                  <Th right>Tests</Th>
-                  <Th right>Duration</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map((run) => (
-                  <tr key={run.id} className="hover:bg-(--surface-2)">
-                    <Td>
-                      <Link
-                        className="font-medium hover:underline"
-                        to={`/r/${repo}/test-runs/${run.id}`}
-                      >
-                        {run.testsFailed ? (
-                          <XCircle className="mr-2 inline text-(--bad)" size={16} />
-                        ) : (
-                          <CirclePlay className="mr-2 inline text-(--good)" size={16} />
-                        )}
-                        {run.pr ? `PR #${run.pr} Playwright run` : `${run.branch} Playwright run`}
-                      </Link>
-                    </Td>
-                    <Td>
-                      <Link
-                        className="font-mono text-xs hover:underline"
-                        to={commitHref(repo, run.commit, data.history)}
-                        title="Open this commit in Covallaby"
-                      >
-                        {run.commit.slice(0, 10)}
-                      </Link>
-                      <a
-                        className="ml-2 inline-flex text-(--muted) hover:text-(--ink)"
-                        href={`https://github.com/${repo}/commit/${run.commit}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label="Open commit on GitHub"
-                      >
-                        <GitCommit size={14} />
-                      </a>
-                      {run.pr ? (
-                        <a
-                          className="ml-2 inline-flex items-center gap-1 text-(--muted) hover:text-(--ink)"
-                          href={`https://github.com/${repo}/pull/${run.pr}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          <GitPullRequest size={14} />#{run.pr}
-                        </a>
-                      ) : null}
-                    </Td>
-                    <Td className="text-(--muted)">{when(run.createdAt)}</Td>
-                    <Td className="text-right">
-                      <span className="text-(--good)">{run.testsPassed} passed</span>
-                      {run.testsFailed ? (
-                        <span className="ml-2 text-(--bad)">{run.testsFailed} failed</span>
-                      ) : null}
-                    </Td>
-                    <Td className="text-right tabular-nums text-(--muted)">
-                      {duration(run.durationMs)}
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </Card>
-  );
-}
 
 type ViewerTab = "steps" | "video" | "trace" | "files";
 type ImageMode = "screen" | "width" | "zoom";

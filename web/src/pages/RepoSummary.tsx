@@ -1,10 +1,60 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
-import { formatPercent, severity } from "../api.js";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { type RepoActivityFeed, api, formatPercent, severity } from "../api.js";
+import { FeedRow } from "../components/activity-feed.js";
 import { HistoryChart } from "../components/charts.js";
 import { RepositoryCommitStatus } from "../components/review-overview.js";
 import { Card, CardHeader, DeltaChip, inkFor } from "../components/ui.js";
-import { BadgeCard, NeedsLove, RANGES, StatCard, UploadsTable, useRepo, when } from "./Repo.js";
+import { buildFeed } from "../feed.js";
+import { BadgeCard, NeedsLove, RANGES, StatCard, useRepo, when } from "./Repo.js";
+
+/**
+ * A five-row taste of the repo's unified Activity feed — the same rows the
+ * Activity tab renders (all three signals, no repo badge), without the chips
+ * or quiet-collapse. "View all →" hands off to the full tab.
+ */
+function RecentActivityCard({ repo }: { repo: string }) {
+  const [params] = useSearchParams();
+  const branch = params.get("branch") ?? undefined;
+  const [feed, setFeed] = useState<RepoActivityFeed | null>(null);
+  useEffect(() => {
+    setFeed(null);
+    api
+      .repoActivity(repo, branch)
+      .then(setFeed)
+      .catch(() => setFeed({ repo, branch: branch ?? null, items: [], runsSupported: true }));
+  }, [repo, branch]);
+  const entries = feed ? buildFeed(feed.items).slice(0, 5) : null;
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader
+        title="Recent activity"
+        description={branch ? `Newest on ${branch}` : "Newest across every branch"}
+        action={
+          <Link
+            to={`/r/${repo}/activity`}
+            className="text-[12.5px] text-(--muted) hover:text-(--ink)"
+          >
+            View all →
+          </Link>
+        }
+      />
+      {!entries ? (
+        <p className="px-5 pb-4 text-sm text-(--muted)">Fetching the latest activity…</p>
+      ) : entries.length === 0 ? (
+        <p className="px-5 pb-4 text-sm text-(--muted)">
+          Quiet in here — activity from CI will hop in soon. 🦘
+        </p>
+      ) : (
+        <div className="divide-y divide-(--hairline) border-t border-(--hairline)">
+          {entries.map((entry) => (
+            <FeedRow key={entry.key} entry={entry} />
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 export function Summary() {
   const { repo, data } = useRepo();
@@ -94,25 +144,7 @@ export function Summary() {
       </Card>
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_290px]">
-        <Card>
-          <CardHeader
-            title="Recent uploads"
-            description={`Newest on ${data.branch}`}
-            action={
-              data.history.length > 5 ? (
-                <Link
-                  to={`/r/${repo}/uploads`}
-                  className="text-[12.5px] text-(--muted) hover:text-(--ink)"
-                >
-                  View all {data.history.length} →
-                </Link>
-              ) : undefined
-            }
-          />
-          <div className="px-1 pb-1">
-            <UploadsTable repo={repo} history={data.history} limit={5} />
-          </div>
-        </Card>
+        <RecentActivityCard repo={repo} />
 
         <div className="space-y-4">
           <NeedsLove latestId={latest.id} />

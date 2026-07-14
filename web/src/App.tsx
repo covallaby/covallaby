@@ -6,6 +6,7 @@ import {
   type RouteObject,
   useLocation,
   useNavigate,
+  useParams,
   useRoutes,
   useSearchParams,
 } from "react-router-dom";
@@ -22,14 +23,14 @@ import { OwnerAvatar } from "./components/ui.js";
 import { Commits } from "./pages/Commits.js";
 import { CompareBranches, PullRequest } from "./pages/Compare.js";
 import { Home } from "./pages/Home.js";
-import { PlaybackDetail, Playbacks } from "./pages/Playbacks.js";
+import { PlaybackDetail } from "./pages/Playbacks.js";
 import { Policy } from "./pages/Policy.js";
 import { RepoLayout } from "./pages/Repo.js";
+import { Activity } from "./pages/RepoActivity.js";
 import { Insights } from "./pages/RepoInsights.js";
 import { PullRequests } from "./pages/RepoPulls.js";
 import { Summary } from "./pages/RepoSummary.js";
-import { Uploads } from "./pages/RepoUploads.js";
-import { StorybookPreviewDetail, StorybookPreviews } from "./pages/StorybookPreviews.js";
+import { StorybookPreviewDetail } from "./pages/StorybookPreviews.js";
 import { Upload } from "./pages/Upload.js";
 import { readRecentVisits, recordRepoVisit, selectRecentRepos } from "./recent-repos.js";
 
@@ -247,13 +248,11 @@ function SignIn({ theme, toggleTheme }: { theme: Theme; toggleTheme: () => void 
   );
 }
 
-/** Label for the trailing path segment of a repo route (Uploads, PR #12, …). */
+/** Label for the trailing path segment of a repo route (Activity, PR #12, …). */
 function tailLabel(rest: string): string | null {
   if (rest === "") return null;
   if (rest.startsWith("insights")) return "Insights";
-  if (rest.startsWith("uploads")) return "Uploads";
-  if (rest.startsWith("playbacks")) return "Playwright runs";
-  if (rest === "storybook-previews") return "Component captures";
+  if (rest.startsWith("activity")) return "Activity";
   const preview = /^storybook-previews\/(\d+)/.exec(rest);
   if (preview) return `Component capture run ${preview[1]}`;
   const run = /^test-runs\/(\d+)/.exec(rest);
@@ -414,6 +413,17 @@ function HomeRoute({ repos }: { repos: RepoOverview[] | null }) {
   return <Home repos={repos} />;
 }
 
+/**
+ * Legacy evidence-list routes (/uploads, /playbacks, /storybook-previews) live
+ * on as deep links into the unified Activity tab — the query string (branch,
+ * type, theme) rides along.
+ */
+export function RedirectToActivity() {
+  const { owner, name } = useParams();
+  const { search } = useLocation();
+  return <Navigate to={{ pathname: `/r/${owner}/${name}/activity`, search }} replace />;
+}
+
 /** The app's route table. Every repo leaf lives under RepoLayout so the repo shell persists. */
 export function buildRoutes(repos: RepoOverview[] | null): RouteObject[] {
   return [
@@ -425,15 +435,16 @@ export function buildRoutes(repos: RepoOverview[] | null): RouteObject[] {
       children: [
         { index: true, element: <Summary /> },
         { path: "commits", element: <Commits /> },
+        { path: "activity", element: <Activity /> },
         { path: "insights", element: <Insights /> },
-        { path: "uploads", element: <Uploads /> },
+        { path: "uploads", element: <RedirectToActivity /> },
         { path: "u/:id", element: <Upload /> },
-        { path: "playbacks", element: <Playbacks /> },
+        { path: "playbacks", element: <RedirectToActivity /> },
         { path: "test-runs/:id", element: <PlaybackDetail /> },
         {
           path: "storybook-previews",
           children: [
-            { index: true, element: <StorybookPreviews /> },
+            { index: true, element: <RedirectToActivity /> },
             { path: ":id", element: <StorybookPreviewDetail /> },
           ],
         },
