@@ -83,7 +83,7 @@ export function Upload() {
           <div className="flex items-center gap-2 text-xs text-(--muted)">
             <span>Coverage at</span>
             <span className="font-mono text-(--ink-2)">{row.commit.slice(0, 10)}</span>
-            <BranchTag branch={row.branch} pr={row.pr} />
+            <BranchTag branch={row.branch} pr={row.pr} repo={row.repo} />
           </div>
           <div
             className={`mt-1 flex items-center gap-3 text-[44px] leading-none font-semibold tracking-tighter ${inkFor[severity(row.percent)]}`}

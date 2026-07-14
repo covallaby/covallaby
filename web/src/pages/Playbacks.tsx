@@ -24,6 +24,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { type TestArtifact, type TestRun, api } from "../api.js";
+import { CommitStrip, commitHref, useCommitSiblings } from "../components/commit-strip.js";
 import { Card, CardHeader, Stat, Td, Th } from "../components/ui.js";
 import { buildPlaybackLibrary, shortJourneyName } from "../playback.js";
 import { useRepo } from "./Repo.js";
@@ -35,7 +36,7 @@ const when = (iso: string) =>
 const duration = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
 
 export function Playbacks() {
-  const { repo } = useRepo();
+  const { repo, data } = useRepo();
   const [runs, setRuns] = useState<TestRun[] | null>(null);
   const [error, setError] = useState(false);
   const [request, setRequest] = useState(0);
@@ -152,7 +153,13 @@ export function Playbacks() {
                       </Link>
                     </Td>
                     <Td>
-                      <span className="font-mono text-xs">{run.commit.slice(0, 10)}</span>
+                      <Link
+                        className="font-mono text-xs hover:underline"
+                        to={commitHref(repo, run.commit, data.history)}
+                        title="Open this commit in Covallaby"
+                      >
+                        {run.commit.slice(0, 10)}
+                      </Link>
                       <a
                         className="ml-2 inline-flex text-(--muted) hover:text-(--ink)"
                         href={`https://github.com/${repo}/commit/${run.commit}`}
@@ -599,6 +606,7 @@ export function PlaybackDetail() {
       .then(setData)
       .catch((e) => setError(String(e)));
   }, [id]);
+  const siblings = useCommitSiblings(data?.run.repo, data?.run.commit);
   if (error)
     return (
       <div className="rounded-xl border border-(--bad)/25 bg-(--bad)/5 p-5">
@@ -623,9 +631,27 @@ export function PlaybackDetail() {
           {data.run.pr ? `PR #${data.run.pr}` : data.run.branch} Playwright run
         </h1>
         <p className="mt-1 font-mono text-xs text-(--muted)">
-          {data.run.commit} · {when(data.run.createdAt)}
+          <Link
+            to={
+              siblings?.upload
+                ? `/r/${data.run.repo}/u/${siblings.upload.id}`
+                : `/r/${data.run.repo}/commits`
+            }
+            title="Open this commit in Covallaby"
+            className="hover:text-(--ink) hover:underline"
+          >
+            {data.run.commit}
+          </Link>{" "}
+          · {when(data.run.createdAt)}
         </p>
       </div>
+      <CommitStrip
+        repo={data.run.repo}
+        commit={data.run.commit}
+        pr={data.run.pr}
+        current="journeys"
+        siblings={siblings}
+      />
       <Card className="p-5">
         <div className="grid grid-cols-2 gap-5 sm:grid-cols-5">
           <Stat

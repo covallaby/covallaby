@@ -669,6 +669,29 @@ export function createApp({
     });
   });
 
+  // The commit is the envelope: everything reported for one SHA — the coverage
+  // upload, the Playwright (journey) run, and the Storybook (component) preview —
+  // so any artifact page can cross-link to its siblings.
+  app.get("/api/v1/repos/:owner/:name/commits/:sha", async (c) => {
+    const repo = `${c.req.param("owner")}/${c.req.param("name")}`;
+    const sha = c.req.param("sha");
+    if (!REPO_RE.test(repo) || sha.length === 0 || sha.length > 64) {
+      return c.json({ ok: false, error: "Bad repository or commit." }, 400);
+    }
+    const upload = (await store.findByCommit(repo, sha))?.row ?? null;
+    let run: TestRunRow | null = null;
+    let preview: TestRunRow | null = null;
+    if (artifactReady()) {
+      const [runs, previews] = await Promise.all([
+        store.listTestRuns!(repo, 50, "playwright"),
+        store.listTestRuns!(repo, 50, "storybook"),
+      ]);
+      run = runs.find((candidate) => candidate.commit === sha) ?? null;
+      preview = previews.find((candidate) => candidate.commit === sha) ?? null;
+    }
+    return c.json({ commit: sha, upload, run, preview });
+  });
+
   app.get("/api/v1/test-runs/:id", async (c) => {
     if (!artifactReady())
       return c.json({ ok: false, error: "Test artifact storage is unavailable." }, 503);

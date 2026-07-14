@@ -181,7 +181,14 @@ export function PullRequest() {
   }, [repo, pr, base]);
   if (error) return <p className="text-sm text-(--bad)">{error}</p>;
   if (!result) return <PageSkeleton />;
-  return <CompareBody repo={repo} result={result} headLabel={`PR #${pr}`} />;
+  return (
+    <div className="space-y-3">
+      <Link to={`/r/${repo}/pulls`} className="text-xs text-(--muted) hover:text-(--ink)">
+        ← All pull requests
+      </Link>
+      <CompareBody repo={repo} result={result} headLabel={`PR #${pr}`} />
+    </div>
+  );
 }
 
 export function CompareBranches() {
