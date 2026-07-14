@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { type CompareResult, api, formatPercent, severity } from "../api.js";
+import { ScopePicker } from "../components/scope-picker.js";
 import { PageSkeleton } from "../components/skeleton.js";
 import { Card, CardHeader, DeltaChip, Meter, inkFor } from "../components/ui.js";
 import { PatchTreemap } from "../components/viz.js";
@@ -220,30 +221,32 @@ export function CompareBranches() {
       .catch((e) => setError(String(e)));
   }, [repo, head, base]);
 
-  const pick = (key: "head" | "base") => (e: React.ChangeEvent<HTMLSelectElement>) =>
+  const pick = (key: "head" | "base") => (value: string) =>
     setParams((prev) => {
       const p = new URLSearchParams(prev);
-      p.set(key, e.target.value);
+      p.set(key, value);
       return p;
     });
 
-  const selectCls =
-    "rounded-lg border border-(--border) bg-(--surface) px-3 py-1.5 font-mono text-[13px] outline-none focus:border-(--muted)";
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-lg font-semibold tracking-tight">Compare</h1>
-        <select value={head} onChange={pick("head")} className={selectCls} aria-label="head branch">
-          {branches.map((b) => (
-            <option key={b}>{b}</option>
-          ))}
-        </select>
+        <ScopePicker
+          label="Head branch"
+          current={head}
+          branches={branches}
+          onSelectBranch={pick("head")}
+          className="w-56"
+        />
         <span className="text-(--muted)">vs</span>
-        <select value={base} onChange={pick("base")} className={selectCls} aria-label="base branch">
-          {branches.map((b) => (
-            <option key={b}>{b}</option>
-          ))}
-        </select>
+        <ScopePicker
+          label="Base branch"
+          current={base}
+          branches={branches}
+          onSelectBranch={pick("base")}
+          className="w-56"
+        />
       </div>
       {error && <p className="text-sm text-(--bad)">{error}</p>}
       {!error && !result && head && <PageSkeleton />}

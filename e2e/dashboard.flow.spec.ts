@@ -18,7 +18,12 @@ test("maintainer finds repository risk and reviews its coverage", async ({ page 
   await page.locator('a[href="#/r/covallaby/covallaby"]').first().click();
   await expect(page).toHaveURL(/#\/r\/covallaby\/covallaby$/);
   await expect(page.getByRole("heading", { name: "covallaby/covallaby" })).toBeVisible();
-  await expect(page.getByLabel("Branch")).toHaveValue("main");
+  const scopePicker = page.getByRole("button", { name: "Branch or pull request" });
+  await expect(scopePicker).toContainText("main");
+  await scopePicker.click();
+  await expect(page.getByRole("listbox", { name: "Branch or pull request" })).toBeVisible();
+  await expect(page.getByText("Open pull requests", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
   await expect(page.getByRole("link", { name: "Compare", exact: true })).toBeVisible();
   await expect(page.getByText("Incomplete", { exact: true })).toBeVisible();
   await expect(page.getByText(/One commit, three independent signals/)).toBeVisible();
