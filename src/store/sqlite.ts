@@ -7,6 +7,7 @@ import {
   type PROverview,
   type RecordUploadInput,
   type RepoOverview,
+  type ReviewState,
   type Store,
   type Subscription,
   type TestArtifactRow,
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS uploads (
   files INTEGER NOT NULL,
   report BLOB NOT NULL,
   account TEXT NOT NULL DEFAULT '',
+  base_sha TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_repo_branch_time
@@ -48,6 +50,7 @@ CREATE TABLE IF NOT EXISTS test_runs (
   pr INTEGER, framework TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'uploading',
   tests_passed INTEGER NOT NULL DEFAULT 0, tests_failed INTEGER NOT NULL DEFAULT 0,
   tests_skipped INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
+  base_sha TEXT, review_state TEXT NOT NULL DEFAULT 'pending',
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), completed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_test_runs_repo_time ON test_runs(repo, created_at DESC);
@@ -70,6 +73,7 @@ interface RawRow {
   lines_covered: number;
   lines_total: number;
   files: number;
+  base_sha: string | null;
   created_at: string;
 }
 
@@ -84,15 +88,16 @@ function toRow(raw: RawRow): UploadRow {
     linesTotal: raw.lines_total,
     percent: percentOf(raw.lines_covered, raw.lines_total),
     files: raw.files,
+    baseSha: raw.base_sha,
     createdAt: raw.created_at,
   };
 }
 
 const ROW_COLUMNS =
-  "id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at";
+  "id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at";
 
 const TEST_RUN_COLUMNS =
-  "id, repo, branch, commit_sha, pr, framework, status, tests_passed, tests_failed, tests_skipped, duration_ms, created_at, completed_at";
+  "id, repo, branch, commit_sha, pr, framework, status, tests_passed, tests_failed, tests_skipped, duration_ms, base_sha, review_state, created_at, completed_at";
 
 type RawTestRun = {
   id: number;
@@ -106,6 +111,8 @@ type RawTestRun = {
   tests_failed: number;
   tests_skipped: number;
   duration_ms: number;
+  base_sha: string | null;
+  review_state: ReviewState;
   created_at: string;
   completed_at: string | null;
 };
@@ -135,6 +142,8 @@ function toTestRun(r: RawTestRun): TestRunRow {
     testsFailed: r.tests_failed,
     testsSkipped: r.tests_skipped,
     durationMs: r.duration_ms,
+    baseSha: r.base_sha,
+    reviewState: r.review_state,
     createdAt: r.created_at,
     completedAt: r.completed_at,
   };
@@ -170,13 +179,30 @@ export class SqliteStore implements Store {
     this.db = new DatabaseSync(path);
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec(SCHEMA);
+    // Additive migrations for databases created before these columns existed.
+    for (const ddl of [
+      "ALTER TABLE uploads ADD COLUMN base_sha TEXT",
+      "ALTER TABLE test_runs ADD COLUMN base_sha TEXT",
+      "ALTER TABLE test_runs ADD COLUMN review_state TEXT NOT NULL DEFAULT 'pending'",
+    ]) {
+      try {
+        this.db.exec(ddl);
+      } catch {
+        // column already exists
+      }
+    }
+    // Mainline never needs review: conventional default-branch runs recorded
+    // before (or without) the auto-accept logic become baseline-eligible.
+    this.db.exec(
+      "UPDATE test_runs SET review_state = 'auto-accepted' WHERE review_state = 'pending' AND branch IN ('main', 'master')",
+    );
   }
 
   async recordUpload(input: RecordUploadInput): Promise<UploadRow> {
     const result = this.db
       .prepare(
-        `INSERT INTO uploads (repo, branch, commit_sha, pr, lines_covered, lines_total, files, report, account)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO uploads (repo, branch, commit_sha, pr, lines_covered, lines_total, files, report, account, base_sha)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.repo,
@@ -188,6 +214,7 @@ export class SqliteStore implements Store {
         input.files,
         packReport(input.report),
         accountOf(input.repo),
+        input.baseSha ?? null,
       );
     const raw = this.db
       .prepare(`SELECT ${ROW_COLUMNS} FROM uploads WHERE id = ?`)
@@ -421,8 +448,8 @@ export class SqliteStore implements Store {
   async createTestRun(input: CreateTestRunInput): Promise<TestRunRow> {
     const result = this.db
       .prepare(
-        `INSERT INTO test_runs (repo, branch, commit_sha, pr, framework, tests_passed, tests_failed, tests_skipped, duration_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO test_runs (repo, branch, commit_sha, pr, framework, tests_passed, tests_failed, tests_skipped, duration_ms, base_sha, review_state)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.repo,
@@ -434,6 +461,8 @@ export class SqliteStore implements Store {
         input.testsFailed,
         input.testsSkipped,
         input.durationMs,
+        input.baseSha ?? null,
+        input.reviewState ?? "pending",
       );
     const row = this.db
       .prepare(`SELECT ${TEST_RUN_COLUMNS} FROM test_runs WHERE id = ?`)
@@ -520,6 +549,11 @@ export class SqliteStore implements Store {
           )
           .all(repo, limit) as unknown as RawTestRun[]);
     return rows.map(toTestRun);
+  }
+
+  async setTestRunReview(id: number, state: ReviewState): Promise<TestRunRow | null> {
+    this.db.prepare("UPDATE test_runs SET review_state = ? WHERE id = ?").run(state, id);
+    return this.getTestRunRow(id);
   }
 
   async deleteTestRun(id: number): Promise<void> {

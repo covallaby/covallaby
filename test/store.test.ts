@@ -171,4 +171,70 @@ describe.each(stores)("store contract (%s)", (_name, store) => {
       { framework: "storybook", commit: "story1" },
     ]);
   });
+
+  it("round-trips the CI-supplied base SHA on uploads", async () => {
+    const row = await store.recordUpload({
+      repo: "acme/base-sha",
+      branch: "feat/x",
+      commit: "headsha",
+      pr: 12,
+      report,
+      linesCovered: 1,
+      linesTotal: 2,
+      files: 1,
+      baseSha: "a".repeat(40),
+    });
+    expect(row.baseSha).toBe("a".repeat(40));
+    expect((await store.getUpload(row.id))?.row.baseSha).toBe("a".repeat(40));
+    // Omitted → null (older CI keeps working unchanged).
+    const bare = await store.recordUpload({
+      repo: "acme/base-sha",
+      branch: "main",
+      commit: "basesha",
+      pr: null,
+      report,
+      linesCovered: 1,
+      linesTotal: 2,
+      files: 1,
+    });
+    expect(bare.baseSha).toBeNull();
+  });
+
+  it("stores review state and base SHA on visual runs, with human overrides", async () => {
+    const run = await store.createTestRun!({
+      repo: "acme/reviews",
+      branch: "main",
+      commit: "rev1",
+      pr: null,
+      framework: "storybook",
+      testsPassed: 0,
+      testsFailed: 0,
+      testsSkipped: 0,
+      durationMs: 0,
+      baseSha: "b".repeat(40),
+      reviewState: "auto-accepted",
+    });
+    expect(run.reviewState).toBe("auto-accepted");
+    expect(run.baseSha).toBe("b".repeat(40));
+    expect((await store.getTestRunRow!(run.id))?.reviewState).toBe("auto-accepted");
+
+    const rejected = await store.setTestRunReview!(run.id, "rejected");
+    expect(rejected?.reviewState).toBe("rejected");
+    expect(await store.setTestRunReview!(999_999, "approved")).toBeNull();
+
+    // Defaults: pending review, no base SHA.
+    const bare = await store.createTestRun!({
+      repo: "acme/reviews",
+      branch: "feat/x",
+      commit: "rev2",
+      pr: 3,
+      framework: "storybook",
+      testsPassed: 0,
+      testsFailed: 0,
+      testsSkipped: 0,
+      durationMs: 0,
+    });
+    expect(bare.reviewState).toBe("pending");
+    expect(bare.baseSha).toBeNull();
+  });
 });

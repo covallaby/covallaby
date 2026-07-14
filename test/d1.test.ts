@@ -100,6 +100,29 @@ describe("D1Store (via node:sqlite fake)", () => {
     expect(prev?.row.id).toBe(first.id);
   });
 
+  it("round-trips the CI-supplied base SHA", async () => {
+    const row = await store.recordUpload({ repo: "acme/app", ...base, baseSha: "a".repeat(40) });
+    expect(row.baseSha).toBe("a".repeat(40));
+    expect((await store.getUpload(row.id))?.row.baseSha).toBe("a".repeat(40));
+    const bare = await store.recordUpload({ repo: "acme/app", ...base, commit: "def" });
+    expect(bare.baseSha).toBeNull();
+  });
+
+  it("adds the base_sha column to databases created before it existed", async () => {
+    const legacy = new FakeD1();
+    await legacy.exec(
+      `CREATE TABLE uploads (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         repo TEXT NOT NULL, branch TEXT NOT NULL, commit_sha TEXT NOT NULL, pr INTEGER,
+         lines_covered INTEGER NOT NULL, lines_total INTEGER NOT NULL, files INTEGER NOT NULL,
+         report BLOB NOT NULL, account TEXT NOT NULL DEFAULT '',
+         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')))`,
+    );
+    const migrated = new D1Store(legacy);
+    const row = await migrated.recordUpload({ repo: "acme/app", ...base, baseSha: "f".repeat(7) });
+    expect(row.baseSha).toBe("f".repeat(7));
+  });
+
   it("persists repo tokens, meta, and subscriptions", async () => {
     await store.setRepoToken("acme/app", "tok");
     expect(await store.getRepoToken("acme/app")).toBe("tok");

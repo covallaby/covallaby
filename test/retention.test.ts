@@ -28,6 +28,8 @@ const run = (
   testsFailed: 0,
   testsSkipped: 0,
   durationMs: 10,
+  baseSha: null,
+  reviewState: branch === "main" ? "auto-accepted" : "pending",
   createdAt: new Date(now.getTime() - ageDays * day).toISOString(),
   completedAt: null,
 });

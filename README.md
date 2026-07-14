@@ -129,11 +129,13 @@ Everything is optional:
 
 | Route | What |
 |---|---|
-| `POST /api/v1/upload?repo=o/n&branch=&commit=&pr=&format=&strip-prefix=&merge=1` | raw coverage file as the body; Bearer auth. `merge=1` accumulates sharded uploads into one per commit |
+| `POST /api/v1/upload?repo=o/n&branch=&commit=&pr=&format=&strip-prefix=&merge=1&commit-sha=&base-sha=` | raw coverage file as the body; Bearer auth. `merge=1` accumulates sharded uploads into one per commit. `commit-sha` (validated hex alias for `commit`) and `base-sha` (the merge-base) let CI pin exact commits for squash/ephemeral-merge workflows — the baseline resolver prefers a recorded `base-sha` |
 | `GET /api/v1/repos` | repos with latest coverage + trend |
 | `GET /api/v1/repos/:owner/:name/history?branch=` | upload history |
 | `GET /api/v1/repos/:owner/:name/prs` | PRs with uploads, latest first |
-| `GET /api/v1/repos/:owner/:name/compare?pr=N` or `?head=<branch>` (+`&base=`) | head vs base: delta + per-file changes |
+| `GET /api/v1/repos/:owner/:name/compare?pr=N` or `?head=<branch>` (+`&base=`) | head vs base: delta + per-file changes, plus `baseline` explaining how the base was chosen |
+| `GET`/`PUT`/`DELETE /api/v1/repos/:owner/:name/default-branch` | read or set (`{"branch": "main"}`, admin token) the branch that baselines and mainline auto-accept key off |
+| `POST /api/v1/storybook-previews/:id/review` | record a review verdict (`{"state": "approved"\|"rejected"\|"pending"}`); default-branch runs are auto-accepted on upload |
 | `POST /api/v1/repos/:owner/:name/token` | mint/rotate a per-repo upload token (admin token required) |
 | `POST /api/v1/test-runs` · `POST /api/v1/test-runs/:id/complete` | create and finalize a browser-test run; returns direct upload URLs |
 | `GET /api/v1/repos/:owner/:name/test-runs` | recent Playwright runs and playback status |

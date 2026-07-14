@@ -13,6 +13,8 @@ export interface UploadRow {
   /** 0–100 or null when nothing was coverable. */
   percent: number | null;
   files: number;
+  /** CI-supplied base commit (merge-base) for baseline resolution, or null. */
+  baseSha: string | null;
   createdAt: string;
 }
 
@@ -32,6 +34,8 @@ export interface RecordUploadInput {
   linesCovered: number;
   linesTotal: number;
   files: number;
+  /** Optional CI-supplied base commit (merge-base) for baseline resolution. */
+  baseSha?: string | null;
 }
 
 /** The report + recomputed counters written back when merging sharded uploads. */
@@ -68,6 +72,12 @@ export interface Subscription {
 }
 
 export type TestRunStatus = "uploading" | "complete" | "failed";
+/**
+ * Review verdict for a visual capture run. "auto-accepted" is the mainline
+ * state — default-branch builds skip review and are immediately
+ * baseline-eligible — kept distinct from a human "approved" on purpose.
+ */
+export type ReviewState = "pending" | "approved" | "rejected" | "auto-accepted";
 export type TestArtifactKind = "video" | "screenshot" | "trace" | "report" | "results" | "other";
 
 export interface TestRunRow {
@@ -82,6 +92,9 @@ export interface TestRunRow {
   testsFailed: number;
   testsSkipped: number;
   durationMs: number;
+  /** CI-supplied base commit (merge-base) for visual baseline resolution. */
+  baseSha: string | null;
+  reviewState: ReviewState;
   createdAt: string;
   completedAt: string | null;
 }
@@ -108,6 +121,10 @@ export interface CreateTestRunInput {
   testsFailed: number;
   testsSkipped: number;
   durationMs: number;
+  /** Optional CI-supplied base commit (merge-base) for baseline resolution. */
+  baseSha?: string | null;
+  /** Defaults to "pending"; default-branch runs are created "auto-accepted". */
+  reviewState?: ReviewState;
 }
 
 export interface CreateTestArtifactInput {
@@ -165,6 +182,8 @@ export interface Store {
   getTestRunRow?(id: number): Promise<TestRunRow | null>;
   getTestArtifactByName?(runId: number, name: string): Promise<TestArtifactRow | null>;
   listTestRuns?(repo: string, limit: number, framework?: string): Promise<TestRunRow[]>;
+  /** Record a human review verdict on a visual capture run. */
+  setTestRunReview?(id: number, state: ReviewState): Promise<TestRunRow | null>;
   deleteTestRun?(id: number): Promise<void>;
   close(): Promise<void>;
 }

@@ -38,7 +38,7 @@ const SCHEMA = [
      id INTEGER PRIMARY KEY AUTOINCREMENT,
      repo TEXT NOT NULL, branch TEXT NOT NULL, commit_sha TEXT NOT NULL, pr INTEGER,
      lines_covered INTEGER NOT NULL, lines_total INTEGER NOT NULL, files INTEGER NOT NULL,
-     report BLOB NOT NULL, account TEXT NOT NULL DEFAULT '',
+     report BLOB NOT NULL, account TEXT NOT NULL DEFAULT '', base_sha TEXT,
      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')))`,
   "CREATE INDEX IF NOT EXISTS idx_uploads_repo_branch_time ON uploads(repo, branch, created_at DESC)",
   "CREATE INDEX IF NOT EXISTS idx_uploads_account ON uploads(account)",
@@ -59,6 +59,7 @@ interface RawRow {
   lines_covered: number;
   lines_total: number;
   files: number;
+  base_sha: string | null;
   created_at: string;
 }
 
@@ -73,6 +74,7 @@ function toRow(raw: RawRow): UploadRow {
     linesTotal: raw.lines_total,
     percent: percentOf(raw.lines_covered, raw.lines_total),
     files: raw.files,
+    baseSha: raw.base_sha,
     createdAt: raw.created_at,
   };
 }
@@ -95,7 +97,7 @@ function toSub(r: SubRow): Subscription {
 }
 
 const ROW_COLUMNS =
-  "id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, created_at";
+  "id, repo, branch, commit_sha, pr, lines_covered, lines_total, files, base_sha, created_at";
 
 /** D1 returns BLOB as ArrayBuffer; normalize to a Buffer for unpackReport. */
 function asReport(blob: ArrayBuffer | Uint8Array): ReturnType<typeof unpackReport> {
@@ -112,6 +114,12 @@ export class D1Store implements Store {
     if (!this.ready) {
       this.ready = (async () => {
         for (const stmt of SCHEMA) await this.db.prepare(stmt).run();
+        // Additive migration for databases created before this column existed.
+        try {
+          await this.db.prepare("ALTER TABLE uploads ADD COLUMN base_sha TEXT").run();
+        } catch {
+          // column already exists
+        }
       })();
     }
     return this.ready;
@@ -121,8 +129,8 @@ export class D1Store implements Store {
     await this.ensure();
     const res = await this.db
       .prepare(
-        `INSERT INTO uploads (repo, branch, commit_sha, pr, lines_covered, lines_total, files, report, account)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO uploads (repo, branch, commit_sha, pr, lines_covered, lines_total, files, report, account, base_sha)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         input.repo,
@@ -134,6 +142,7 @@ export class D1Store implements Store {
         input.files,
         packReport(input.report),
         accountOf(input.repo),
+        input.baseSha ?? null,
       )
       .run();
     const raw = await this.db

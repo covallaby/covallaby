@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { type CompareResult, api, formatPercent, severity } from "../api.js";
+import { BaselineChip } from "../components/baseline-chip.js";
 import { ScopePicker } from "../components/scope-picker.js";
 import { PageSkeleton } from "../components/skeleton.js";
 import { Card, CardHeader, DeltaChip, Meter, inkFor } from "../components/ui.js";
@@ -111,6 +112,9 @@ function CompareBody({
                     : "Neck and neck with the base."}
           </p>
           <Meter percent={head.percent} className="mt-3 w-72" />
+          <div className="mt-2.5">
+            <BaselineChip baseline={result.baseline} />
+          </div>
         </div>
         <div className="flex flex-wrap gap-8 pb-1.5">
           <div>
