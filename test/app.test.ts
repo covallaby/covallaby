@@ -380,9 +380,16 @@ describe("browser test artifacts", () => {
           id: "button--primary",
           status: "changed",
           diffImageUrl: expect.any(String),
+          sha256: "c".repeat(64),
+          baselineSha256: "a".repeat(64),
         }),
-        expect.objectContaining({ id: "button--new", status: "new" }),
-        expect.objectContaining({ id: "button--removed", status: "removed", artifactId: null }),
+        expect.objectContaining({ id: "button--new", status: "new", sha256: "d".repeat(64) }),
+        expect.objectContaining({
+          id: "button--removed",
+          status: "removed",
+          artifactId: null,
+          baselineSha256: "b".repeat(64),
+        }),
       ]),
     );
 
