@@ -55,7 +55,6 @@ CREATE TABLE IF NOT EXISTS test_runs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(), completed_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_test_runs_repo_time ON test_runs(repo, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_test_runs_account ON test_runs(account);
 CREATE TABLE IF NOT EXISTS test_artifacts (
   id BIGSERIAL PRIMARY KEY, run_id BIGINT NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
   name TEXT NOT NULL, kind TEXT NOT NULL, content_type TEXT NOT NULL, size_bytes BIGINT NOT NULL,
@@ -77,6 +76,11 @@ ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS base_sha TEXT;
 ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS review_state TEXT NOT NULL DEFAULT 'pending';
 ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS account TEXT NOT NULL DEFAULT '';
 ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS image_count INTEGER;
+-- Indexes on migrated columns must come AFTER the ALTERs: on a pre-existing
+-- database CREATE TABLE IF NOT EXISTS is a no-op, so an index created inside
+-- the schema block would reference a column that does not exist yet
+-- (produced the 2026-07-14 production crash loop).
+CREATE INDEX IF NOT EXISTS idx_test_runs_account ON test_runs(account);
 -- Backfill the tenant column for runs recorded before it existed, so the
 -- account-scoped feed query never misses old rows.
 UPDATE test_runs SET account = split_part(repo, '/', 1) WHERE account = '';

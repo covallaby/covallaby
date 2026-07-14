@@ -57,7 +57,6 @@ CREATE TABLE IF NOT EXISTS test_runs (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), completed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_test_runs_repo_time ON test_runs(repo, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_test_runs_account ON test_runs(account);
 CREATE TABLE IF NOT EXISTS test_artifacts (
   id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
   name TEXT NOT NULL, kind TEXT NOT NULL, content_type TEXT NOT NULL, size_bytes INTEGER NOT NULL,
@@ -233,6 +232,11 @@ export class SqliteStore implements Store {
         // column already exists
       }
     }
+    // Indexes on migrated columns must come AFTER the ALTERs: on a
+    // pre-existing database the schema block's CREATE TABLE is a no-op, so
+    // an index there would reference a column that does not exist yet
+    // (produced the 2026-07-14 production crash loop on the postgres store).
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_test_runs_account ON test_runs(account)");
     // Backfill the tenant column for runs recorded before it existed, so the
     // account-scoped feed query never misses old rows.
     this.db.exec(
