@@ -1025,6 +1025,8 @@ export function createApp({
       imageUrl: string;
       baselineImageUrl?: string;
       diffImageUrl?: string;
+      sha256?: string;
+      baselineSha256?: string;
     }> = storyCaptures(found.artifacts).map(({ artifact, story }) => {
       const before = baselineCaptures.get(story.id);
       baselineCaptures.delete(story.id);
@@ -1044,6 +1046,8 @@ export function createApp({
         name: story.name,
         status,
         imageUrl: `${previewBase}/p/${run.id}/${artifact.name}?preview_token=${encodeURIComponent(token)}`,
+        ...(story.sha256 && { sha256: story.sha256 }),
+        ...(before?.story.sha256 && { baselineSha256: before.story.sha256 }),
         ...(before && baselineToken
           ? {
               baselineImageUrl: `${previewBase}/p/${baseline!.run.id}/${before.artifact.name}?preview_token=${encodeURIComponent(baselineToken)}`,
@@ -1062,6 +1066,7 @@ export function createApp({
         name: story.name,
         status: "removed",
         imageUrl: "",
+        ...(story.sha256 && { baselineSha256: story.sha256 }),
         baselineImageUrl: `${previewBase}/p/${baseline!.run.id}/${artifact.name}?preview_token=${encodeURIComponent(baselineToken!)}`,
       });
     }

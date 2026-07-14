@@ -42,7 +42,7 @@ const changedFixture: PreviewResponse = {
   run: run(),
   previewUrl: "https://previews.example.test/p/18/index.html",
   baselineRun: run({ id: 17, branch: "main", pr: null, commit: "72d41f0dd8" }),
-  summary: { changed: 1, new: 1, removed: 1, unchanged: 1, uncompared: 0 },
+  summary: { changed: 3, new: 1, removed: 1, unchanged: 1, uncompared: 0 },
   captures: [
     {
       artifactId: 1,
@@ -53,6 +53,34 @@ const changedFixture: PreviewResponse = {
       imageUrl: current,
       baselineImageUrl: baseline,
       diffImageUrl: diff,
+      sha256: "1".repeat(64),
+      baselineSha256: "2".repeat(64),
+    },
+    // These two share the exact same (baseline, new) hash pair as each other,
+    // so the review groups them into one stop.
+    {
+      artifactId: 4,
+      id: "checkout--dark",
+      title: "Commerce/Checkout",
+      name: "Dark",
+      status: "changed",
+      imageUrl: current,
+      baselineImageUrl: baseline,
+      diffImageUrl: diff,
+      sha256: "3".repeat(64),
+      baselineSha256: "4".repeat(64),
+    },
+    {
+      artifactId: 5,
+      id: "checkout--compact",
+      title: "Commerce/Checkout",
+      name: "Compact",
+      status: "changed",
+      imageUrl: current,
+      baselineImageUrl: baseline,
+      diffImageUrl: diff,
+      sha256: "3".repeat(64),
+      baselineSha256: "4".repeat(64),
     },
     {
       artifactId: 2,
@@ -134,8 +162,35 @@ export const ChangedNewAndRemoved: Story = {
     await expect(canvas.getByRole("slider", { name: "Current image visibility" })).toBeVisible();
     await userEvent.click(canvas.getByRole("button", { name: "diff" }));
     await expect(canvas.getByAltText("Pixel diff for Default")).toBeVisible();
+    // The two stories sharing one identical diff collapse into a single group card.
+    const group = canvas.getByRole("button", { name: /2 stories with this same change/i });
+    await userEvent.click(group);
+    await expect(canvas.getByRole("button", { name: /Compact/i })).toBeVisible();
     await userEvent.click(canvas.getByRole("button", { name: /1 removed/i }));
     await expect(canvas.getByRole("button", { name: /Legacy coupon/i })).toBeVisible();
+  },
+};
+
+export const KeyboardReviewLoop: Story = {
+  render: () => <ReviewStory fixture={changedFixture} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("heading", { name: "Default" })).toBeVisible();
+    // j advances to the next review stop; the identical-diff group is one stop.
+    await userEvent.keyboard("j");
+    await expect(canvas.getByRole("heading", { name: "Dark" })).toBeVisible();
+    await userEvent.keyboard("j");
+    await expect(canvas.getByRole("heading", { name: "Annual plan" })).toBeVisible();
+    await userEvent.keyboard("k");
+    await userEvent.keyboard("k");
+    await expect(canvas.getByRole("heading", { name: "Default" })).toBeVisible();
+    // d toggles the pixel diff, b flips baseline vs. new in place.
+    await userEvent.keyboard("d");
+    await expect(canvas.getByAltText("Pixel diff for Default")).toBeVisible();
+    await userEvent.keyboard("d");
+    await expect(canvas.queryByAltText("Pixel diff for Default")).toBeNull();
+    await userEvent.keyboard("b");
+    await expect(canvas.getByRole("slider", { name: "Current image visibility" })).toBeVisible();
   },
 };
 
@@ -178,7 +233,7 @@ export const AllUnchanged: Story = {
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(await canvas.findByText("No component captures match “”.")).toBeVisible();
+    await expect(await canvas.findByText(/No visual changes to review/)).toBeVisible();
     await userEvent.selectOptions(canvas.getByRole("combobox", { name: "Capture filter" }), "all");
     await expect(
       canvas.getByRole("button", { name: /Components\/Button — Primary/i }),

@@ -1,14 +1,17 @@
 import {
   AlertCircle,
   BookOpen,
+  ChevronDown,
+  ChevronRight,
   ExternalLink,
   GitCommit,
   GitPullRequest,
+  Layers,
   RotateCw,
   Search,
 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   type StorybookCapture,
   type StorybookDiffSummary,
@@ -18,6 +21,17 @@ import {
 import { CommitStrip, commitHref, useCommitSiblings } from "../components/commit-strip.js";
 import { Card, CardHeader, Td, Th } from "../components/ui.js";
 import { useRepo } from "./Repo.js";
+import {
+  type ReviewStop,
+  type ReviewView,
+  buildReviewStops,
+  isEditableTarget,
+  parseReviewFilter,
+  parseReviewView,
+  reviewKeyAction,
+  stepStop,
+  stopIndexOf,
+} from "./storybook-review.js";
 
 const when = (iso: string) =>
   new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
@@ -160,6 +174,14 @@ export function StorybookPreviews() {
   );
 }
 
+const statusTone: Record<StorybookCapture["status"], string> = {
+  changed: "bg-(--warn)/12 text-(--warn)",
+  new: "bg-(--good)/12 text-(--good)",
+  removed: "bg-(--bad)/12 text-(--bad)",
+  unchanged: "bg-(--surface-2) text-(--muted)",
+  uncompared: "bg-(--accent-wash) text-(--accent)",
+};
+
 export function StorybookPreviewDetail() {
   const { id } = useParams();
   const [data, setData] = useState<{
@@ -172,27 +194,79 @@ export function StorybookPreviewDetail() {
   const [error, setError] = useState<string | null>(null);
   const [request, setRequest] = useState(0);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<"changes" | StorybookCapture["status"] | "all">("changes");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [view, setView] = useState<"side-by-side" | "overlay" | "diff">("side-by-side");
+  const [searchParams, setSearchParams] = useSearchParams();
   const [overlay, setOverlay] = useState(50);
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(new Set());
+  // Where `d` returns to when the diff view toggles back off.
+  const previousViewRef = useRef<Exclude<ReviewView, "diff">>("side-by-side");
+
+  // Shareable review state lives in the URL: ?filter= (changed-only vs. all),
+  // ?view= (diff mode), ?story= (selected capture).
+  const filter = parseReviewFilter(searchParams.get("filter"));
+  const view = parseReviewView(searchParams.get("view"));
+  const storyParam = searchParams.get("story");
+  const paramDefaults: Record<string, string> = { filter: "changes", view: "side-by-side" };
+  const setParam = (key: "filter" | "view" | "story", value: string | null) => {
+    setSearchParams(
+      (params) => {
+        const next = new URLSearchParams(params);
+        if (value === null || value === paramDefaults[key]) next.delete(key);
+        else next.set(key, value);
+        return next;
+      },
+      { replace: true },
+    );
+  };
+  const setView = (mode: ReviewView) => {
+    if (mode !== "diff") previousViewRef.current = mode;
+    setParam("view", mode);
+  };
+
   useEffect(() => {
     void request;
     setData(null);
     setError(null);
     api
       .storybookPreview(id!)
-      .then((result) => {
-        setData(result);
-        setSelectedId(
-          result.captures.find((capture) => capture.status !== "unchanged")?.id ??
-            result.captures[0]?.id ??
-            null,
-        );
-      })
+      .then((result) => setData(result))
       .catch((reason) => setError(String(reason)));
   }, [id, request]);
   const siblings = useCommitSiblings(data?.run.repo, data?.run.commit);
+
+  const stops = data ? buildReviewStops(data.captures, filter, query) : [];
+  const selected =
+    (storyParam ? data?.captures.find((capture) => capture.id === storyParam) : null) ??
+    stops[0]?.captures[0] ??
+    null;
+  const selectedStop = stops[stopIndexOf(stops, selected?.id ?? null)] ?? null;
+
+  // Keyboard-first review loop. Re-registered every render so the handler
+  // always closes over current stops/selection; cleanup keeps it single.
+  useEffect(() => {
+    if (!data) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const action = reviewKeyAction(event.key, {
+        editable: isEditableTarget(event.target),
+        modifier: event.metaKey || event.ctrlKey || event.altKey,
+      });
+      if (!action) return;
+      event.preventDefault();
+      if (action === "next" || action === "prev") {
+        const target = stepStop(stops, selected?.id ?? null, action === "next" ? 1 : -1);
+        if (target) setParam("story", target.id);
+      } else if (action === "toggle-diff") {
+        if (!selected?.diffImageUrl) return;
+        setParam("view", view === "diff" ? previousViewRef.current : "diff");
+      } else if (action === "swap") {
+        if (!selected?.baselineImageUrl || !selected.imageUrl) return;
+        setParam("view", "overlay");
+        setOverlay((value) => (value === 0 ? 100 : 0));
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
   if (error)
     return (
       <div className="rounded-xl border border-(--bad)/25 bg-(--bad)/5 p-5">
@@ -210,26 +284,8 @@ export function StorybookPreviewDetail() {
       </div>
     );
   if (!data) return <p className="text-sm text-(--muted)">Loading component captures…</p>;
-  const captures = data.captures.filter((capture) => {
-    const matchesQuery = `${capture.title} ${capture.name}`
-      .toLowerCase()
-      .includes(query.trim().toLowerCase());
-    const matchesFilter =
-      filter === "all" ||
-      (filter === "changes"
-        ? capture.status === "changed" || capture.status === "new" || capture.status === "removed"
-        : capture.status === filter);
-    return matchesQuery && matchesFilter;
-  });
-  const selected = data.captures.find((capture) => capture.id === selectedId) ?? null;
   const actionable = data.summary.changed + data.summary.new + data.summary.removed;
-  const statusTone: Record<StorybookCapture["status"], string> = {
-    changed: "bg-(--warn)/12 text-(--warn)",
-    new: "bg-(--good)/12 text-(--good)",
-    removed: "bg-(--bad)/12 text-(--bad)",
-    unchanged: "bg-(--surface-2) text-(--muted)",
-    uncompared: "bg-(--accent-wash) text-(--accent)",
-  };
+  const groupCount = stops.filter((stop) => stop.captures.length > 1).length;
   return (
     <div className="space-y-4">
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
@@ -296,7 +352,7 @@ export function StorybookPreviewDetail() {
                 <button
                   key={status}
                   type="button"
-                  onClick={() => setFilter(status)}
+                  onClick={() => setParam("filter", status)}
                   className="px-4 py-3 text-left hover:bg-(--surface-2)"
                 >
                   <span className="block text-lg font-semibold">{count}</span>
@@ -306,7 +362,7 @@ export function StorybookPreviewDetail() {
             </div>
             <div className="border-t border-(--hairline) px-4 py-3 text-xs text-(--muted)">
               {data.baselineRun
-                ? `${actionable} reviewable change${actionable === 1 ? "" : "s"} against main ${data.baselineRun.commit.slice(0, 9)}`
+                ? `${actionable} reviewable change${actionable === 1 ? "" : "s"} against main ${data.baselineRun.commit.slice(0, 9)}${groupCount > 0 ? ` · ${groupCount} identical-diff group${groupCount === 1 ? "" : "s"}` : ""}`
                 : "No earlier main capture is available yet; this run will establish visual history."}
             </div>
           </Card>
@@ -321,6 +377,12 @@ export function StorybookPreviewDetail() {
                     >
                       {selected.status}
                     </span>
+                    {selectedStop && selectedStop.captures.length > 1 ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-(--accent-wash) px-2 py-0.5 text-[11px] text-(--accent)">
+                        <Layers size={11} /> same change as {selectedStop.captures.length - 1} other
+                        {selectedStop.captures.length === 2 ? "" : "s"}
+                      </span>
+                    ) : null}
                   </div>
                   <p className="mt-1 text-xs text-(--muted)">{selected.title}</p>
                 </div>
@@ -362,15 +424,21 @@ export function StorybookPreviewDetail() {
                         style={{ clipPath: `inset(0 ${100 - overlay}% 0 0)` }}
                       />
                     </div>
-                    <input
-                      aria-label="Current image visibility"
-                      type="range"
-                      min="0"
-                      max="100"
-                      value={overlay}
-                      onChange={(event) => setOverlay(Number(event.target.value))}
-                      className="mx-auto mt-4 block w-full max-w-lg"
-                    />
+                    <div className="mx-auto mt-4 w-full max-w-lg">
+                      <input
+                        aria-label="Current image visibility"
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={overlay}
+                        onChange={(event) => setOverlay(Number(event.target.value))}
+                        className="block w-full"
+                      />
+                      <div className="mt-1 flex justify-between text-[11px] text-(--muted)">
+                        <span>Baseline</span>
+                        <span>Current</span>
+                      </div>
+                    </div>
                   </div>
                 ) : selected.baselineImageUrl && selected.imageUrl ? (
                   <div className="grid gap-4 lg:grid-cols-2">
@@ -413,10 +481,19 @@ export function StorybookPreviewDetail() {
                   className="w-full rounded-lg border border-(--border) bg-(--surface-2) py-2 pr-3 pl-9 text-sm outline-none focus:border-(--muted)"
                 />
               </label>
+              <button
+                type="button"
+                onClick={() => setParam("filter", filter === "all" ? "changes" : "all")}
+                className="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm font-medium hover:border-(--muted)"
+              >
+                {filter === "all"
+                  ? `Changes only (${actionable})`
+                  : `Show all (${data.captures.length})`}
+              </button>
               <select
                 aria-label="Capture filter"
                 value={filter}
-                onChange={(event) => setFilter(event.target.value as typeof filter)}
+                onChange={(event) => setParam("filter", event.target.value)}
                 className="rounded-lg border border-(--border) bg-(--surface-2) px-3 py-2 text-sm"
               >
                 <option value="changes">Changes to review</option>
@@ -428,45 +505,55 @@ export function StorybookPreviewDetail() {
                 <option value="uncompared">Uncompared</option>
               </select>
             </div>
+            <div className="mt-3 hidden flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-(--muted) sm:flex">
+              <span>
+                <Kbd>j</Kbd>/<Kbd>k</Kbd> or <Kbd>↑</Kbd>/<Kbd>↓</Kbd> next / prev
+              </span>
+              <span>
+                <Kbd>d</Kbd> toggle pixel diff
+              </span>
+              <span>
+                <Kbd>b</Kbd> flip baseline ↔ new
+              </span>
+            </div>
           </Card>
-          {captures.length > 0 ? (
+          {stops.length > 0 ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {captures.map((capture) => (
-                <button
-                  key={capture.id}
-                  type="button"
-                  onClick={() => setSelectedId(capture.id)}
-                  className="text-left"
-                >
-                  <Card
-                    className={`group overflow-hidden transition-colors ${selectedId === capture.id ? "border-(--accent)" : ""}`}
-                  >
-                    <div className="block bg-[linear-gradient(45deg,var(--surface-2)_25%,transparent_25%),linear-gradient(-45deg,var(--surface-2)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,var(--surface-2)_75%),linear-gradient(-45deg,transparent_75%,var(--surface-2)_75%)] bg-size-[18px_18px] bg-position-[0_0,0_9px,9px_-9px,-9px_0] p-3">
-                      <img
-                        src={capture.imageUrl || capture.baselineImageUrl}
-                        alt={`${capture.title} — ${capture.name}`}
-                        loading="lazy"
-                        className="mx-auto h-52 w-full rounded-md bg-white object-contain shadow-sm transition-transform group-hover:scale-[1.01]"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between gap-3 border-t border-(--hairline) px-4 py-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-xs text-(--muted)">{capture.title}</p>
-                        <p className="mt-0.5 truncate text-sm font-medium">{capture.name}</p>
-                      </div>
-                      <span
-                        className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] capitalize ${statusTone[capture.status]}`}
-                      >
-                        {capture.status}
-                      </span>
-                    </div>
-                  </Card>
-                </button>
+              {stops.map((stop) => (
+                <ReviewStopCard
+                  key={stop.key}
+                  stop={stop}
+                  selectedId={selected?.id ?? null}
+                  active={selectedStop?.key === stop.key}
+                  expanded={expandedGroups.has(stop.key)}
+                  onSelect={(captureId) => setParam("story", captureId)}
+                  onToggleExpanded={() =>
+                    setExpandedGroups((current) => {
+                      const next = new Set(current);
+                      if (next.has(stop.key)) next.delete(stop.key);
+                      else next.add(stop.key);
+                      return next;
+                    })
+                  }
+                />
               ))}
             </div>
           ) : (
             <Card className="p-6 text-center text-sm text-(--muted)">
-              No component captures match “{query}”.
+              {filter === "changes" && query.trim() === "" ? (
+                <>
+                  No visual changes to review.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setParam("filter", "all")}
+                    className="font-medium text-(--accent) hover:underline"
+                  >
+                    Show all ({data.captures.length})
+                  </button>
+                </>
+              ) : (
+                <>No component captures match “{query}”.</>
+              )}
             </Card>
           )}
         </>
@@ -492,6 +579,97 @@ export function StorybookPreviewDetail() {
         </Card>
       )}
     </div>
+  );
+}
+
+/**
+ * One stop in the review loop: a single capture, or a group of stories that
+ * share the exact same visual change and review together.
+ */
+function ReviewStopCard({
+  stop,
+  selectedId,
+  active,
+  expanded,
+  onSelect,
+  onToggleExpanded,
+}: {
+  stop: ReviewStop;
+  selectedId: string | null;
+  active: boolean;
+  expanded: boolean;
+  onSelect: (captureId: string) => void;
+  onToggleExpanded: () => void;
+}) {
+  const representative =
+    stop.captures.find((capture) => capture.id === selectedId) ?? stop.captures[0]!;
+  const isGroup = stop.captures.length > 1;
+  return (
+    <Card
+      className={`group overflow-hidden transition-colors ${active ? "border-(--accent)" : ""}`}
+    >
+      <button
+        type="button"
+        onClick={() => onSelect(representative.id)}
+        className="block w-full text-left"
+      >
+        <div className="block bg-[linear-gradient(45deg,var(--surface-2)_25%,transparent_25%),linear-gradient(-45deg,var(--surface-2)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,var(--surface-2)_75%),linear-gradient(-45deg,transparent_75%,var(--surface-2)_75%)] bg-size-[18px_18px] bg-position-[0_0,0_9px,9px_-9px,-9px_0] p-3">
+          <img
+            src={representative.imageUrl || representative.baselineImageUrl}
+            alt={`${representative.title} — ${representative.name}`}
+            loading="lazy"
+            className="mx-auto h-52 w-full rounded-md bg-white object-contain shadow-sm transition-transform group-hover:scale-[1.01]"
+          />
+        </div>
+        <div className="flex items-center justify-between gap-3 border-t border-(--hairline) px-4 py-3">
+          <div className="min-w-0">
+            <p className="truncate text-xs text-(--muted)">{representative.title}</p>
+            <p className="mt-0.5 truncate text-sm font-medium">{representative.name}</p>
+          </div>
+          <span
+            className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] capitalize ${statusTone[representative.status]}`}
+          >
+            {representative.status}
+          </span>
+        </div>
+      </button>
+      {isGroup ? (
+        <div className="border-t border-(--hairline)">
+          <button
+            type="button"
+            onClick={onToggleExpanded}
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-medium text-(--accent) hover:bg-(--surface-2)"
+          >
+            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <Layers size={13} /> {stop.captures.length} stories with this same change
+          </button>
+          {expanded ? (
+            <ul className="border-t border-(--hairline)">
+              {stop.captures.map((capture) => (
+                <li key={capture.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(capture.id)}
+                    className={`flex w-full items-baseline gap-2 px-4 py-2 text-left text-xs hover:bg-(--surface-2) ${capture.id === selectedId ? "bg-(--accent-wash)" : ""}`}
+                  >
+                    <span className="text-(--muted)">{capture.title}</span>
+                    <span className="font-medium">{capture.name}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
+function Kbd({ children }: { children: ReactNode }) {
+  return (
+    <kbd className="rounded border border-(--border) bg-(--surface-2) px-1 py-0.5 font-mono text-[10px]">
+      {children}
+    </kbd>
   );
 }
 

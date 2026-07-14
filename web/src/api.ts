@@ -129,6 +129,10 @@ export interface StorybookCapture {
   baselineImageUrl?: string;
   diffImageUrl?: string;
   status: "changed" | "new" | "removed" | "unchanged" | "uncompared";
+  /** Content hash of this run's capture, when the uploader provided one. */
+  sha256?: string;
+  /** Content hash of the baseline capture, when the uploader provided one. */
+  baselineSha256?: string;
 }
 
 export interface StorybookDiffSummary {
