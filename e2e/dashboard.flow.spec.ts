@@ -171,13 +171,14 @@ test.describe("mobile product playback", () => {
     await page.getByRole("button", { name: "Open navigation" }).click();
     const drawer = page.locator('aside[aria-label="Dashboard navigation"]');
     await expect(drawer).toBeVisible();
-    // The slim rail: Recent repos instead of the old org→repo tree with sub-links.
-    await expect(drawer.getByText("Recent", { exact: true })).toBeVisible();
+    // The rail lists every org and repo, but section sub-links live in the tab bar.
+    await expect(drawer.getByText("Repositories", { exact: true })).toBeVisible();
     await expect(drawer.getByRole("link", { name: "Needs attention" })).toBeVisible();
+    await expect(drawer.locator('a[href*="/o/covallaby"]')).toBeVisible();
     await expect(drawer.getByRole("link", { name: "Component captures" })).toHaveCount(0);
     await chapter(page, testInfo, "02-mobile-navigation");
-    // Repo sections live in the tab bar now: hop to the repo via Recent, then tab over.
-    await drawer.getByRole("link", { name: "covallaby", exact: true }).click();
+    // Repo sections live in the tab bar now: hop to the repo, then tab over.
+    await drawer.locator('a[href$="/r/covallaby/covallaby"]').click();
     await expect(page).toHaveURL(/#\/r\/covallaby\/covallaby$/);
     await page
       .getByRole("navigation", { name: "Repository sections" })
