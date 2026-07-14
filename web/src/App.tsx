@@ -1,6 +1,14 @@
 import { ChevronDown, Github, LayoutDashboard, Menu, Moon, Sun, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import {
+  Link,
+  Navigate,
+  type RouteObject,
+  useLocation,
+  useNavigate,
+  useRoutes,
+  useSearchParams,
+} from "react-router-dom";
 import {
   type GitHubAppStatus,
   IS_DEMO,
@@ -186,7 +194,7 @@ function OrgSection({ group, pathname }: { group: OwnerGroup; pathname: string }
     <div className="mt-1.5 first:mt-0">
       <div className="flex items-center gap-1">
         <Link
-          to={`/?org=${encodeURIComponent(group.owner)}`}
+          to={`/o/${encodeURIComponent(group.owner)}`}
           title={`${group.owner} overview`}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-(--surface-2)"
         >
@@ -372,18 +380,26 @@ function tailLabel(rest: string): string | null {
   return null;
 }
 
-/** Header dropdown to scope the Overview to a single org (or all). */
+const LAST_ORG_KEY = "covallaby-last-org";
+
+/** The org an app path is scoped to: `/o/:owner` or `/r/:owner/...` — null elsewhere. */
+export function orgFromPathname(pathname: string): string | null {
+  const match = /^\/[or]\/([^/]+)/.exec(pathname);
+  return match ? decodeURIComponent(match[1]!) : null;
+}
+
+/** Header dropdown to jump to an org's overview (or all orgs). */
 function OrgSwitcher({ repos }: { repos: RepoOverview[] }) {
   const owners = groupReposByOwner(repos).map((g) => g.owner);
   const navigate = useNavigate();
-  const { search } = useLocation();
-  const current = new URLSearchParams(search).get("org");
+  const { pathname } = useLocation();
+  const current = orgFromPathname(pathname);
   const [open, setOpen] = useState(false);
   if (owners.length < 2) return null;
 
   const pick = (org: string | null) => {
     setOpen(false);
-    navigate(org ? `/?org=${encodeURIComponent(org)}` : "/");
+    navigate(org ? `/o/${encodeURIComponent(org)}` : "/");
   };
 
   return (
@@ -433,34 +449,107 @@ function OrgSwitcher({ repos }: { repos: RepoOverview[] }) {
   );
 }
 
+export interface Crumb {
+  label: string;
+  /** Link target — absent on the trailing (current-page) crumb. */
+  to?: string;
+  /** Render in the mono font (repo names). */
+  mono?: boolean;
+}
+
+/** The breadcrumb spine for a pathname: Overview / org / repo / section-or-entity. */
+export function crumbTrail(pathname: string): Crumb[] {
+  const crumbs: Crumb[] = [{ label: "Overview", to: "/" }];
+  const org = /^\/o\/([^/]+)\/?$/.exec(pathname);
+  if (org) {
+    crumbs.push({ label: decodeURIComponent(org[1]!) });
+    return crumbs;
+  }
+  const repo = /^\/r\/([^/]+)\/([^/]+)(?:\/(.*))?$/.exec(pathname);
+  if (repo) {
+    crumbs.push({ label: decodeURIComponent(repo[1]!), to: `/o/${repo[1]}` });
+    crumbs.push({
+      label: decodeURIComponent(repo[2]!),
+      to: `/r/${repo[1]}/${repo[2]}`,
+      mono: true,
+    });
+    const tail = tailLabel(repo[3] ?? "");
+    if (tail) crumbs.push({ label: tail });
+  }
+  return crumbs;
+}
+
 function Crumbs() {
   const { pathname } = useLocation();
-  const match = /^\/r\/([^/]+)\/([^/]+)(?:\/(.*))?$/.exec(pathname);
-  const tail = match ? tailLabel(match[3] ?? "") : null;
+  const crumbs = crumbTrail(pathname);
   return (
     <div className="flex min-w-0 items-center gap-1.5 text-[13px] text-(--muted)">
-      <Link to="/" className="hidden shrink-0 hover:text-(--ink) sm:block">
-        Overview
-      </Link>
-      {match && (
-        <>
-          <span className="hidden sm:inline">/</span>
-          <Link
-            to={`/r/${match[1]}/${match[2]}`}
-            className="truncate font-mono text-[12.5px] hover:text-(--ink)"
+      {crumbs.map((crumb, i) => {
+        // Keep the trailing two crumbs visible on mobile; the leading tiers collapse.
+        const mobileHidden = i < crumbs.length - 2;
+        // The separator disappears alongside the crumb before it.
+        const prevHidden = i - 1 < crumbs.length - 2;
+        const text = crumb.mono ? "font-mono text-[12.5px]" : "";
+        return (
+          <span
+            key={crumb.to ?? crumb.label}
+            className={`${mobileHidden ? "hidden sm:flex" : "flex"} min-w-0 items-center gap-1.5`}
           >
-            {match[1]}/{match[2]}
-          </Link>
-          {tail && (
-            <>
-              <span>/</span>
-              <span className="truncate text-[12.5px] text-(--ink-2)">{tail}</span>
-            </>
-          )}
-        </>
-      )}
+            {i > 0 && <span className={prevHidden ? "hidden sm:inline" : ""}>/</span>}
+            {crumb.to ? (
+              <Link to={crumb.to} className={`truncate hover:text-(--ink) ${text}`}>
+                {crumb.label}
+              </Link>
+            ) : (
+              <span className={`truncate text-(--ink-2) ${text || "text-[12.5px]"}`}>
+                {crumb.label}
+              </span>
+            )}
+          </span>
+        );
+      })}
     </div>
   );
+}
+
+/** The all-orgs overview at `/` — redirects legacy `/?org=<owner>` links to `/o/:owner`. */
+function HomeRoute({ repos }: { repos: RepoOverview[] | null }) {
+  const [params] = useSearchParams();
+  const org = params.get("org");
+  if (org) return <Navigate to={`/o/${encodeURIComponent(org)}`} replace />;
+  return <Home repos={repos} />;
+}
+
+/** The app's route table. Every repo leaf lives under RepoLayout so the repo shell persists. */
+export function buildRoutes(repos: RepoOverview[] | null): RouteObject[] {
+  return [
+    { path: "/", element: <HomeRoute repos={repos} /> },
+    { path: "/o/:owner", element: <Home repos={repos} /> },
+    {
+      path: "/r/:owner/:name",
+      element: <RepoLayout />,
+      children: [
+        { index: true, element: <Summary /> },
+        { path: "commits", element: <Commits /> },
+        { path: "insights", element: <Insights /> },
+        { path: "uploads", element: <Uploads /> },
+        { path: "u/:id", element: <Upload /> },
+        { path: "playbacks", element: <Playbacks /> },
+        { path: "test-runs/:id", element: <PlaybackDetail /> },
+        {
+          path: "storybook-previews",
+          children: [
+            { index: true, element: <StorybookPreviews /> },
+            { path: ":id", element: <StorybookPreviewDetail /> },
+          ],
+        },
+        { path: "pulls", element: <PullRequests /> },
+        { path: "pr/:pr", element: <PullRequest /> },
+        { path: "compare", element: <CompareBranches /> },
+        { path: "policy", element: <Policy /> },
+      ],
+    },
+  ];
 }
 
 export function App() {
@@ -470,10 +559,17 @@ export function App() {
   const [githubApp, setGitHubApp] = useState<GitHubAppStatus | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { pathname } = useLocation();
+  const routed = useRoutes(buildRoutes(repos));
 
   useEffect(() => {
     void pathname;
     setMobileNavOpen(false);
+  }, [pathname]);
+
+  // Remember the last org overview visited so future sessions can pick up where you left off.
+  useEffect(() => {
+    const org = /^\/o\/([^/]+)/.exec(pathname);
+    if (org) localStorage.setItem(LAST_ORG_KEY, decodeURIComponent(org[1]!));
   }, [pathname]);
 
   useEffect(() => {
@@ -545,7 +641,7 @@ export function App() {
               <Crumbs />
             </div>
             <div className="flex items-center gap-3">
-              {pathname === "/" && repos && repos.length > 0 && <OrgSwitcher repos={repos} />}
+              {repos && repos.length > 0 && <OrgSwitcher repos={repos} />}
               <button
                 type="button"
                 onClick={toggleTheme}
@@ -563,29 +659,7 @@ export function App() {
         </header>
         <main className="min-w-0 overflow-x-clip px-4 py-5 motion-safe:animate-[rise_.3s_cubic-bezier(.21,1.02,.73,1)] sm:px-6 sm:py-7">
           <style>{"@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1}}"}</style>
-          <div className="mx-auto min-w-0 max-w-5xl">
-            <Routes>
-              <Route path="/" element={<Home repos={repos} />} />
-              <Route path="/r/:owner/:name" element={<RepoLayout />}>
-                <Route index element={<Summary />} />
-                <Route path="commits" element={<Commits />} />
-                <Route path="insights" element={<Insights />} />
-                <Route path="uploads" element={<Uploads />} />
-                <Route path="playbacks" element={<Playbacks />} />
-                <Route path="storybook-previews" element={<StorybookPreviews />} />
-                <Route path="pulls" element={<PullRequests />} />
-                <Route path="policy" element={<Policy />} />
-              </Route>
-              <Route path="/r/:owner/:name/pr/:pr" element={<PullRequest />} />
-              <Route path="/r/:owner/:name/compare" element={<CompareBranches />} />
-              <Route path="/r/:owner/:name/u/:id" element={<Upload />} />
-              <Route path="/r/:owner/:name/test-runs/:id" element={<PlaybackDetail />} />
-              <Route
-                path="/r/:owner/:name/storybook-previews/:id"
-                element={<StorybookPreviewDetail />}
-              />
-            </Routes>
-          </div>
+          <div className="mx-auto min-w-0 max-w-5xl">{routed}</div>
         </main>
       </div>
     </div>
