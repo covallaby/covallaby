@@ -21,9 +21,7 @@ test("maintainer finds repository risk and reviews its coverage", async ({ page 
   await expect(page.getByLabel("Branch")).toHaveValue("main");
   await expect(page.getByRole("link", { name: "Compare", exact: true })).toBeVisible();
   await expect(page.getByText("Incomplete", { exact: true })).toBeVisible();
-  await expect(
-    page.getByText(/One commit, three independent signals/),
-  ).toBeVisible();
+  await expect(page.getByText(/One commit, three independent signals/)).toBeVisible();
   await expect(page.getByRole("link", { name: /Journeys.*34 passed/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /Components.*24 states/ })).toBeVisible();
   await chapter(page, testInfo, "02-repository-summary");
