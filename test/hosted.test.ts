@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
+import type { ArtifactStorage } from "../src/artifacts.js";
 import { type HostedConfig, loadHostedConfig } from "../src/hosted/config.js";
 import type { GitHubAppClient } from "../src/hosted/github-app.js";
 import type { GitHubClient } from "../src/hosted/github.js";
@@ -309,5 +310,85 @@ describe("GitHub App installation flow", () => {
       }),
     });
     expect(await fallback.json()).toMatchObject({ ok: true, handled: false });
+  });
+});
+
+describe("hosted review auth", () => {
+  it("accepts reviews from a session covering the repo owner and rejects others", async () => {
+    const store = new SqliteStore(":memory:");
+    const storage: ArtifactStorage = {
+      kind: "local",
+      createUploadUrl: async () => null,
+      createDownloadUrl: async () => null,
+      put: async () => {},
+      get: async () => new Uint8Array(),
+      exists: async () => true,
+      delete: async () => {},
+    };
+    const app = createApp({
+      store,
+      uploadToken: "up",
+      hosted: config,
+      hostedDeps: { github: fakeGitHub },
+      artifactStorage: storage,
+      storybookPreviewBaseUrl: "https://previews.test",
+      storybookPreviewSecret: "preview-secret",
+    });
+    // A mainline baseline (auto-accepted) and a feature run with one new story.
+    const zeros = {
+      pr: null,
+      framework: "storybook",
+      testsPassed: 0,
+      testsFailed: 0,
+      testsSkipped: 0,
+      durationMs: 0,
+    };
+    const base = await store.createTestRun({
+      repo: "acme/app",
+      branch: "main",
+      commit: "m1",
+      ...zeros,
+      reviewState: "auto-accepted",
+    });
+    await store.completeTestRun(base.id);
+    const run = await store.createTestRun({
+      repo: "acme/app",
+      branch: "feat/x",
+      commit: "f1",
+      ...zeros,
+      pr: 1,
+    });
+    await store.createTestArtifact({
+      runId: run.id,
+      name: "_covallaby/captures/button--a.png",
+      kind: "screenshot",
+      contentType: "image/png",
+      sizeBytes: 4,
+      objectKey: `k-${run.id}`,
+      testName: JSON.stringify({
+        id: "button--a",
+        title: "Components/Button",
+        name: "a",
+        sha256: "e".repeat(64),
+      }),
+    });
+    await store.completeTestRun(run.id);
+
+    const review = (cookie?: string) =>
+      app.request(`/api/v1/storybook-previews/${run.id}/review-captures`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+        body: JSON.stringify({ stories: ["button--a"], state: "approved" }),
+      });
+    expect((await review()).status).toBe(401); // hosted mode: no session, no review
+    expect((await review(sessionCookieFor(["bob"]))).status).toBe(401); // wrong account
+    const ok = await review(sessionCookieFor(["acme"]));
+    expect(ok.status).toBe(200);
+    const json = await ok.json();
+    expect(json.run.reviewState).toBe("approved");
+    // The verdict records who reviewed it — the session login.
+    expect(
+      json.captures.find((capture: { id: string }) => capture.id === "button--a").review,
+    ).toMatchObject({ state: "approved", reviewedBy: "alice" });
   });
 });

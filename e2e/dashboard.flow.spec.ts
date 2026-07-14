@@ -84,13 +84,27 @@ test("maintainer discovers browser runs and component previews", async ({ page }
   await expect(page.getByAltText("Pixel diff for With component captures")).toBeVisible();
   await chapter(page, testInfo, "04-component-pixel-diff");
 
+  // Approve the current stop from the keyboard loop and watch progress move.
+  await expect(page.getByText("0 of 2 reviewed")).toBeVisible();
+  await page.keyboard.press("a");
+  await expect(page.getByText("1 of 2 reviewed")).toBeVisible();
+  await expect(page.getByText("approved", { exact: true }).first()).toBeVisible();
+  // Re-pressing the same verdict key returns the stop to pending.
+  await page.keyboard.press("a");
+  await expect(page.getByText("0 of 2 reviewed")).toBeVisible();
+  // Reject via the visible button instead of the keyboard.
+  await page.getByRole("button", { name: "Reject", exact: true }).click();
+  await expect(page.getByText("1 of 2 reviewed")).toBeVisible();
+  await expect(page.getByText("rejected", { exact: true }).first()).toBeVisible();
+  await chapter(page, testInfo, "05-review-verdicts");
+
   // Lateral navigation: [ jumps to the previous run; the exhausted end renders disabled.
   await expect(page.getByRole("link", { name: "Previous run" })).toBeVisible();
   await page.keyboard.press("[");
   await expect(page).toHaveURL(/storybook-previews\/17$/);
   await expect(page.getByRole("link", { name: "Next run" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Previous run" })).toHaveCount(0);
-  await chapter(page, testInfo, "05-lateral-run-navigation");
+  await chapter(page, testInfo, "06-lateral-run-navigation");
   await expectHealthyPage(page);
 });
 

@@ -127,6 +127,42 @@ export interface CreateTestRunInput {
   reviewState?: ReviewState;
 }
 
+/**
+ * A human verdict on one story's visual change within a run. Pending is the
+ * absence of a row, so the table only ever holds explicit approve/reject
+ * decisions. The (baselineSha256, sha256) pair records exactly which pixels
+ * the verdict covered: if the diff changes, the stored verdict no longer
+ * applies (Percy semantics), and an identical pair lets an approval carry
+ * over to later runs.
+ */
+export type CaptureReviewState = "approved" | "rejected";
+
+export interface CaptureReviewRow {
+  id: number;
+  runId: number;
+  repo: string;
+  /** The story id the verdict is keyed to within the run. */
+  storyId: string;
+  state: CaptureReviewState;
+  /** Hash of the baseline screenshot the verdict was made against (null for new stories). */
+  baselineSha256: string | null;
+  /** Hash of this run's screenshot (null for removed stories). */
+  sha256: string | null;
+  /** Who reviewed (hosted session login), or null for token/self-hosted reviews. */
+  reviewedBy: string | null;
+  reviewedAt: string;
+}
+
+export interface SetCaptureReviewInput {
+  runId: number;
+  repo: string;
+  storyId: string;
+  state: CaptureReviewState;
+  baselineSha256: string | null;
+  sha256: string | null;
+  reviewedBy: string | null;
+}
+
 export interface CreateTestArtifactInput {
   runId: number;
   name: string;
@@ -200,6 +236,23 @@ export interface Store {
   ): Promise<{ prev: TestRunRow | null; next: TestRunRow | null }>;
   /** Record a human review verdict on a visual capture run. */
   setTestRunReview?(id: number, state: ReviewState): Promise<TestRunRow | null>;
+  /** Upsert a per-story review verdict (keyed by run + story). */
+  setCaptureReview?(input: SetCaptureReviewInput): Promise<CaptureReviewRow>;
+  /** Return a story to pending by removing its verdict row. */
+  clearCaptureReview?(runId: number, storyId: string): Promise<void>;
+  /** All per-story verdicts recorded on a run. */
+  listCaptureReviews?(runId: number): Promise<CaptureReviewRow[]>;
+  /**
+   * The most recent verdict anywhere else in the repo on this exact
+   * (baseline, current) hash pair — the carry-over lookup. Null hashes match
+   * null (new/removed stories key on their single hash).
+   */
+  findCaptureReviewByPair?(
+    repo: string,
+    baselineSha256: string | null,
+    sha256: string | null,
+    excludeRunId: number,
+  ): Promise<CaptureReviewRow | null>;
   deleteTestRun?(id: number): Promise<void>;
   close(): Promise<void>;
 }

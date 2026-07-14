@@ -74,7 +74,10 @@ export function buildCommitChecks(
       ...(!check.components ? (["components"] as const) : []),
     ];
     check.status =
-      check.journey?.status === "failed" || (check.journey?.testsFailed ?? 0) > 0
+      check.journey?.status === "failed" ||
+      (check.journey?.testsFailed ?? 0) > 0 ||
+      // A human rejected this commit's visual changes: it must not ship as-is.
+      check.components?.reviewState === "rejected"
         ? "failed"
         : check.missing.length === 0
           ? "ready"

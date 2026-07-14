@@ -308,4 +308,91 @@ describe.each(stores)("store contract (%s)", (_name, store) => {
     expect(bare.reviewState).toBe("pending");
     expect(bare.baseSha).toBeNull();
   });
+
+  it("records, updates, clears, and carries per-story capture reviews", async () => {
+    const run = async (branch: string, commit: string) =>
+      store.createTestRun!({
+        repo: "acme/capture-reviews",
+        branch,
+        commit,
+        pr: null,
+        framework: "storybook",
+        testsPassed: 0,
+        testsFailed: 0,
+        testsSkipped: 0,
+        durationMs: 0,
+      });
+    const first = await run("feat/a", "cr1");
+    const second = await run("feat/a", "cr2");
+
+    // Upsert keyed by (run, story): the second verdict replaces the first.
+    await store.setCaptureReview!({
+      runId: first.id,
+      repo: first.repo,
+      storyId: "button--primary",
+      state: "approved",
+      baselineSha256: "old-hash",
+      sha256: "new-hash",
+      reviewedBy: "alice",
+    });
+    const updated = await store.setCaptureReview!({
+      runId: first.id,
+      repo: first.repo,
+      storyId: "button--primary",
+      state: "rejected",
+      baselineSha256: "old-hash",
+      sha256: "new-hash",
+      reviewedBy: "bob",
+    });
+    expect(updated.state).toBe("rejected");
+    expect(updated.reviewedBy).toBe("bob");
+    expect(updated.reviewedAt).toBeTruthy();
+
+    // New stories key on a single hash (null baseline round-trips).
+    await store.setCaptureReview!({
+      runId: first.id,
+      repo: first.repo,
+      storyId: "button--new",
+      state: "approved",
+      baselineSha256: null,
+      sha256: "fresh-hash",
+      reviewedBy: null,
+    });
+    const listed = await store.listCaptureReviews!(first.id);
+    expect(listed).toHaveLength(2);
+    expect(listed.find((r) => r.storyId === "button--new")).toMatchObject({
+      state: "approved",
+      baselineSha256: null,
+      sha256: "fresh-hash",
+      reviewedBy: null,
+    });
+
+    // Carry-over lookup matches the exact pair from another run only.
+    const carried = await store.findCaptureReviewByPair!(
+      first.repo,
+      "old-hash",
+      "new-hash",
+      second.id,
+    );
+    expect(carried?.state).toBe("rejected");
+    // The excluded run's own rows never match…
+    expect(
+      await store.findCaptureReviewByPair!(first.repo, "old-hash", "new-hash", first.id),
+    ).toBeNull();
+    // …and neither does a different pair.
+    expect(
+      await store.findCaptureReviewByPair!(first.repo, "other", "new-hash", second.id),
+    ).toBeNull();
+    expect(
+      (await store.findCaptureReviewByPair!(first.repo, null, "fresh-hash", second.id))?.storyId,
+    ).toBe("button--new");
+
+    // Pending is the absence of a row.
+    await store.clearCaptureReview!(first.id, "button--primary");
+    expect(await store.listCaptureReviews!(first.id)).toHaveLength(1);
+
+    // Deleting the run removes its verdicts.
+    await store.deleteTestRun!(first.id);
+    expect(await store.listCaptureReviews!(first.id)).toHaveLength(0);
+  });
 });

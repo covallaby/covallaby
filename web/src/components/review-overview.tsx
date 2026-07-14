@@ -86,6 +86,20 @@ export function PortfolioReviewQueue({ repos }: { repos: RepoOverview[] }) {
           tone: "bad",
           icon: AlertTriangle,
         });
+      } else if (check?.components?.reviewState === "rejected") {
+        const preview = check.components;
+        review.push({
+          id: `preview-${preview.id}`,
+          priority: 0,
+          createdAt: preview.createdAt,
+          repo: repo.repo,
+          title: "Visual changes were rejected",
+          detail: preview.pr ? `PR #${preview.pr} · ${preview.branch}` : preview.branch,
+          href: `/r/${repo.repo}/storybook-previews/${preview.id}`,
+          action: "Review captures",
+          tone: "bad",
+          icon: AlertTriangle,
+        });
       } else if (check?.status === "partial" && check.commit === repo.latest.commit) {
         review.push({
           id: `commit-${check.commit}`,
@@ -243,7 +257,9 @@ export function RepositoryCommitStatus({
           value={check.components ? `${check.components.imageCount ?? 0} states` : "Missing"}
           detail={
             check.components
-              ? "Rendered states captured from Storybook"
+              ? check.components.reviewState === "rejected"
+                ? "Visual changes rejected in review"
+                : "Rendered states captured from Storybook"
               : "No component captures for this SHA"
           }
           href={

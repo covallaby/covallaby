@@ -156,6 +156,16 @@ export interface StorybookPreview extends TestRun {
   imageCount?: number;
 }
 
+/** A capture's review verdict; present only on reviewable (changed/new/removed) captures. */
+export interface CaptureReview {
+  state: ReviewState;
+  /** Hosted session login of the reviewer; null for token / self-hosted reviews. */
+  reviewedBy?: string | null;
+  reviewedAt?: string;
+  /** True when an approval carried over from an identical diff in another run. */
+  carried?: boolean;
+}
+
 export interface StorybookCapture {
   artifactId: number | null;
   id: string;
@@ -169,6 +179,17 @@ export interface StorybookCapture {
   sha256?: string;
   /** Content hash of the baseline capture, when the uploader provided one. */
   baselineSha256?: string;
+  review?: CaptureReview;
+}
+
+export interface StorybookPreviewDetail {
+  run: StorybookPreview;
+  previewUrl: string;
+  baselineRun: StorybookPreview | null;
+  baseline?: BaselineInfo;
+  neighbors?: Neighbors<StorybookPreview>;
+  summary: StorybookDiffSummary;
+  captures: StorybookCapture[];
 }
 
 export interface StorybookDiffSummary {
@@ -241,6 +262,16 @@ async function get<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function post<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return (await res.json()) as T;
+}
+
 /** Hosted-mode auth state. */
 export interface Me {
   authenticated: boolean;
@@ -296,16 +327,13 @@ const liveApi = {
     ),
   storybookPreviews: (repo: string) =>
     get<{ previews: StorybookPreview[] }>(`/api/v1/repos/${repo}/storybook-previews`),
-  storybookPreview: (id: string) =>
-    get<{
-      run: StorybookPreview;
-      previewUrl: string;
-      baselineRun: StorybookPreview | null;
-      baseline?: BaselineInfo;
-      neighbors?: Neighbors<StorybookPreview>;
-      summary: StorybookDiffSummary;
-      captures: StorybookCapture[];
-    }>(`/api/v1/storybook-previews/${id}`),
+  storybookPreview: (id: string) => get<StorybookPreviewDetail>(`/api/v1/storybook-previews/${id}`),
+  /** Approve/reject/reset the given stories; the server re-derives the run verdict. */
+  reviewCaptures: (id: string, stories: string[], state: "approved" | "rejected" | "pending") =>
+    post<StorybookPreviewDetail>(`/api/v1/storybook-previews/${id}/review-captures`, {
+      stories,
+      state,
+    }),
   reviewSignals: (repo?: string) =>
     get<{ repositories: ReviewSignals[] }>(
       `/api/v1/review-signals${repo ? `?repo=${encodeURIComponent(repo)}` : ""}`,
@@ -323,6 +351,26 @@ const liveApi = {
 
 /** In the static demo build the same UI runs on captured fixtures. */
 export const IS_DEMO = import.meta.env.VITE_DEMO === "1";
+
+/** Demo-only review ledger so the approve/reject loop works on the fixtures. */
+const demoReviews = new Map<string, CaptureReview>();
+
+function demoAnnotate(detail: StorybookPreviewDetail): StorybookPreviewDetail {
+  const captures = detail.captures.map((capture) =>
+    capture.status === "changed" || capture.status === "new" || capture.status === "removed"
+      ? { ...capture, review: demoReviews.get(capture.id) ?? { state: "pending" as const } }
+      : capture,
+  );
+  const reviewable = captures.filter((capture) => capture.review);
+  const reviewState: ReviewState = reviewable.some(
+    (capture) => capture.review?.state === "rejected",
+  )
+    ? "rejected"
+    : reviewable.length > 0 && reviewable.every((capture) => capture.review?.state === "approved")
+      ? "approved"
+      : "pending";
+  return { ...detail, run: { ...detail.run, reviewState }, captures };
+}
 
 // Lazy so the ~900KB fixture bundle never loads in the real server build.
 let demo: typeof liveApi | null = null;
@@ -399,6 +447,7 @@ export const api: typeof liveApi = IS_DEMO
                     durationMs: 0,
                     createdAt: "2026-07-11T18:42:00.000Z",
                     completedAt: "2026-07-11T18:43:02.000Z",
+                    reviewState: "pending" as const,
                     artifactCount: 28,
                     imageCount: 24,
                   },
@@ -416,6 +465,7 @@ export const api: typeof liveApi = IS_DEMO
                     durationMs: 0,
                     createdAt: "2026-07-10T16:14:00.000Z",
                     completedAt: "2026-07-10T16:15:12.000Z",
+                    reviewState: "auto-accepted" as const,
                     artifactCount: 22,
                     imageCount: 19,
                   },
@@ -423,105 +473,114 @@ export const api: typeof liveApi = IS_DEMO
               }),
         }),
       storybookPreview: (id: string) =>
-        Promise.resolve({
-          run: {
-            id: Number(id),
-            repo: "covallaby/covallaby",
-            branch: "feature/checkout-polish",
-            commit: "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
-            pr: 128,
-            framework: "storybook",
-            status: "complete" as const,
-            testsPassed: 0,
-            testsFailed: 0,
-            testsSkipped: 0,
-            durationMs: 0,
-            createdAt: "2026-07-11T18:42:00.000Z",
-            completedAt: "2026-07-11T18:43:02.000Z",
-            artifactCount: 3,
-            imageCount: 2,
-          },
-          previewUrl: "https://example.invalid/storybook",
-          baselineRun: {
-            id: 17,
-            repo: "covallaby/covallaby",
-            branch: "main",
-            commit: "72d41f0dd8",
-            pr: null,
-            framework: "storybook",
-            status: "complete" as const,
-            testsPassed: 0,
-            testsFailed: 0,
-            testsSkipped: 0,
-            durationMs: 0,
-            createdAt: "2026-07-10T16:14:00.000Z",
-            completedAt: "2026-07-10T16:15:12.000Z",
-          },
-          // Two-run demo history: 18 (PR head) follows 17 (main baseline).
-          neighbors:
-            Number(id) > 17
-              ? {
-                  prev: {
-                    id: 17,
-                    repo: "covallaby/covallaby",
-                    branch: "main",
-                    commit: "72d41f0dd8e6abfe280d9e340c277421f3607184",
-                    pr: null,
-                    framework: "storybook",
-                    status: "complete" as const,
-                    testsPassed: 0,
-                    testsFailed: 0,
-                    testsSkipped: 0,
-                    durationMs: 0,
-                    createdAt: "2026-07-10T16:14:00.000Z",
-                    completedAt: "2026-07-10T16:15:12.000Z",
-                  },
-                  next: null,
-                }
-              : {
-                  prev: null,
-                  next: {
-                    id: 18,
-                    repo: "covallaby/covallaby",
-                    branch: "feature/checkout-polish",
-                    commit: "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
-                    pr: 128,
-                    framework: "storybook",
-                    status: "complete" as const,
-                    testsPassed: 0,
-                    testsFailed: 0,
-                    testsSkipped: 0,
-                    durationMs: 0,
-                    createdAt: "2026-07-11T18:42:00.000Z",
-                    completedAt: "2026-07-11T18:43:02.000Z",
-                  },
-                },
-          summary: { changed: 1, new: 1, removed: 0, unchanged: 0, uncompared: 0 },
-          captures: [
-            {
-              artifactId: 1,
-              id: "dashboard--review-queue",
-              title: "Dashboard/Review queue",
-              name: "With component captures",
-              status: "changed" as const,
-              imageUrl:
-                "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='100%25' height='100%25' fill='%231c1a17'/%3E%3Crect x='80' y='80' width='640' height='290' rx='18' fill='%2328231d' stroke='%23483f34'/%3E%3Ccircle cx='130' cy='135' r='18' fill='%2322c55e'/%3E%3Crect x='170' y='118' width='360' height='18' rx='9' fill='%23f5f1e8'/%3E%3Crect x='170' y='150' width='260' height='12' rx='6' fill='%238f8778'/%3E%3C/svg%3E",
-              baselineImageUrl:
-                "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='100%25' height='100%25' fill='%231c1a17'/%3E%3Crect x='100' y='95' width='600' height='260' rx='12' fill='%2328231d' stroke='%23483f34'/%3E%3Ccircle cx='145' cy='145' r='15' fill='%23d59b16'/%3E%3Crect x='180' y='130' width='300' height='16' rx='8' fill='%23f5f1e8'/%3E%3C/svg%3E",
-              diffImageUrl:
-                "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='100%25' height='100%25' fill='%231c1a17'/%3E%3Crect x='80' y='80' width='640' height='290' rx='18' fill='none' stroke='%23ff2f92' stroke-width='8'/%3E%3C/svg%3E",
+        Promise.resolve(
+          demoAnnotate({
+            run: {
+              id: Number(id),
+              repo: "covallaby/covallaby",
+              branch: "feature/checkout-polish",
+              commit: "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
+              pr: 128,
+              framework: "storybook",
+              status: "complete" as const,
+              testsPassed: 0,
+              testsFailed: 0,
+              testsSkipped: 0,
+              durationMs: 0,
+              createdAt: "2026-07-11T18:42:00.000Z",
+              completedAt: "2026-07-11T18:43:02.000Z",
+              artifactCount: 3,
+              imageCount: 2,
             },
-            {
-              artifactId: 2,
-              id: "playback--steps",
-              title: "Visual testing/Playback",
-              name: "Step gallery",
-              status: "new" as const,
-              imageUrl:
-                "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='100%25' height='100%25' fill='%231c1a17'/%3E%3Crect x='60' y='60' width='205' height='330' rx='14' fill='%2328231d'/%3E%3Crect x='290' y='60' width='450' height='330' rx='14' fill='%23f5f1e8'/%3E%3C/svg%3E",
+            previewUrl: "https://example.invalid/storybook",
+            baselineRun: {
+              id: 17,
+              repo: "covallaby/covallaby",
+              branch: "main",
+              commit: "72d41f0dd8",
+              pr: null,
+              framework: "storybook",
+              status: "complete" as const,
+              testsPassed: 0,
+              testsFailed: 0,
+              testsSkipped: 0,
+              durationMs: 0,
+              createdAt: "2026-07-10T16:14:00.000Z",
+              completedAt: "2026-07-10T16:15:12.000Z",
             },
-          ],
-        }),
+            // Two-run demo history: 18 (PR head) follows 17 (main baseline).
+            neighbors:
+              Number(id) > 17
+                ? {
+                    prev: {
+                      id: 17,
+                      repo: "covallaby/covallaby",
+                      branch: "main",
+                      commit: "72d41f0dd8e6abfe280d9e340c277421f3607184",
+                      pr: null,
+                      framework: "storybook",
+                      status: "complete" as const,
+                      testsPassed: 0,
+                      testsFailed: 0,
+                      testsSkipped: 0,
+                      durationMs: 0,
+                      createdAt: "2026-07-10T16:14:00.000Z",
+                      completedAt: "2026-07-10T16:15:12.000Z",
+                    },
+                    next: null,
+                  }
+                : {
+                    prev: null,
+                    next: {
+                      id: 18,
+                      repo: "covallaby/covallaby",
+                      branch: "feature/checkout-polish",
+                      commit: "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
+                      pr: 128,
+                      framework: "storybook",
+                      status: "complete" as const,
+                      testsPassed: 0,
+                      testsFailed: 0,
+                      testsSkipped: 0,
+                      durationMs: 0,
+                      createdAt: "2026-07-11T18:42:00.000Z",
+                      completedAt: "2026-07-11T18:43:02.000Z",
+                    },
+                  },
+            summary: { changed: 1, new: 1, removed: 0, unchanged: 0, uncompared: 0 },
+            captures: [
+              {
+                artifactId: 1,
+                id: "dashboard--review-queue",
+                title: "Dashboard/Review queue",
+                name: "With component captures",
+                status: "changed" as const,
+                imageUrl:
+                  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='100%25' height='100%25' fill='%231c1a17'/%3E%3Crect x='80' y='80' width='640' height='290' rx='18' fill='%2328231d' stroke='%23483f34'/%3E%3Ccircle cx='130' cy='135' r='18' fill='%2322c55e'/%3E%3Crect x='170' y='118' width='360' height='18' rx='9' fill='%23f5f1e8'/%3E%3Crect x='170' y='150' width='260' height='12' rx='6' fill='%238f8778'/%3E%3C/svg%3E",
+                baselineImageUrl:
+                  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='100%25' height='100%25' fill='%231c1a17'/%3E%3Crect x='100' y='95' width='600' height='260' rx='12' fill='%2328231d' stroke='%23483f34'/%3E%3Ccircle cx='145' cy='145' r='15' fill='%23d59b16'/%3E%3Crect x='180' y='130' width='300' height='16' rx='8' fill='%23f5f1e8'/%3E%3C/svg%3E",
+                diffImageUrl:
+                  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='100%25' height='100%25' fill='%231c1a17'/%3E%3Crect x='80' y='80' width='640' height='290' rx='18' fill='none' stroke='%23ff2f92' stroke-width='8'/%3E%3C/svg%3E",
+              },
+              {
+                artifactId: 2,
+                id: "playback--steps",
+                title: "Visual testing/Playback",
+                name: "Step gallery",
+                status: "new" as const,
+                imageUrl:
+                  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='100%25' height='100%25' fill='%231c1a17'/%3E%3Crect x='60' y='60' width='205' height='330' rx='14' fill='%2328231d'/%3E%3Crect x='290' y='60' width='450' height='330' rx='14' fill='%23f5f1e8'/%3E%3C/svg%3E",
+              },
+            ],
+          }),
+        ),
+      reviewCaptures: (id: string, stories: string[], state) => {
+        for (const story of stories) {
+          if (state === "pending") demoReviews.delete(story);
+          else demoReviews.set(story, { state, reviewedAt: new Date().toISOString() });
+        }
+        return api.storybookPreview(id);
+      },
       reviewSignals: async (repo?: string) => {
         const names = repo ? [repo] : ["acme/megarepo", "covallaby/covallaby", "covallaby/server"];
         return {

@@ -2,12 +2,14 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  type CaptureReviewRow,
   type CreateTestArtifactInput,
   type CreateTestRunInput,
   type PROverview,
   type RecordUploadInput,
   type RepoOverview,
   type ReviewState,
+  type SetCaptureReviewInput,
   type Store,
   type Subscription,
   type TestArtifactRow,
@@ -62,6 +64,14 @@ CREATE TABLE IF NOT EXISTS test_artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_test_artifacts_run ON test_artifacts(run_id);
 CREATE INDEX IF NOT EXISTS idx_test_artifacts_run_name ON test_artifacts(run_id, name);
+CREATE TABLE IF NOT EXISTS capture_reviews (
+  id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
+  repo TEXT NOT NULL, story_id TEXT NOT NULL, state TEXT NOT NULL,
+  baseline_sha256 TEXT, sha256 TEXT, reviewed_by TEXT,
+  reviewed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  UNIQUE(run_id, story_id)
+);
+CREATE INDEX IF NOT EXISTS idx_capture_reviews_pair ON capture_reviews(repo, baseline_sha256, sha256);
 `;
 
 interface RawRow {
@@ -146,6 +156,32 @@ function toTestRun(r: RawTestRun): TestRunRow {
     reviewState: r.review_state,
     createdAt: r.created_at,
     completedAt: r.completed_at,
+  };
+}
+
+type RawCaptureReview = {
+  id: number;
+  run_id: number;
+  repo: string;
+  story_id: string;
+  state: CaptureReviewRow["state"];
+  baseline_sha256: string | null;
+  sha256: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string;
+};
+
+function toCaptureReview(r: RawCaptureReview): CaptureReviewRow {
+  return {
+    id: r.id,
+    runId: r.run_id,
+    repo: r.repo,
+    storyId: r.story_id,
+    state: r.state,
+    baselineSha256: r.baseline_sha256,
+    sha256: r.sha256,
+    reviewedBy: r.reviewed_by,
+    reviewedAt: r.reviewed_at,
   };
 }
 
@@ -590,7 +626,62 @@ export class SqliteStore implements Store {
     return this.getTestRunRow(id);
   }
 
+  async setCaptureReview(input: SetCaptureReviewInput): Promise<CaptureReviewRow> {
+    this.db
+      .prepare(
+        `INSERT INTO capture_reviews (run_id, repo, story_id, state, baseline_sha256, sha256, reviewed_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(run_id, story_id) DO UPDATE SET
+           state = excluded.state, baseline_sha256 = excluded.baseline_sha256,
+           sha256 = excluded.sha256, reviewed_by = excluded.reviewed_by,
+           reviewed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+      )
+      .run(
+        input.runId,
+        input.repo,
+        input.storyId,
+        input.state,
+        input.baselineSha256,
+        input.sha256,
+        input.reviewedBy,
+      );
+    const raw = this.db
+      .prepare("SELECT * FROM capture_reviews WHERE run_id = ? AND story_id = ?")
+      .get(input.runId, input.storyId) as unknown as RawCaptureReview;
+    return toCaptureReview(raw);
+  }
+
+  async clearCaptureReview(runId: number, storyId: string): Promise<void> {
+    this.db
+      .prepare("DELETE FROM capture_reviews WHERE run_id = ? AND story_id = ?")
+      .run(runId, storyId);
+  }
+
+  async listCaptureReviews(runId: number): Promise<CaptureReviewRow[]> {
+    const rows = this.db
+      .prepare("SELECT * FROM capture_reviews WHERE run_id = ? ORDER BY id")
+      .all(runId) as unknown as RawCaptureReview[];
+    return rows.map(toCaptureReview);
+  }
+
+  async findCaptureReviewByPair(
+    repo: string,
+    baselineSha256: string | null,
+    sha256: string | null,
+    excludeRunId: number,
+  ): Promise<CaptureReviewRow | null> {
+    const raw = this.db
+      .prepare(
+        `SELECT * FROM capture_reviews
+         WHERE repo = ? AND baseline_sha256 IS ? AND sha256 IS ? AND run_id != ?
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .get(repo, baselineSha256, sha256, excludeRunId) as unknown as RawCaptureReview | undefined;
+    return raw ? toCaptureReview(raw) : null;
+  }
+
   async deleteTestRun(id: number): Promise<void> {
+    this.db.prepare("DELETE FROM capture_reviews WHERE run_id = ?").run(id);
     this.db.prepare("DELETE FROM test_artifacts WHERE run_id = ?").run(id);
     this.db.prepare("DELETE FROM test_runs WHERE id = ?").run(id);
   }

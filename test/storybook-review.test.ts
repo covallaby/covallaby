@@ -6,9 +6,12 @@ import {
   isChange,
   parseReviewFilter,
   parseReviewView,
+  reviewActionState,
   reviewKeyAction,
+  reviewProgress,
   stepStop,
   stopIndexOf,
+  stopReviewState,
 } from "../web/src/pages/storybook-review.js";
 
 const capture = (
@@ -129,13 +132,65 @@ describe("reviewKeyAction", () => {
     expect(reviewKeyAction("ArrowUp", free)).toBe("prev");
     expect(reviewKeyAction("d", free)).toBe("toggle-diff");
     expect(reviewKeyAction("b", free)).toBe("swap");
-    expect(reviewKeyAction("a", free)).toBeNull();
+    expect(reviewKeyAction("a", free)).toBe("approve");
+    expect(reviewKeyAction("x", free)).toBe("reject");
+    expect(reviewKeyAction("u", free)).toBe("unreview");
     expect(reviewKeyAction("Enter", free)).toBeNull();
   });
 
   it("never hijacks typing or browser shortcuts", () => {
     expect(reviewKeyAction("j", { editable: true, modifier: false })).toBeNull();
     expect(reviewKeyAction("d", { editable: false, modifier: true })).toBeNull();
+    expect(reviewKeyAction("a", { editable: true, modifier: false })).toBeNull();
+  });
+});
+
+describe("review verdict helpers", () => {
+  const reviewed = (
+    id: string,
+    state: "pending" | "approved" | "rejected" | "auto-accepted",
+  ): StorybookCapture => ({ ...capture(id, "changed"), review: { state } });
+
+  it("re-pressing a verdict key returns the stop to pending", () => {
+    expect(reviewActionState("approve", "pending")).toBe("approved");
+    expect(reviewActionState("approve", "approved")).toBe("pending");
+    expect(reviewActionState("approve", "rejected")).toBe("approved");
+    expect(reviewActionState("reject", "pending")).toBe("rejected");
+    expect(reviewActionState("reject", "rejected")).toBe("pending");
+    expect(reviewActionState("unreview", "approved")).toBe("pending");
+    expect(reviewActionState("unreview", undefined)).toBe("pending");
+  });
+
+  it("a stop's aggregate verdict is the state its members share", () => {
+    expect(stopReviewState({ key: "k", captures: [reviewed("a", "approved")] })?.state).toBe(
+      "approved",
+    );
+    expect(
+      stopReviewState({
+        key: "k",
+        captures: [reviewed("a", "approved"), reviewed("b", "approved")],
+      })?.state,
+    ).toBe("approved");
+    // Mixed verdicts read as pending, so the next key press applies cleanly.
+    expect(
+      stopReviewState({
+        key: "k",
+        captures: [reviewed("a", "approved"), reviewed("b", "rejected")],
+      })?.state,
+    ).toBe("pending");
+    expect(stopReviewState({ key: "k", captures: [capture("a", "unchanged")] })).toBeUndefined();
+  });
+
+  it("counts progress over reviewable captures only", () => {
+    expect(
+      reviewProgress([
+        reviewed("a", "approved"),
+        reviewed("b", "pending"),
+        reviewed("c", "rejected"),
+        capture("d", "unchanged"),
+      ]),
+    ).toEqual({ reviewed: 2, total: 3 });
+    expect(reviewProgress([capture("d", "unchanged")])).toEqual({ reviewed: 0, total: 0 });
   });
 });
 
