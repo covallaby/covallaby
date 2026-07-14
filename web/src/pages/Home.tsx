@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import {
   type PortfolioTrends,
   type RepoOverview,
@@ -89,8 +89,7 @@ function Tile({ label, value, sub }: { label: string; value: React.ReactNode; su
 }
 
 export function Home({ repos }: { repos: RepoOverview[] | null }) {
-  const navigate = useNavigate();
-  const [params] = useSearchParams();
+  const { owner } = useParams();
   const [activity, setActivity] = useState<UploadRow[] | null>(null);
   const [trends, setTrends] = useState<PortfolioTrends | null>(null);
   useEffect(() => {
@@ -142,7 +141,7 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
     );
   }
 
-  const orgFilter = params.get("org");
+  const orgFilter = owner ?? null;
   const shown = orgFilter ? repos.filter((r) => r.repo.split("/")[0] === orgFilter) : repos;
   const shownActivity = orgFilter
     ? (activity ?? []).filter((u) => u.repo.split("/")[0] === orgFilter)
@@ -244,7 +243,7 @@ export function Home({ repos }: { repos: RepoOverview[] | null }) {
         <section key={group.owner} className="mt-6">
           <div className="mb-3 flex items-center gap-2.5">
             <Link
-              to={`/?org=${encodeURIComponent(group.owner)}`}
+              to={`/o/${encodeURIComponent(group.owner)}`}
               className="flex items-center gap-2.5 transition-opacity hover:opacity-75"
               title={`${group.owner} overview`}
             >

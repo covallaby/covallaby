@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { type UploadDetail, api, formatPercent, severity } from "../api.js";
 import { Breadcrumb, Hotspots, TreeOutline, buildTree } from "../components/explorer.js";
 import { PageSkeleton } from "../components/skeleton.js";
@@ -33,8 +33,7 @@ const SWATCHES = [
 ] as const;
 
 export function Upload() {
-  const { owner, name, id } = useParams();
-  const repo = `${owner}/${name}`;
+  const { id } = useParams();
   const [data, setData] = useState<UploadDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [params, setParams] = useSearchParams();
@@ -389,12 +388,6 @@ export function Upload() {
           />
         </Card>
       </div>
-
-      <p className="text-sm">
-        <Link to={`/r/${repo}`} className="text-(--ink-2) hover:underline">
-          ← Back to {repo}
-        </Link>
-      </p>
     </div>
   );
 }
