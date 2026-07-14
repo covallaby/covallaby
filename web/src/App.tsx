@@ -1,4 +1,4 @@
-import { ChevronDown, Github, LayoutDashboard, Menu, Moon, Sun, X } from "lucide-react";
+import { ChevronDown, Github, Inbox, LayoutDashboard, Menu, Moon, Sun, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   Link,
@@ -13,15 +13,12 @@ import {
   type GitHubAppStatus,
   IS_DEMO,
   type Me,
-  type OwnerGroup,
   type RepoOverview,
   api,
-  formatPercent,
   groupReposByOwner,
-  severity,
   shortRepoName,
 } from "./api.js";
-import { Meter, OwnerAvatar, inkFor } from "./components/ui.js";
+import { OwnerAvatar } from "./components/ui.js";
 import { Commits } from "./pages/Commits.js";
 import { CompareBranches, PullRequest } from "./pages/Compare.js";
 import { Home } from "./pages/Home.js";
@@ -34,6 +31,7 @@ import { Summary } from "./pages/RepoSummary.js";
 import { Uploads } from "./pages/RepoUploads.js";
 import { StorybookPreviewDetail, StorybookPreviews } from "./pages/StorybookPreviews.js";
 import { Upload } from "./pages/Upload.js";
+import { readRecentVisits, recordRepoVisit, selectRecentRepos } from "./recent-repos.js";
 
 import logoUrl from "./assets/logo.png";
 
@@ -87,97 +85,6 @@ function SidebarLink({
   );
 }
 
-function SubLink({
-  to,
-  active,
-  children,
-}: {
-  to: string;
-  active: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <Link
-      to={to}
-      className={`rounded-md px-2.5 py-1 text-[12px] transition-colors ${
-        active ? "font-medium text-(--ink)" : "text-(--muted) hover:text-(--ink)"
-      }`}
-    >
-      {children}
-    </Link>
-  );
-}
-
-/** A repo in the rail: name + coverage %, a mini bar, and — when active — quick links. */
-function RepoNavItem({ r, pathname }: { r: RepoOverview; pathname: string }) {
-  const base = `/r/${r.repo}`;
-  const active = pathname === base || pathname.startsWith(`${base}/`);
-  return (
-    <div>
-      <Link
-        to={base}
-        className={`block rounded-lg px-2.5 py-2 transition-colors ${
-          active ? "bg-(--accent-wash)" : "hover:bg-(--surface-2)"
-        }`}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-(--ink-2)">
-            {shortRepoName(r.repo)}
-          </span>
-          <span
-            className={`text-[11px] font-semibold tabular-nums ${inkFor[severity(r.latest.percent)]}`}
-          >
-            {formatPercent(r.latest.percent)}
-          </span>
-        </div>
-        <Meter percent={r.latest.percent} className="mt-1.5" />
-      </Link>
-      {active && (
-        <div className="mt-0.5 mb-1 ml-3 flex flex-col items-start gap-0.5 border-l border-(--hairline) pl-2">
-          <SubLink to={base} active={pathname === base || pathname.startsWith(`${base}/u/`)}>
-            Overview
-          </SubLink>
-          <SubLink to={`${base}/commits`} active={pathname.startsWith(`${base}/commits`)}>
-            Commits
-          </SubLink>
-          <SubLink
-            to={`${base}/pulls`}
-            active={pathname.startsWith(`${base}/pulls`) || pathname.startsWith(`${base}/pr/`)}
-          >
-            Pull requests
-          </SubLink>
-          <SubLink to={`${base}/insights`} active={pathname.startsWith(`${base}/insights`)}>
-            Insights
-          </SubLink>
-          <SubLink to={`${base}/policy`} active={pathname.startsWith(`${base}/policy`)}>
-            Policy
-          </SubLink>
-          <div className="px-2.5 pt-2 pb-0.5 text-[9px] font-semibold tracking-widest text-(--muted) uppercase">
-            Evidence
-          </div>
-          <SubLink to={`${base}/uploads`} active={pathname.startsWith(`${base}/uploads`)}>
-            Code uploads
-          </SubLink>
-          <SubLink
-            to={`${base}/playbacks`}
-            active={
-              pathname.startsWith(`${base}/playbacks`) || pathname.startsWith(`${base}/test-runs/`)
-            }
-          >
-            Journey runs
-          </SubLink>
-          <SubLink
-            to={`${base}/storybook-previews`}
-            active={pathname.startsWith(`${base}/storybook-previews`)}
-          >
-            Component captures
-          </SubLink>
-        </div>
-      )}
-    </div>
-  );
-}
-
 async function signOut() {
   try {
     await fetch("/auth/logout", { method: "POST" });
@@ -185,44 +92,6 @@ async function signOut() {
     // ignore — we redirect regardless
   }
   window.location.href = "/";
-}
-
-/** A collapsible org/owner section in the rail: avatar + name + repo count. */
-function OrgSection({ group, pathname }: { group: OwnerGroup; pathname: string }) {
-  const [open, setOpen] = useState(true);
-  return (
-    <div className="mt-1.5 first:mt-0">
-      <div className="flex items-center gap-1">
-        <Link
-          to={`/o/${encodeURIComponent(group.owner)}`}
-          title={`${group.owner} overview`}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-(--surface-2)"
-        >
-          <OwnerAvatar owner={group.owner} size={16} />
-          <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{group.owner}</span>
-          <span className="text-[10.5px] tabular-nums text-(--muted)">{group.repos.length}</span>
-        </Link>
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          aria-label={open ? "Collapse" : "Expand"}
-          className="shrink-0 rounded-lg p-1.5 transition-colors hover:bg-(--surface-2)"
-        >
-          <ChevronDown
-            size={13}
-            className={`text-(--muted) transition-transform ${open ? "" : "-rotate-90"}`}
-          />
-        </button>
-      </div>
-      {open && (
-        <div className="mt-0.5 ml-[15px] space-y-0.5 border-l border-(--hairline) pl-2">
-          {group.repos.map((r) => (
-            <RepoNavItem key={r.repo} r={r} pathname={pathname} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 function Sidebar({
@@ -238,7 +107,14 @@ function Sidebar({
   mobileOpen: boolean;
   onClose: () => void;
 }) {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
+  const reviewFocused = new URLSearchParams(search).get("focus") === "review";
+  const currentRepo = repoFromPathname(pathname);
+  const recent = selectRecentRepos({
+    visits: readRecentVisits(),
+    currentRepo,
+    available: (repos ?? []).map((r) => r.repo),
+  });
   return (
     <aside
       aria-label="Dashboard navigation"
@@ -261,29 +137,41 @@ function Sidebar({
       </div>
       <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-3">
         <div className="space-y-0.5">
-          <SidebarLink to="/" active={pathname === "/"}>
+          <SidebarLink to="/" active={pathname === "/" && !reviewFocused}>
             <LayoutDashboard size={15} strokeWidth={1.75} /> Overview
+          </SidebarLink>
+          <SidebarLink to="/?focus=review" active={pathname === "/" && reviewFocused}>
+            <Inbox size={15} strokeWidth={1.75} /> Needs attention
           </SidebarLink>
         </div>
         <div>
           <div className="px-2.5 pb-1.5 text-[10.5px] font-semibold tracking-widest text-(--muted) uppercase">
-            Repositories
+            Recent
           </div>
           <div className="space-y-0.5">
-            {repos === null && (
+            {repos === null && recent.length === 0 && (
               <div className="space-y-2.5 px-2.5 py-1">
-                <div className="h-8 animate-pulse rounded bg-(--surface-2)" />
-                <div className="h-8 animate-pulse rounded bg-(--surface-2)" />
+                <div className="h-7 animate-pulse rounded bg-(--surface-2)" />
+                <div className="h-7 animate-pulse rounded bg-(--surface-2)" />
               </div>
             )}
-            {repos?.length
-              ? groupReposByOwner(repos).map((group) => (
-                  <OrgSection key={group.owner} group={group} pathname={pathname} />
-                ))
-              : null}
-            {repos?.length === 0 && (
+            {recent.map((repo) => (
+              <SidebarLink key={repo} to={`/r/${repo}`} active={currentRepo === repo}>
+                <OwnerAvatar owner={repo.split("/")[0] ?? repo} size={16} />
+                <span className="min-w-0 truncate font-mono text-[12px]" title={repo}>
+                  {shortRepoName(repo)}
+                </span>
+              </SidebarLink>
+            ))}
+            {repos?.length === 0 && recent.length === 0 && (
               <p className="px-2.5 py-1 text-[12px] text-(--muted)">Nothing uploaded yet.</p>
             )}
+            <Link
+              to="/"
+              className="block rounded-lg px-2.5 py-1.5 text-[12px] text-(--muted) transition-colors hover:bg-(--surface-2) hover:text-(--ink)"
+            >
+              All repositories →
+            </Link>
           </div>
         </div>
       </nav>
@@ -386,6 +274,12 @@ const LAST_ORG_KEY = "covallaby-last-org";
 export function orgFromPathname(pathname: string): string | null {
   const match = /^\/[or]\/([^/]+)/.exec(pathname);
   return match ? decodeURIComponent(match[1]!) : null;
+}
+
+/** The repo an app path is scoped to: `/r/:owner/:name/...` — null elsewhere. */
+export function repoFromPathname(pathname: string): string | null {
+  const match = /^\/r\/([^/]+)\/([^/]+)/.exec(pathname);
+  return match ? `${decodeURIComponent(match[1]!)}/${decodeURIComponent(match[2]!)}` : null;
 }
 
 /** Header dropdown to jump to an org's overview (or all orgs). */
@@ -558,8 +452,26 @@ export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined); // undefined = still loading
   const [githubApp, setGitHubApp] = useState<GitHubAppStatus | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const routed = useRoutes(buildRoutes(repos));
+
+  // "Needs attention" in the rail lands on Home with ?focus=review — bring the
+  // review queue into view once it renders (it arrives after the repos fetch).
+  useEffect(() => {
+    if (pathname !== "/" || new URLSearchParams(search).get("focus") !== "review") return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      const target = [...document.querySelectorAll<HTMLElement>("main div")].find(
+        (el) => el.childElementCount === 0 && el.textContent === "Needs attention",
+      );
+      if (target) {
+        target.style.scrollMarginTop = "64px"; // clear the sticky header
+        target.scrollIntoView({ block: "start" });
+      }
+      if (target || ++tries >= 20) clearInterval(timer);
+    }, 100);
+    return () => clearInterval(timer);
+  }, [pathname, search]);
 
   useEffect(() => {
     void pathname;
@@ -570,6 +482,12 @@ export function App() {
   useEffect(() => {
     const org = /^\/o\/([^/]+)/.exec(pathname);
     if (org) localStorage.setItem(LAST_ORG_KEY, decodeURIComponent(org[1]!));
+  }, [pathname]);
+
+  // Stamp repo visits so the sidebar's Recent section tracks where you actually work.
+  useEffect(() => {
+    const repo = repoFromPathname(pathname);
+    if (repo) recordRepoVisit(repo);
   }, [pathname]);
 
   useEffect(() => {
