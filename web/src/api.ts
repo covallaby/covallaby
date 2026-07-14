@@ -72,10 +72,20 @@ export interface UploadChanges {
   changed: Array<{ path: string; before: number | null; after: number | null; delta: number }>;
 }
 
+/** Prev/next snapshots on the same lane, for lateral navigation. Null at the ends of history. */
+export interface Neighbors<T> {
+  prev: T | null;
+  next: T | null;
+}
+
 export interface UploadDetail {
   changes: UploadChanges | null;
   baseline?: BaselineInfo;
   verdict?: PolicyVerdict;
+  /** The resolved base upload — the "Base build" lateral link on PR uploads. */
+  baseUpload?: UploadRow | null;
+  /** Prev/next uploads on the same branch. */
+  neighbors?: Neighbors<UploadRow>;
   row: UploadRow;
   totals: { lines: Counter; functions: Counter; branches: Counter; files: number };
   directories: Array<{ path: string; covered: number; total: number; percent: number | null }>;
@@ -281,7 +291,9 @@ const liveApi = {
   status: (repo: string) => get<PolicyStatus>(`/api/v1/repos/${repo}/status`),
   testRuns: (repo: string) => get<{ runs: TestRun[] }>(`/api/v1/repos/${repo}/test-runs`),
   testRun: (id: string) =>
-    get<{ run: TestRun; artifacts: TestArtifact[] }>(`/api/v1/test-runs/${id}`),
+    get<{ run: TestRun; neighbors?: Neighbors<TestRun>; artifacts: TestArtifact[] }>(
+      `/api/v1/test-runs/${id}`,
+    ),
   storybookPreviews: (repo: string) =>
     get<{ previews: StorybookPreview[] }>(`/api/v1/repos/${repo}/storybook-previews`),
   storybookPreview: (id: string) =>
@@ -290,6 +302,7 @@ const liveApi = {
       previewUrl: string;
       baselineRun: StorybookPreview | null;
       baseline?: BaselineInfo;
+      neighbors?: Neighbors<StorybookPreview>;
       summary: StorybookDiffSummary;
       captures: StorybookCapture[];
     }>(`/api/v1/storybook-previews/${id}`),
@@ -444,6 +457,45 @@ export const api: typeof liveApi = IS_DEMO
             createdAt: "2026-07-10T16:14:00.000Z",
             completedAt: "2026-07-10T16:15:12.000Z",
           },
+          // Two-run demo history: 18 (PR head) follows 17 (main baseline).
+          neighbors:
+            Number(id) > 17
+              ? {
+                  prev: {
+                    id: 17,
+                    repo: "covallaby/covallaby",
+                    branch: "main",
+                    commit: "72d41f0dd8e6abfe280d9e340c277421f3607184",
+                    pr: null,
+                    framework: "storybook",
+                    status: "complete" as const,
+                    testsPassed: 0,
+                    testsFailed: 0,
+                    testsSkipped: 0,
+                    durationMs: 0,
+                    createdAt: "2026-07-10T16:14:00.000Z",
+                    completedAt: "2026-07-10T16:15:12.000Z",
+                  },
+                  next: null,
+                }
+              : {
+                  prev: null,
+                  next: {
+                    id: 18,
+                    repo: "covallaby/covallaby",
+                    branch: "feature/checkout-polish",
+                    commit: "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
+                    pr: 128,
+                    framework: "storybook",
+                    status: "complete" as const,
+                    testsPassed: 0,
+                    testsFailed: 0,
+                    testsSkipped: 0,
+                    durationMs: 0,
+                    createdAt: "2026-07-11T18:42:00.000Z",
+                    completedAt: "2026-07-11T18:43:02.000Z",
+                  },
+                },
           summary: { changed: 1, new: 1, removed: 0, unchanged: 0, uncompared: 0 },
           captures: [
             {

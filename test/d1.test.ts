@@ -100,6 +100,26 @@ describe("D1Store (via node:sqlite fake)", () => {
     expect(prev?.row.id).toBe(first.id);
   });
 
+  it("finds upload neighbors on the same branch, clamped at the ends", async () => {
+    const first = await store.recordUpload({ repo: "acme/app", ...base, commit: "c1" });
+    const middle = await store.recordUpload({ repo: "acme/app", ...base, commit: "c2" });
+    const last = await store.recordUpload({ repo: "acme/app", ...base, commit: "c3" });
+    // Another branch must not leak into the lane.
+    await store.recordUpload({ repo: "acme/app", ...base, branch: "feat/x", commit: "cx" });
+
+    const mid = await store.uploadNeighbors("acme/app", "main", middle.id);
+    expect(mid.prev?.commit).toBe("c1");
+    expect(mid.next?.commit).toBe("c3");
+    expect(await store.uploadNeighbors("acme/app", "main", first.id)).toMatchObject({
+      prev: null,
+      next: { commit: "c2" },
+    });
+    expect(await store.uploadNeighbors("acme/app", "main", last.id)).toMatchObject({
+      prev: { commit: "c2" },
+      next: null,
+    });
+  });
+
   it("round-trips the CI-supplied base SHA", async () => {
     const row = await store.recordUpload({ repo: "acme/app", ...base, baseSha: "a".repeat(40) });
     expect(row.baseSha).toBe("a".repeat(40));
