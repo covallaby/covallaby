@@ -31,12 +31,21 @@ test("maintainer finds repository risk and reviews its coverage", async ({ page 
   await expect(page.getByRole("link", { name: /Components.*24 states/ })).toBeVisible();
   await chapter(page, testInfo, "02-repository-summary");
 
-  await page.getByRole("link", { name: "Commits", exact: true }).click();
+  const repoTabs = page.getByRole("navigation", { name: "Repository sections" });
+  await expect(repoTabs.getByRole("link", { name: "Overview", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await repoTabs.getByRole("link", { name: "Commits", exact: true }).click();
   await expect(page.getByText(/joined by commit SHA/)).toBeVisible();
   await expect(page.getByText("Missing code", { exact: true })).toHaveCount(2);
+  await expect(repoTabs.getByRole("link", { name: "Commits", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
   await chapter(page, testInfo, "03-commit-evidence");
 
-  await page.getByRole("link", { name: "Insights", exact: true }).click();
+  await repoTabs.getByRole("link", { name: "Insights", exact: true }).click();
   await expect(page.getByText(/coverage/i).first()).toBeVisible();
   await chapter(page, testInfo, "04-coverage-insights");
   await expectHealthyPage(page);
