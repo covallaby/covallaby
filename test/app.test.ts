@@ -599,8 +599,8 @@ describe("browser test artifacts", () => {
     const carried = await detailOf(secondId);
     expect(reviewOf(carried, "button--one")).toMatchObject({ state: "approved", carried: true });
     expect(reviewOf(carried, "button--fresh")).toMatchObject({ state: "approved", carried: true });
-    // The stored run state only re-derives on a write; one touch approves it.
-    expect(carried.run.reviewState).toBe("pending");
+    // Completion re-derives the stored run state from carried approvals.
+    expect(carried.run.reviewState).toBe("approved");
     const touched = await (await review(secondId, ["button--one"], "approved")).json();
     expect(touched.run.reviewState).toBe("approved");
 
@@ -613,6 +613,66 @@ describe("browser test artifacts", () => {
     const stale = await detailOf(thirdId);
     expect(reviewOf(stale, "button--one")).toEqual({ state: "pending" });
     expect(reviewOf(stale, "button--two")).toMatchObject({ state: "approved", carried: true });
+
+    // Persistent rules are separate from one-off approval. They document a
+    // known pixel envelope and can call out flaky debt without making every
+    // future run block for the same-sized noise.
+    const setRule = (id: number, body: Record<string, unknown>) =>
+      artifactApp.request(`/api/v1/storybook-previews/${id}/capture-rule`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const allowed = await (
+      await setRule(thirdId, {
+        story: "button--one",
+        state: "allowed",
+        tolerancePercent: 1,
+        note: "Known animation variance",
+      })
+    ).json();
+    expect(reviewOf(allowed, "button--one")).toMatchObject({ state: "allowed" });
+    expect(
+      allowed.captures.find((capture: { id: string }) => capture.id === "button--one")?.rule,
+    ).toMatchObject({ state: "allowed", toleranceRatio: 0.01, note: "Known animation variance" });
+
+    const fourthId = await uploadPreview("feat/loop", "loophead4", [
+      { id: "button--one", hash: hash("f"), bytes: light },
+      { id: "button--two", hash: hash("c"), bytes: light },
+      { id: "button--fresh", hash: hash("d"), bytes: dark },
+    ]);
+    const exceeded = await detailOf(fourthId);
+    expect(reviewOf(exceeded, "button--one")).toEqual({ state: "pending" });
+    expect(
+      exceeded.captures.find((capture: { id: string }) => capture.id === "button--one")?.rule,
+    ).toMatchObject({ state: "allowed", toleranceRatio: 0.01 });
+
+    const flaky = await (
+      await setRule(fourthId, {
+        story: "button--one",
+        state: "flaky",
+        tolerancePercent: 100,
+        note: "Fix nondeterministic rendering",
+      })
+    ).json();
+    expect(reviewOf(flaky, "button--one")).toMatchObject({ state: "flaky" });
+
+    const fifthId = await uploadPreview("feat/loop", "loophead5", [
+      { id: "button--one", hash: hash("9"), bytes: light },
+      { id: "button--two", hash: hash("c"), bytes: light },
+      { id: "button--fresh", hash: hash("d"), bytes: dark },
+    ]);
+    const future = await detailOf(fifthId);
+    expect(reviewOf(future, "button--one")).toMatchObject({ state: "flaky" });
+    expect(
+      future.captures.find((capture: { id: string }) => capture.id === "button--one")?.rule,
+    ).toMatchObject({ state: "flaky", note: "Fix nondeterministic rendering" });
+
+    const cleared = await (await setRule(fifthId, { story: "button--one", state: null })).json();
+    expect(reviewOf(cleared, "button--one")).toEqual({ state: "pending" });
+    expect(
+      cleared.captures.find((capture: { id: string }) => capture.id === "button--one")?.rule,
+    ).toBeUndefined();
 
     // A view-token-gated self-hosted server requires the token for reviews.
     const gatedApp = createApp({

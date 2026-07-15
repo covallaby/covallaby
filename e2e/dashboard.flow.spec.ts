@@ -143,6 +143,18 @@ test("maintainer reviews all repo evidence through the Activity tab", async ({
   // Re-pressing the same verdict key returns the stop to pending.
   await page.keyboard.press("a");
   await expect(page.getByText("0 of 2 reviewed")).toBeVisible();
+  // Persistent exceptions keep known noise out of the queue while preserving
+  // the distinction between accepted variance and flaky debt.
+  await page.getByRole("button", { name: "Allow variance", exact: true }).click();
+  await expect(page.getByText("1 of 2 reviewed")).toBeVisible();
+  await expect(page.getByText("allowed", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Allow variance", exact: true }).click();
+  await expect(page.getByText("0 of 2 reviewed")).toBeVisible();
+  await page.getByRole("button", { name: "Mark flaky", exact: true }).click();
+  await expect(page.getByText("1 of 2 reviewed")).toBeVisible();
+  await expect(page.getByText("flaky", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Mark flaky", exact: true }).click();
+  await expect(page.getByText("0 of 2 reviewed")).toBeVisible();
   // Reject via the visible button instead of the keyboard.
   await page.getByRole("button", { name: "Reject", exact: true }).click();
   await expect(page.getByText("1 of 2 reviewed")).toBeVisible();

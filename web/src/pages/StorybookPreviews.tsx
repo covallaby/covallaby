@@ -1,6 +1,7 @@
 import {
   AlertCircle,
   BookOpen,
+  Bug,
   Check,
   ChevronDown,
   ChevronRight,
@@ -11,14 +12,15 @@ import {
   RotateCcw,
   RotateCw,
   Search,
+  ShieldCheck,
   X,
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   type CaptureReview,
+  type CaptureReviewState,
   type StorybookPreviewDetail as PreviewDetailPayload,
-  type ReviewState,
   type StorybookCapture,
   type StorybookPreview,
   api,
@@ -56,18 +58,25 @@ const statusTone: Record<StorybookCapture["status"], string> = {
   uncompared: "bg-(--accent-wash) text-(--accent)",
 };
 
-const reviewTone: Record<ReviewState, string> = {
+const reviewTone: Record<CaptureReviewState, string> = {
   pending: "bg-(--surface-2) text-(--muted)",
   approved: "bg-(--good)/12 text-(--good)",
   rejected: "bg-(--bad)/12 text-(--bad)",
   "auto-accepted": "bg-(--good)/12 text-(--good)",
+  allowed: "bg-(--accent-wash) text-(--accent)",
+  flaky: "bg-(--warn)/12 text-(--warn)",
 };
 
 /** Who reviewed and when — the chip tooltip and the inline byline. */
 function reviewedByLine(review: CaptureReview): string | null {
   if (review.state === "pending") return null;
   if (review.state === "auto-accepted") return "Accepted automatically — default-branch build";
-  const verb = review.state === "approved" ? "Approved" : "Rejected";
+  const verb = {
+    approved: "Approved",
+    rejected: "Rejected",
+    allowed: "Allowed across future diffs",
+    flaky: "Marked flaky across future diffs",
+  }[review.state];
   const who = review.reviewedBy ? ` by ${review.reviewedBy}` : "";
   const at = review.reviewedAt ? ` · ${when(review.reviewedAt)}` : "";
   const carried = review.carried ? " · carried over from an earlier run" : "";
@@ -153,7 +162,11 @@ export function StorybookPreviewDetail() {
   // every member. The server answers with the fully re-derived payload.
   const submitReview = (action: "approve" | "reject" | "unreview") => {
     if (!data || !selectedStop || !canReview || reviewBusy) return;
-    const state = reviewActionState(action, stopReviewState(selectedStop)?.state);
+    const current = stopReviewState(selectedStop)?.state;
+    const state = reviewActionState(
+      action,
+      current === "approved" || current === "rejected" ? current : "pending",
+    );
     setReviewBusy(true);
     setReviewError(false);
     api
@@ -162,6 +175,31 @@ export function StorybookPreviewDetail() {
         selectedStop.captures.map((capture) => capture.id),
         state,
       )
+      .then((result) => setData(result))
+      .catch(() => setReviewError(true))
+      .finally(() => setReviewBusy(false));
+  };
+
+  // Persistent exceptions are intentionally separate from approve/reject.
+  // They carry a measured pixel tolerance forward to later runs and remain
+  // visible as either understood variance or flaky test debt.
+  const submitRule = (state: "allowed" | "flaky") => {
+    if (!data || !selected || !canReview || reviewBusy || selected.changeRatio === undefined)
+      return;
+    const remove = selected.rule?.state === state;
+    const currentPercent = selected.changeRatio * 100;
+    const tolerancePercent = Math.min(
+      100,
+      Math.max(0.1, Math.round(currentPercent * 1.25 * 1000) / 1000),
+    );
+    setReviewBusy(true);
+    setReviewError(false);
+    api
+      .setCaptureRule(String(data.run.id), {
+        story: selected.id,
+        state: remove ? null : state,
+        tolerancePercent,
+      })
       .then((result) => setData(result))
       .catch(() => setReviewError(true))
       .finally(() => setReviewBusy(false));
@@ -350,6 +388,14 @@ export function StorybookPreviewDetail() {
                       {selected.status}
                     </span>
                     {selected.review ? <ReviewChip review={selected.review} /> : null}
+                    {selected.rule && selected.review?.state !== selected.rule.state ? (
+                      <span
+                        title={`Current diff exceeds the ${(selected.rule.toleranceRatio * 100).toFixed(3)}% tolerance`}
+                        className="shrink-0 rounded-full bg-(--warn)/12 px-2 py-0.5 text-[11px] text-(--warn)"
+                      >
+                        {selected.rule.state} · outside tolerance
+                      </span>
+                    ) : null}
                     {selectedStop && selectedStop.captures.length > 1 ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-(--accent-wash) px-2 py-0.5 text-[11px] text-(--accent)">
                         <Layers size={11} /> same change as {selectedStop.captures.length - 1} other
@@ -359,6 +405,15 @@ export function StorybookPreviewDetail() {
                   </div>
                   <p className="mt-1 text-xs text-(--muted)">
                     {selected.title}
+                    {selected.changeRatio !== undefined ? (
+                      <span> · {(selected.changeRatio * 100).toFixed(3)}% pixels changed</span>
+                    ) : null}
+                    {selected.rule ? (
+                      <span>
+                        {" "}
+                        · rule allows up to {(selected.rule.toleranceRatio * 100).toFixed(3)}%
+                      </span>
+                    ) : null}
                     {selected.review && reviewedByLine(selected.review) ? (
                       <span className="text-(--muted)"> · {reviewedByLine(selected.review)}</span>
                     ) : null}
@@ -371,7 +426,7 @@ export function StorybookPreviewDetail() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {canReview && selectedStop ? (
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <button
                         type="button"
                         disabled={reviewBusy}
@@ -389,6 +444,32 @@ export function StorybookPreviewDetail() {
                       >
                         <Check size={13} /> Approve
                         {selectedStop.captures.length > 1 ? ` ${selectedStop.captures.length}` : ""}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => submitRule("allowed")}
+                        disabled={reviewBusy || selected.changeRatio === undefined}
+                        title="Allow this story's known visual variance on future runs"
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium disabled:opacity-50 ${
+                          selected.rule?.state === "allowed"
+                            ? "border-(--accent)/40 bg-(--accent-wash) text-(--accent)"
+                            : "border-(--border) bg-(--surface) hover:border-(--accent)/60 hover:text-(--accent)"
+                        }`}
+                      >
+                        <ShieldCheck size={13} /> Allow variance
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => submitRule("flaky")}
+                        disabled={reviewBusy || selected.changeRatio === undefined}
+                        title="Mark this story as flaky and keep known-size future diffs non-blocking"
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium disabled:opacity-50 ${
+                          selected.rule?.state === "flaky"
+                            ? "border-(--warn)/40 bg-(--warn)/12 text-(--warn)"
+                            : "border-(--border) bg-(--surface) hover:border-(--warn)/60 hover:text-(--warn)"
+                        }`}
+                      >
+                        <Bug size={13} /> Mark flaky
                       </button>
                       <button
                         type="button"

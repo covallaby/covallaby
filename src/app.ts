@@ -372,11 +372,19 @@ async function computeStatus(
 
 /** One capture's review verdict in a preview detail payload. */
 export interface PreviewCaptureReview {
-  state: ReviewState;
+  state: ReviewState | "allowed" | "flaky";
   reviewedBy?: string | null;
   reviewedAt?: string;
   /** True when an approval carried over from an identical diff in another run. */
   carried?: boolean;
+}
+
+export interface PreviewCaptureRule {
+  state: "allowed" | "flaky";
+  toleranceRatio: number;
+  note: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string;
 }
 
 export interface PreviewCapture {
@@ -390,6 +398,10 @@ export interface PreviewCapture {
   diffImageUrl?: string;
   sha256?: string;
   baselineSha256?: string;
+  changedPixels?: number;
+  totalPixels?: number;
+  changeRatio?: number;
+  rule?: PreviewCaptureRule;
   review?: PreviewCaptureReview;
 }
 
@@ -410,7 +422,11 @@ export function deriveRunReviewState(
   if (reviewable.some((capture) => capture.review?.state === "rejected")) return "rejected";
   if (
     reviewable.length > 0 &&
-    reviewable.every((capture) => capture.review?.state === "approved")
+    reviewable.every((capture) =>
+      ["approved", "allowed", "flaky", "auto-accepted"].includes(
+        capture.review?.state ?? "pending",
+      ),
+    )
   ) {
     return "approved";
   }
@@ -665,6 +681,47 @@ export function createApp({
     const { baseline, info } = await resolveVisualBaseline(store, run, baseBranch);
     return { found: baseline ? await store.getTestRun!(baseline.id) : null, info };
   };
+  const visualDiffThreshold = () => {
+    const configured = Number(process.env.COVALLABY_VISUAL_DIFF_THRESHOLD ?? "0.1");
+    return Number.isFinite(configured) ? Math.min(1, Math.max(0, configured)) : 0.1;
+  };
+  /** Measure changed pixels once at publish time so review policy reads stay cheap. */
+  const measureCaptureComparisons = async (found: {
+    run: TestRunRow;
+    artifacts: TestArtifactRow[];
+  }): Promise<void> => {
+    if (!store.setCaptureComparison || !artifactStorage) return;
+    const { found: baseline } = await storybookBaseline(found.run);
+    if (!baseline) return;
+    const beforeByStory = new Map(
+      storyCaptures(baseline.artifacts).map((capture) => [capture.story.id, capture]),
+    );
+    await Promise.all(
+      storyCaptures(found.artifacts).map(async (current) => {
+        const before = beforeByStory.get(current.story.id);
+        if (
+          !before ||
+          !current.story.sha256 ||
+          !before.story.sha256 ||
+          current.story.sha256 === before.story.sha256
+        ) {
+          return;
+        }
+        const result = createVisualDiff(
+          await artifactStorage.get(before.artifact.objectKey),
+          await artifactStorage.get(current.artifact.objectKey),
+          visualDiffThreshold(),
+        );
+        await store.setCaptureComparison!({
+          runId: found.run.id,
+          storyId: current.story.id,
+          changedPixels: result.changedPixels,
+          totalPixels: result.totalPixels,
+          changeRatio: result.changeRatio,
+        });
+      }),
+    );
+  };
   /**
    * Shared visual-run creation fields: the optional CI-supplied base SHA
    * (validated) and the review state — default-branch builds are
@@ -694,6 +751,10 @@ export function createApp({
         store.clearCaptureReview &&
         store.listCaptureReviews &&
         store.findCaptureReviewByPair,
+    );
+  const captureReviewRulesReady = () =>
+    Boolean(
+      store.setCaptureReviewRule && store.clearCaptureReviewRule && store.listCaptureReviewRules,
     );
   /**
    * Who may record a review verdict. Three doors, in order:
@@ -733,13 +794,23 @@ export function createApp({
    * matches — a different diff resets the story to pending automatically. A
    * story with no verdict of its own inherits an approval recorded anywhere
    * else in the repo on the identical pair (carry-over, resolved lazily at
-   * read so ingest stays write-free).
+   * read so ingest stays write-free). Persistent allowed/flaky rules are
+   * keyed by repo + story and intentionally survive pixel changes.
    */
   const annotateCaptureReviews = async (
     run: TestRunRow,
     captures: PreviewCapture[],
   ): Promise<void> => {
     if (!captureReviewsReady()) return;
+    const rules = new Map(
+      captureReviewRulesReady()
+        ? (await store.listCaptureReviewRules!(run.repo)).map((rule) => [rule.storyId, rule])
+        : [],
+    );
+    for (const capture of captures) {
+      const rule = rules.get(capture.id);
+      if (rule) capture.rule = rule;
+    }
     if (run.reviewState === "auto-accepted") {
       for (const capture of captures) {
         if (reviewableCapture(capture.status)) capture.review = { state: "auto-accepted" };
@@ -761,6 +832,15 @@ export function createApp({
           state: verdict.state,
           reviewedBy: verdict.reviewedBy,
           reviewedAt: verdict.reviewedAt,
+        };
+        continue;
+      }
+      const rule = capture.rule;
+      if (rule && capture.changeRatio !== undefined && capture.changeRatio <= rule.toleranceRatio) {
+        capture.review = {
+          state: rule.state,
+          reviewedBy: rule.reviewedBy,
+          reviewedAt: rule.reviewedAt,
         };
         continue;
       }
@@ -928,7 +1008,18 @@ export function createApp({
         { ok: false, error: "One or more artifacts are missing or have the wrong size." },
         409,
       );
-    const run = await store.completeTestRun!(found.run.id);
+    await measureCaptureComparisons(found);
+    let run = await store.completeTestRun!(found.run.id);
+    const detail = await buildPreviewDetail({ ...found, run: run! });
+    const derived = deriveRunReviewState(detail.captures);
+    if (
+      run &&
+      run.reviewState !== "auto-accepted" &&
+      derived !== run.reviewState &&
+      store.setTestRunReview
+    ) {
+      run = await store.setTestRunReview(run.id, derived);
+    }
     if (artifactRetention && store.deleteTestRun) {
       try {
         await cleanupRepoArtifacts(store, artifactStorage!, found.run.repo, artifactRetention);
@@ -1218,7 +1309,18 @@ export function createApp({
     );
     if (checks.some((exists) => !exists))
       return c.json({ ok: false, error: "One or more preview files are missing." }, 409);
-    const run = await store.completeTestRun!(found.run.id);
+    await measureCaptureComparisons(found);
+    let run = await store.completeTestRun!(found.run.id);
+    const detail = await buildPreviewDetail({ ...found, run: run! });
+    const derived = deriveRunReviewState(detail.captures);
+    if (
+      run &&
+      run.reviewState !== "auto-accepted" &&
+      derived !== run.reviewState &&
+      store.setTestRunReview
+    ) {
+      run = await store.setTestRunReview(run.id, derived);
+    }
     if (artifactRetention && store.deleteTestRun) {
       try {
         await cleanupRepoArtifacts(store, artifactStorage!, found.run.repo, artifactRetention);
@@ -1308,10 +1410,10 @@ export function createApp({
   });
 
   /** The full detail payload for a preview — shared by the GET and the review write. */
-  const buildPreviewDetail = async (found: {
+  async function buildPreviewDetail(found: {
     run: TestRunRow;
     artifacts: TestArtifactRow[];
-  }) => {
+  }) {
     const run = found.run;
     const token = previewToken(run.id, Math.floor(Date.now() / 1000) + 3600);
     const { found: baseline, info: baselineInfo } = await storybookBaseline(run);
@@ -1321,8 +1423,17 @@ export function createApp({
     const baselineCaptures = new Map(
       storyCaptures(baseline?.artifacts ?? []).map((capture) => [capture.story.id, capture]),
     );
+    const comparisons = new Map(
+      store.listCaptureComparisons
+        ? (await store.listCaptureComparisons(run.id)).map((comparison) => [
+            comparison.storyId,
+            comparison,
+          ])
+        : [],
+    );
     const captures: PreviewCapture[] = storyCaptures(found.artifacts).map(({ artifact, story }) => {
       const before = baselineCaptures.get(story.id);
+      const comparison = comparisons.get(story.id);
       baselineCaptures.delete(story.id);
       const status = !baseline
         ? "uncompared"
@@ -1342,6 +1453,11 @@ export function createApp({
         imageUrl: `${previewBase}/p/${run.id}/${artifact.name}?preview_token=${encodeURIComponent(token)}`,
         ...(story.sha256 && { sha256: story.sha256 }),
         ...(before?.story.sha256 && { baselineSha256: before.story.sha256 }),
+        ...(comparison && {
+          changedPixels: comparison.changedPixels,
+          totalPixels: comparison.totalPixels,
+          changeRatio: comparison.changeRatio,
+        }),
         ...(before && baselineToken
           ? {
               baselineImageUrl: `${previewBase}/p/${baseline!.run.id}/${before.artifact.name}?preview_token=${encodeURIComponent(baselineToken)}`,
@@ -1385,7 +1501,7 @@ export function createApp({
       summary,
       captures,
     };
-  };
+  }
 
   app.get("/api/v1/storybook-previews/:id", async (c) => {
     if (!previewReady()) return c.notFound();
@@ -1470,6 +1586,64 @@ export function createApp({
       derived === run.reviewState ? run : await store.setTestRunReview(run.id, derived);
     // Per-story verdicts roll up into the run's review_state; keep the
     // commit's covallaby/components status truthful whenever that changes.
+    if (derived !== run.reviewState) await reportComponentsStatus(freshRun);
+    return c.json({ ok: true, ...updated, run: freshRun ?? updated.run });
+  });
+
+  // Persist a per-story visual tolerance independently of one-off verdicts.
+  // Flaky is a visible debt tag; only the numeric tolerance makes a diff
+  // non-blocking, preventing a label from hiding an unexpectedly large change.
+  app.put("/api/v1/storybook-previews/:id/capture-rule", async (c) => {
+    if (!previewReady() || !captureReviewRulesReady() || !store.setTestRunReview) {
+      return c.notFound();
+    }
+    const found = await store.getTestRun!(Number(c.req.param("id")));
+    if (!found || found.run.framework !== "storybook") return c.notFound();
+    const run = found.run;
+    const auth = await reviewAuthorized(c, run.repo);
+    if (!auth.ok) {
+      return c.json({ ok: false, error: "Sign in (or pass a valid token) to configure." }, 401);
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ ok: false, error: "Body must be JSON." }, 400);
+    }
+    const storyId = typeof body.story === "string" ? body.story : "";
+    const state = body.state;
+    const tolerancePercent = Number(body.tolerancePercent ?? 0);
+    const note = typeof body.note === "string" ? body.note.trim() : "";
+    const capture = (await buildPreviewDetail(found)).captures.find(
+      (candidate) => candidate.id === storyId,
+    );
+    if (!capture) return c.json({ ok: false, error: "Story was not found in this run." }, 400);
+    if (state === null) {
+      await store.clearCaptureReviewRule!(run.repo, storyId);
+    } else {
+      if (state !== "allowed" && state !== "flaky") {
+        return c.json({ ok: false, error: 'state must be "allowed", "flaky", or null.' }, 400);
+      }
+      if (!Number.isFinite(tolerancePercent) || tolerancePercent < 0 || tolerancePercent > 100) {
+        return c.json({ ok: false, error: "tolerancePercent must be between 0 and 100." }, 400);
+      }
+      if (state === "allowed" && tolerancePercent <= 0) {
+        return c.json({ ok: false, error: "Allowed captures need a positive tolerance." }, 400);
+      }
+      if (note.length > 500) return c.json({ ok: false, error: "note is too long." }, 400);
+      await store.setCaptureReviewRule!({
+        repo: run.repo,
+        storyId,
+        state,
+        toleranceRatio: tolerancePercent / 100,
+        note: note || null,
+        reviewedBy: auth.reviewer,
+      });
+    }
+    const updated = await buildPreviewDetail(found);
+    const derived = deriveRunReviewState(updated.captures);
+    const freshRun =
+      derived === run.reviewState ? run : await store.setTestRunReview(run.id, derived);
     if (derived !== run.reviewState) await reportComponentsStatus(freshRun);
     return c.json({ ok: true, ...updated, run: freshRun ?? updated.run });
   });

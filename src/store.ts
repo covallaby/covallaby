@@ -171,6 +171,42 @@ export interface SetCaptureReviewInput {
   reviewedBy: string | null;
 }
 
+/** Cached pixel comparison for one capture in one run. */
+export interface CaptureComparisonRow {
+  runId: number;
+  storyId: string;
+  changedPixels: number;
+  totalPixels: number;
+  changeRatio: number;
+}
+
+/**
+ * A persistent policy for a story whose pixels are intentionally variable.
+ * `allowed` documents understood variance; `flaky` calls out test debt. Both
+ * require an explicit tolerance before a future diff can pass automatically.
+ */
+export type CaptureReviewRuleState = "allowed" | "flaky";
+
+export interface CaptureReviewRuleRow {
+  repo: string;
+  storyId: string;
+  state: CaptureReviewRuleState;
+  /** Maximum changed-pixel ratio accepted automatically (0–1). */
+  toleranceRatio: number;
+  note: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string;
+}
+
+export interface SetCaptureReviewRuleInput {
+  repo: string;
+  storyId: string;
+  state: CaptureReviewRuleState;
+  toleranceRatio: number;
+  note: string | null;
+  reviewedBy: string | null;
+}
+
 export interface CreateTestArtifactInput {
   runId: number;
   name: string;
@@ -271,6 +307,15 @@ export interface Store {
     sha256: string | null,
     excludeRunId: number,
   ): Promise<CaptureReviewRow | null>;
+  /** Cached changed-pixel measurements, populated when a preview completes. */
+  listCaptureComparisons?(runId: number): Promise<CaptureComparisonRow[]>;
+  setCaptureComparison?(comparison: CaptureComparisonRow): Promise<void>;
+  /** Persist a non-blocking rule for a story across future pixel changes. */
+  setCaptureReviewRule?(input: SetCaptureReviewRuleInput): Promise<CaptureReviewRuleRow>;
+  /** Remove a story's persistent allowed/flaky rule. */
+  clearCaptureReviewRule?(repo: string, storyId: string): Promise<void>;
+  /** Load all persistent visual-review rules for a repository. */
+  listCaptureReviewRules?(repo: string): Promise<CaptureReviewRuleRow[]>;
   deleteTestRun?(id: number): Promise<void>;
   close(): Promise<void>;
 }

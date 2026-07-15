@@ -1,6 +1,8 @@
 import postgres from "postgres";
 import {
+  type CaptureComparisonRow,
   type CaptureReviewRow,
+  type CaptureReviewRuleRow,
   type CreateTestArtifactInput,
   type CreateTestRunInput,
   type PROverview,
@@ -8,6 +10,7 @@ import {
   type RepoOverview,
   type ReviewState,
   type SetCaptureReviewInput,
+  type SetCaptureReviewRuleInput,
   type Store,
   type Subscription,
   type TestArtifactRow,
@@ -70,12 +73,25 @@ CREATE TABLE IF NOT EXISTS capture_reviews (
   UNIQUE(run_id, story_id)
 );
 CREATE INDEX IF NOT EXISTS idx_capture_reviews_pair ON capture_reviews(repo, baseline_sha256, sha256);
+CREATE TABLE IF NOT EXISTS capture_review_rules (
+  repo TEXT NOT NULL, story_id TEXT NOT NULL, state TEXT NOT NULL,
+  tolerance_ratio DOUBLE PRECISION NOT NULL DEFAULT 0, note TEXT,
+  reviewed_by TEXT, reviewed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY(repo, story_id)
+);
+CREATE TABLE IF NOT EXISTS capture_comparisons (
+  run_id BIGINT NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
+  story_id TEXT NOT NULL, changed_pixels INTEGER NOT NULL, total_pixels INTEGER NOT NULL,
+  change_ratio DOUBLE PRECISION NOT NULL, PRIMARY KEY(run_id, story_id)
+);
 -- Additive migrations for databases created before these columns existed.
 ALTER TABLE uploads ADD COLUMN IF NOT EXISTS base_sha TEXT;
 ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS base_sha TEXT;
 ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS review_state TEXT NOT NULL DEFAULT 'pending';
 ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS account TEXT NOT NULL DEFAULT '';
 ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS image_count INTEGER;
+ALTER TABLE capture_review_rules ADD COLUMN IF NOT EXISTS tolerance_ratio DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE capture_review_rules ADD COLUMN IF NOT EXISTS note TEXT;
 -- Indexes on migrated columns must come AFTER the ALTERs: on a pre-existing
 -- database CREATE TABLE IF NOT EXISTS is a no-op, so an index created inside
 -- the schema block would reference a column that does not exist yet
@@ -189,6 +205,26 @@ const toCaptureReview = (r: RawCaptureReview): CaptureReviewRow => ({
   state: r.state,
   baselineSha256: r.baseline_sha256,
   sha256: r.sha256,
+  reviewedBy: r.reviewed_by,
+  reviewedAt: iso(r.reviewed_at),
+});
+
+interface RawCaptureReviewRule {
+  repo: string;
+  story_id: string;
+  state: CaptureReviewRuleRow["state"];
+  tolerance_ratio: number;
+  note: string | null;
+  reviewed_by: string | null;
+  reviewed_at: Date | string;
+}
+
+const toCaptureReviewRule = (r: RawCaptureReviewRule): CaptureReviewRuleRow => ({
+  repo: r.repo,
+  storyId: r.story_id,
+  state: r.state,
+  toleranceRatio: r.tolerance_ratio,
+  note: r.note,
   reviewedBy: r.reviewed_by,
   reviewedAt: iso(r.reviewed_at),
 });
@@ -563,6 +599,60 @@ export class PostgresStore implements Store {
         AND run_id != ${excludeRunId}
       ORDER BY id DESC LIMIT 1`;
     return row ? toCaptureReview(row) : null;
+  }
+
+  async setCaptureReviewRule(input: SetCaptureReviewRuleInput): Promise<CaptureReviewRuleRow> {
+    const [row] = await this.sql<RawCaptureReviewRule[]>`
+      INSERT INTO capture_review_rules
+        (repo, story_id, state, tolerance_ratio, note, reviewed_by)
+      VALUES (${input.repo}, ${input.storyId}, ${input.state}, ${input.toleranceRatio},
+        ${input.note}, ${input.reviewedBy})
+      ON CONFLICT (repo, story_id) DO UPDATE SET
+        state = EXCLUDED.state, tolerance_ratio = EXCLUDED.tolerance_ratio,
+        note = EXCLUDED.note, reviewed_by = EXCLUDED.reviewed_by, reviewed_at = now()
+      RETURNING *`;
+    return toCaptureReviewRule(row!);
+  }
+
+  async clearCaptureReviewRule(repo: string, storyId: string): Promise<void> {
+    await this.sql`
+      DELETE FROM capture_review_rules WHERE repo = ${repo} AND story_id = ${storyId}`;
+  }
+
+  async listCaptureReviewRules(repo: string): Promise<CaptureReviewRuleRow[]> {
+    const rows = await this.sql<RawCaptureReviewRule[]>`
+      SELECT * FROM capture_review_rules WHERE repo = ${repo} ORDER BY story_id`;
+    return rows.map(toCaptureReviewRule);
+  }
+
+  async listCaptureComparisons(runId: number): Promise<CaptureComparisonRow[]> {
+    const rows = await this.sql<
+      Array<{
+        run_id: string | number;
+        story_id: string;
+        changed_pixels: number;
+        total_pixels: number;
+        change_ratio: number;
+      }>
+    >`SELECT * FROM capture_comparisons WHERE run_id = ${runId} ORDER BY story_id`;
+    return rows.map((row) => ({
+      runId: Number(row.run_id),
+      storyId: row.story_id,
+      changedPixels: row.changed_pixels,
+      totalPixels: row.total_pixels,
+      changeRatio: row.change_ratio,
+    }));
+  }
+
+  async setCaptureComparison(comparison: CaptureComparisonRow): Promise<void> {
+    await this.sql`
+      INSERT INTO capture_comparisons
+        (run_id, story_id, changed_pixels, total_pixels, change_ratio)
+      VALUES (${comparison.runId}, ${comparison.storyId}, ${comparison.changedPixels},
+        ${comparison.totalPixels}, ${comparison.changeRatio})
+      ON CONFLICT (run_id, story_id) DO UPDATE SET
+        changed_pixels = EXCLUDED.changed_pixels, total_pixels = EXCLUDED.total_pixels,
+        change_ratio = EXCLUDED.change_ratio`;
   }
 
   async deleteTestRun(id: number): Promise<void> {
