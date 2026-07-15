@@ -41,14 +41,39 @@ export function createVisualDiff(
   currentBytes: Uint8Array,
   threshold = 0.1,
 ): { png: Uint8Array; changedPixels: number; totalPixels: number; changeRatio: number } {
+  const result = compareVisuals(baselineBytes, currentBytes, threshold, true);
+  return { ...result, png: result.png! };
+}
+
+/** Measure a visual change without allocating or encoding a diff image. */
+export function measureVisualDiff(
+  baselineBytes: Uint8Array,
+  currentBytes: Uint8Array,
+  threshold = 0.1,
+): { changedPixels: number; totalPixels: number; changeRatio: number } {
+  const { changedPixels, totalPixels, changeRatio } = compareVisuals(
+    baselineBytes,
+    currentBytes,
+    threshold,
+    false,
+  );
+  return { changedPixels, totalPixels, changeRatio };
+}
+
+function compareVisuals(
+  baselineBytes: Uint8Array,
+  currentBytes: Uint8Array,
+  threshold: number,
+  renderPng: boolean,
+): { png?: Uint8Array; changedPixels: number; totalPixels: number; changeRatio: number } {
   const baselineSource = PNG.sync.read(Buffer.from(baselineBytes));
   const currentSource = PNG.sync.read(Buffer.from(currentBytes));
   const width = Math.max(baselineSource.width, currentSource.width);
   const height = Math.max(baselineSource.height, currentSource.height);
   const baseline = place(baselineSource, width, height);
   const current = place(currentSource, width, height);
-  const diff = new PNG({ width, height });
-  const changedPixels = pixelmatch(baseline.data, current.data, diff.data, width, height, {
+  const diff = renderPng ? new PNG({ width, height }) : null;
+  const changedPixels = pixelmatch(baseline.data, current.data, diff?.data, width, height, {
     threshold,
     alpha: 0.35,
     diffColor: [255, 47, 146],
@@ -56,7 +81,7 @@ export function createVisualDiff(
   });
   const totalPixels = width * height;
   return {
-    png: PNG.sync.write(diff),
+    ...(diff && { png: PNG.sync.write(diff) }),
     changedPixels,
     totalPixels,
     changeRatio: totalPixels === 0 ? 0 : changedPixels / totalPixels,

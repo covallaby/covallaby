@@ -1,5 +1,5 @@
 import { PNG } from "pngjs";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { createApp, ensureUploadToken } from "../src/app.js";
 import type { ArtifactStorage } from "../src/artifacts.js";
 import { attachDashboard } from "../src/static-node.js";
@@ -623,6 +623,32 @@ describe("browser test artifacts", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
+    expect(
+      (await setRule(mainId, { story: "button--one", state: "allowed", tolerancePercent: 1 }))
+        .status,
+    ).toBe(409);
+    expect(
+      (await setRule(thirdId, { story: "button--one", state: "sideways", tolerancePercent: 1 }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await setRule(thirdId, { story: "button--one", state: "allowed", tolerancePercent: 101 }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await setRule(thirdId, { story: "button--one", state: "allowed", tolerancePercent: 0 }))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await setRule(thirdId, {
+          story: "button--one",
+          state: "flaky",
+          tolerancePercent: 1,
+          note: "x".repeat(501),
+        })
+      ).status,
+    ).toBe(400);
     const allowed = await (
       await setRule(thirdId, {
         story: "button--one",
@@ -636,6 +662,23 @@ describe("browser test artifacts", () => {
       allowed.captures.find((capture: { id: string }) => capture.id === "button--one")?.rule,
     ).toMatchObject({ state: "allowed", toleranceRatio: 0.01, note: "Known animation variance" });
 
+    // A later explicit verdict wins, but choosing the persistent rule again
+    // deliberately replaces that one-off verdict and applies immediately.
+    const ruleRejected = await (await review(thirdId, ["button--one"], "rejected")).json();
+    expect(reviewOf(ruleRejected, "button--one")).toMatchObject({ state: "rejected" });
+    expect(
+      ruleRejected.captures.find((capture: { id: string }) => capture.id === "button--one")?.rule,
+    ).toMatchObject({ state: "allowed" });
+    const ruleRestored = await (
+      await setRule(thirdId, {
+        story: "button--one",
+        state: "allowed",
+        tolerancePercent: 1,
+        note: "Known animation variance",
+      })
+    ).json();
+    expect(reviewOf(ruleRestored, "button--one")).toMatchObject({ state: "allowed" });
+
     const fourthId = await uploadPreview("feat/loop", "loophead4", [
       { id: "button--one", hash: hash("f"), bytes: light },
       { id: "button--two", hash: hash("c"), bytes: light },
@@ -647,6 +690,7 @@ describe("browser test artifacts", () => {
       exceeded.captures.find((capture: { id: string }) => capture.id === "button--one")?.rule,
     ).toMatchObject({ state: "allowed", toleranceRatio: 0.01 });
 
+    await review(fourthId, ["button--one"], "approved");
     const flaky = await (
       await setRule(fourthId, {
         story: "button--one",
@@ -672,6 +716,20 @@ describe("browser test artifacts", () => {
     expect(reviewOf(cleared, "button--one")).toEqual({ state: "pending" });
     expect(
       cleared.captures.find((capture: { id: string }) => capture.id === "button--one")?.rule,
+    ).toBeUndefined();
+
+    // Comparison failures are isolated: publishing completes, while the
+    // unmeasured capture stays pending and cannot silently inherit a rule.
+    const comparisonError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const brokenId = await uploadPreview("feat/broken-image", "loophead6", [
+      { id: "button--one", hash: hash("8"), bytes: new Uint8Array([1, 2, 3, 4]) },
+    ]);
+    comparisonError.mockRestore();
+    const broken = await detailOf(brokenId);
+    expect(broken.run.status).toBe("complete");
+    expect(reviewOf(broken, "button--one")).toEqual({ state: "pending" });
+    expect(
+      broken.captures.find((capture: { id: string }) => capture.id === "button--one")?.changeRatio,
     ).toBeUndefined();
 
     // A view-token-gated self-hosted server requires the token for reviews.

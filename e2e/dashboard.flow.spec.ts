@@ -146,13 +146,23 @@ test("maintainer reviews all repo evidence through the Activity tab", async ({
   // Persistent exceptions keep known noise out of the queue while preserving
   // the distinction between accepted variance and flaky debt.
   await page.getByRole("button", { name: "Allow variance", exact: true }).click();
+  await expect(page.getByLabel("Allowed changed pixels percentage")).toHaveValue("1.5");
+  await page.getByLabel("Visual rule reason").fill("Expected rendering variance");
+  await page.getByRole("button", { name: "Save variance", exact: true }).click();
   await expect(page.getByText("1 of 2 reviewed")).toBeVisible();
   await expect(page.getByText("allowed", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Allow variance", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   await page.getByRole("button", { name: "Allow variance", exact: true }).click();
   await expect(page.getByText("0 of 2 reviewed")).toBeVisible();
   await page.getByRole("button", { name: "Mark flaky", exact: true }).click();
+  await page.getByLabel("Visual rule reason").fill("Fix nondeterministic rendering");
+  await page.getByRole("button", { name: "Save flaky rule", exact: true }).click();
   await expect(page.getByText("1 of 2 reviewed")).toBeVisible();
   await expect(page.getByText("flaky", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("1 flaky story needs fixing")).toBeVisible();
   await page.getByRole("button", { name: "Mark flaky", exact: true }).click();
   await expect(page.getByText("0 of 2 reviewed")).toBeVisible();
   // Reject via the visible button instead of the keyboard.

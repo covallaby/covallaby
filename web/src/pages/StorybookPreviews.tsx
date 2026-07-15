@@ -94,6 +94,12 @@ function ReviewChip({ review }: { review: CaptureReview }) {
   );
 }
 
+type RuleDraft = {
+  state: "allowed" | "flaky";
+  tolerancePercent: string;
+  note: string;
+};
+
 export function StorybookPreviewDetail() {
   const { id } = useParams();
   const [data, setData] = useState<PreviewDetailPayload | null>(null);
@@ -102,6 +108,8 @@ export function StorybookPreviewDetail() {
   const [request, setRequest] = useState(0);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState(false);
+  const [ruleDraft, setRuleDraft] = useState<RuleDraft | null>(null);
+  const [ruleValidation, setRuleValidation] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
   const [overlay, setOverlay] = useState(50);
@@ -148,6 +156,14 @@ export function StorybookPreviewDetail() {
     stops[0]?.captures[0] ??
     null;
   const selectedStop = stops[stopIndexOf(stops, selected?.id ?? null)] ?? null;
+  const selectedId = selected?.id;
+
+  useEffect(() => {
+    // A draft belongs to one story; moving through the review queue closes it.
+    void selectedId;
+    setRuleDraft(null);
+    setRuleValidation(null);
+  }, [selectedId]);
 
   // Whether the current stop accepts a human verdict: reviewable captures on
   // a complete run that the server didn't auto-accept (mainline is read-only).
@@ -183,26 +199,56 @@ export function StorybookPreviewDetail() {
   // Persistent exceptions are intentionally separate from approve/reject.
   // They carry a measured pixel tolerance forward to later runs and remain
   // visible as either understood variance or flaky test debt.
-  const submitRule = (state: "allowed" | "flaky") => {
-    if (!data || !selected || !canReview || reviewBusy || selected.changeRatio === undefined)
-      return;
-    const remove = selected.rule?.state === state;
-    const currentPercent = selected.changeRatio * 100;
-    const tolerancePercent = Math.min(
-      100,
-      Math.max(0.1, Math.round(currentPercent * 1.25 * 1000) / 1000),
-    );
+  const persistRule = (
+    state: "allowed" | "flaky" | null,
+    tolerancePercent?: number,
+    note?: string,
+  ) => {
+    if (!data || !selected || !canReview || reviewBusy) return;
     setReviewBusy(true);
     setReviewError(false);
+    setRuleValidation(null);
     api
       .setCaptureRule(String(data.run.id), {
         story: selected.id,
-        state: remove ? null : state,
+        state,
         tolerancePercent,
+        note,
       })
-      .then((result) => setData(result))
+      .then((result) => {
+        setData(result);
+        setRuleDraft(null);
+      })
       .catch(() => setReviewError(true))
       .finally(() => setReviewBusy(false));
+  };
+
+  const startRule = (state: "allowed" | "flaky") => {
+    if (!selected || selected.changeRatio === undefined || reviewBusy) return;
+    if (selected.rule?.state === state) {
+      persistRule(null);
+      return;
+    }
+    const currentPercent = selected.changeRatio * 100;
+    const suggested = Math.min(100, Math.max(0.1, Math.round(currentPercent * 1.25 * 1000) / 1000));
+    setRuleValidation(null);
+    setRuleDraft({
+      state,
+      tolerancePercent: String(
+        selected.rule?.toleranceRatio ? selected.rule.toleranceRatio * 100 : suggested,
+      ),
+      note: selected.rule?.note ?? "",
+    });
+  };
+
+  const saveRule = () => {
+    if (!ruleDraft) return;
+    const tolerance = Number(ruleDraft.tolerancePercent);
+    if (!Number.isFinite(tolerance) || tolerance <= 0 || tolerance > 100) {
+      setRuleValidation("Enter a tolerance greater than 0 and no more than 100%.");
+      return;
+    }
+    persistRule(ruleDraft.state, tolerance, ruleDraft.note);
   };
 
   // Keyboard-first review loop. Re-registered every render so the handler
@@ -264,6 +310,7 @@ export function StorybookPreviewDetail() {
   const actionable = data.summary.changed + data.summary.new + data.summary.removed;
   const groupCount = stops.filter((stop) => stop.captures.length > 1).length;
   const progress = reviewProgress(data.captures);
+  const flakyRules = data.captures.filter((capture) => capture.rule?.state === "flaky").length;
   return (
     <div className="space-y-4">
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
@@ -374,6 +421,11 @@ export function StorybookPreviewDetail() {
                   · {progress.reviewed} of {progress.total} reviewed
                 </span>
               ) : null}
+              {flakyRules > 0 ? (
+                <span className="ml-2 font-medium text-(--warn)">
+                  · {flakyRules} flaky {flakyRules === 1 ? "story needs" : "stories need"} fixing
+                </span>
+              ) : null}
             </div>
           </Card>
           {selected ? (
@@ -388,7 +440,9 @@ export function StorybookPreviewDetail() {
                       {selected.status}
                     </span>
                     {selected.review ? <ReviewChip review={selected.review} /> : null}
-                    {selected.rule && selected.review?.state !== selected.rule.state ? (
+                    {selected.rule &&
+                    selected.changeRatio !== undefined &&
+                    selected.changeRatio > selected.rule.toleranceRatio ? (
                       <span
                         title={`Current diff exceeds the ${(selected.rule.toleranceRatio * 100).toFixed(3)}% tolerance`}
                         className="shrink-0 rounded-full bg-(--warn)/12 px-2 py-0.5 text-[11px] text-(--warn)"
@@ -418,6 +472,14 @@ export function StorybookPreviewDetail() {
                       <span className="text-(--muted)"> · {reviewedByLine(selected.review)}</span>
                     ) : null}
                   </p>
+                  {selected.rule?.note ? (
+                    <p className="mt-1 text-xs text-(--ink-2)">
+                      <span className="font-medium">
+                        {selected.rule.state === "flaky" ? "Flaky follow-up:" : "Variance reason:"}
+                      </span>{" "}
+                      {selected.rule.note}
+                    </p>
+                  ) : null}
                   {reviewError ? (
                     <p className="mt-1 text-xs text-(--bad)">
                       The review didn't save. Check your connection (or sign-in) and try again.
@@ -447,8 +509,9 @@ export function StorybookPreviewDetail() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => submitRule("allowed")}
+                        onClick={() => startRule("allowed")}
                         disabled={reviewBusy || selected.changeRatio === undefined}
+                        aria-pressed={selected.rule?.state === "allowed"}
                         title="Allow this story's known visual variance on future runs"
                         className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium disabled:opacity-50 ${
                           selected.rule?.state === "allowed"
@@ -460,8 +523,9 @@ export function StorybookPreviewDetail() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => submitRule("flaky")}
+                        onClick={() => startRule("flaky")}
                         disabled={reviewBusy || selected.changeRatio === undefined}
+                        aria-pressed={selected.rule?.state === "flaky"}
                         title="Mark this story as flaky and keep known-size future diffs non-blocking"
                         className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium disabled:opacity-50 ${
                           selected.rule?.state === "flaky"
@@ -519,6 +583,80 @@ export function StorybookPreviewDetail() {
                   ) : null}
                 </div>
               </div>
+              {ruleDraft ? (
+                <div className="border-b border-(--hairline) bg-(--surface-2) px-4 py-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                    <label className="text-xs font-medium text-(--ink-2)">
+                      Pixel tolerance
+                      <span className="mt-1 flex items-center rounded-lg border border-(--border) bg-(--surface) px-2.5">
+                        <input
+                          aria-label="Allowed changed pixels percentage"
+                          type="number"
+                          min="0.001"
+                          max="100"
+                          step="0.001"
+                          value={ruleDraft.tolerancePercent}
+                          onChange={(event) =>
+                            setRuleDraft((draft) =>
+                              draft ? { ...draft, tolerancePercent: event.target.value } : draft,
+                            )
+                          }
+                          className="w-24 bg-transparent py-2 text-sm outline-none"
+                        />
+                        <span className="text-xs text-(--muted)">%</span>
+                      </span>
+                    </label>
+                    <label className="min-w-0 flex-1 text-xs font-medium text-(--ink-2)">
+                      Reason or follow-up
+                      <input
+                        aria-label="Visual rule reason"
+                        type="text"
+                        maxLength={500}
+                        value={ruleDraft.note}
+                        onChange={(event) =>
+                          setRuleDraft((draft) =>
+                            draft ? { ...draft, note: event.target.value } : draft,
+                          )
+                        }
+                        placeholder={
+                          ruleDraft.state === "flaky"
+                            ? "What needs fixing? Add an issue reference if one exists."
+                            : "Why is this variance expected?"
+                        }
+                        className="mt-1 block w-full rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm font-normal outline-none focus:border-(--accent)"
+                      />
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={reviewBusy}
+                        onClick={saveRule}
+                        className="rounded-lg bg-(--accent) px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
+                      >
+                        Save {ruleDraft.state === "flaky" ? "flaky rule" : "variance"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRuleDraft(null)}
+                        className="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-xs font-medium"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                  <p
+                    className={`mt-2 text-xs ${ruleValidation ? "text-(--bad)" : "text-(--muted)"}`}
+                  >
+                    {ruleValidation ??
+                      `The current diff is ${(selected.changeRatio! * 100).toFixed(3)}%. Larger future changes will return to review.`}
+                  </p>
+                </div>
+              ) : canReview && selected.changeRatio === undefined ? (
+                <p className="border-b border-(--hairline) bg-(--surface-2) px-4 py-2 text-xs text-(--muted)">
+                  Persistent rules need a measured changed-pixel comparison. They are unavailable
+                  for new or removed captures and storage backends without comparison support.
+                </p>
+              ) : null}
               <div className="bg-(--surface-2) p-3 sm:p-5">
                 {view === "diff" && selected.diffImageUrl ? (
                   <ReviewImage
