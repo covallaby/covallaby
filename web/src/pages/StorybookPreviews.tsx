@@ -3,11 +3,12 @@ import {
   BookOpen,
   Bug,
   Check,
-  ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ExternalLink,
   GitCommit,
   GitPullRequest,
+  Keyboard,
   Layers,
   RotateCcw,
   RotateCw,
@@ -35,6 +36,7 @@ import {
   type ReviewView,
   buildReviewStops,
   isEditableTarget,
+  nextPendingStop,
   parseReviewFilter,
   parseReviewView,
   reviewActionState,
@@ -113,7 +115,6 @@ export function StorybookPreviewDetail() {
   const [query, setQuery] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
   const [overlay, setOverlay] = useState(50);
-  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(new Set());
   // Where `d` returns to when the diff view toggles back off.
   const previousViewRef = useRef<Exclude<ReviewView, "diff">>("side-by-side");
 
@@ -155,7 +156,8 @@ export function StorybookPreviewDetail() {
     (storyParam ? data?.captures.find((capture) => capture.id === storyParam) : null) ??
     stops[0]?.captures[0] ??
     null;
-  const selectedStop = stops[stopIndexOf(stops, selected?.id ?? null)] ?? null;
+  const selectedStopIndex = stopIndexOf(stops, selected?.id ?? null);
+  const selectedStop = stops[selectedStopIndex] ?? null;
   const selectedId = selected?.id;
 
   useEffect(() => {
@@ -183,6 +185,7 @@ export function StorybookPreviewDetail() {
       action,
       current === "approved" || current === "rejected" ? current : "pending",
     );
+    const reviewedCaptureId = selected?.id ?? null;
     setReviewBusy(true);
     setReviewError(false);
     api
@@ -191,9 +194,21 @@ export function StorybookPreviewDetail() {
         selectedStop.captures.map((capture) => capture.id),
         state,
       )
-      .then((result) => setData(result))
-      .catch(() => setReviewError(true))
-      .finally(() => setReviewBusy(false));
+      .then((result) => {
+        setReviewBusy(false);
+        setData(result);
+        if (state !== "pending") {
+          const next = nextPendingStop(
+            buildReviewStops(result.captures, filter, query),
+            reviewedCaptureId,
+          );
+          if (next) setParam("story", next.id);
+        }
+      })
+      .catch(() => {
+        setReviewError(true);
+        setReviewBusy(false);
+      });
   };
 
   // Persistent exceptions are intentionally separate from approve/reject.
@@ -205,6 +220,7 @@ export function StorybookPreviewDetail() {
     note?: string,
   ) => {
     if (!data || !selected || !canReview || reviewBusy) return;
+    const reviewedCaptureId = selected.id;
     setReviewBusy(true);
     setReviewError(false);
     setRuleValidation(null);
@@ -216,11 +232,21 @@ export function StorybookPreviewDetail() {
         note,
       })
       .then((result) => {
+        setReviewBusy(false);
         setData(result);
         setRuleDraft(null);
+        if (state !== null) {
+          const next = nextPendingStop(
+            buildReviewStops(result.captures, filter, query),
+            reviewedCaptureId,
+          );
+          if (next) setParam("story", next.id);
+        }
       })
-      .catch(() => setReviewError(true))
-      .finally(() => setReviewBusy(false));
+      .catch(() => {
+        setReviewError(true);
+        setReviewBusy(false);
+      });
   };
 
   const startRule = (state: "allowed" | "flaky") => {
@@ -419,6 +445,7 @@ export function StorybookPreviewDetail() {
                 <span className="font-medium text-(--ink-2)">
                   {" "}
                   · {progress.reviewed} of {progress.total} reviewed
+                  {progress.reviewed === progress.total ? " · Review complete" : ""}
                 </span>
               ) : null}
               {flakyRules > 0 ? (
@@ -428,6 +455,47 @@ export function StorybookPreviewDetail() {
               ) : null}
             </div>
           </Card>
+          {stops.length > 0 ? (
+            <>
+              <ReviewFilmstrip
+                stops={stops}
+                selectedId={selected?.id ?? null}
+                onSelect={(captureId) => setParam("story", captureId)}
+              />
+              <Card className="flex flex-col gap-2 px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+                <span className="inline-flex items-center gap-2 font-medium text-(--ink-2)">
+                  <Keyboard size={15} className="text-(--accent)" /> Keyboard shortcuts
+                </span>
+                <div
+                  aria-label="Review keyboard shortcuts"
+                  className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-(--muted)"
+                >
+                  {canReview ? (
+                    <>
+                      <span>
+                        <Kbd>a</Kbd> approve &amp; next
+                      </span>
+                      <span>
+                        <Kbd>x</Kbd> reject &amp; next
+                      </span>
+                      <span>
+                        <Kbd>u</Kbd> return to pending
+                      </span>
+                    </>
+                  ) : null}
+                  <span>
+                    <Kbd>j</Kbd>/<Kbd>k</Kbd> move
+                  </span>
+                  <span>
+                    <Kbd>d</Kbd> pixel diff
+                  </span>
+                  <span>
+                    <Kbd>b</Kbd> swap images
+                  </span>
+                </div>
+              </Card>
+            </>
+          ) : null}
           {selected ? (
             <Card className="overflow-hidden">
               <div className="flex flex-col gap-3 border-b border-(--hairline) p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -487,6 +555,35 @@ export function StorybookPreviewDetail() {
                   ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1 rounded-lg border border-(--border) bg-(--surface-2) p-1">
+                    <button
+                      type="button"
+                      aria-label="Previous capture"
+                      disabled={selectedStopIndex <= 0}
+                      onClick={() => {
+                        const target = stepStop(stops, selected?.id ?? null, -1);
+                        if (target) setParam("story", target.id);
+                      }}
+                      className="rounded p-1 text-(--muted) hover:bg-(--surface) hover:text-(--ink) disabled:opacity-30"
+                    >
+                      <ChevronLeft size={15} />
+                    </button>
+                    <span className="min-w-16 text-center text-[11px] font-medium text-(--muted)">
+                      {selectedStopIndex + 1} / {stops.length}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Next capture"
+                      disabled={selectedStopIndex < 0 || selectedStopIndex >= stops.length - 1}
+                      onClick={() => {
+                        const target = stepStop(stops, selected?.id ?? null, 1);
+                        if (target) setParam("story", target.id);
+                      }}
+                      className="rounded p-1 text-(--muted) hover:bg-(--surface) hover:text-(--ink) disabled:opacity-30"
+                    >
+                      <ChevronRight size={15} />
+                    </button>
+                  </div>
                   {canReview && selectedStop ? (
                     <div className="flex flex-wrap items-center gap-1.5">
                       <button
@@ -504,7 +601,7 @@ export function StorybookPreviewDetail() {
                             : "border-(--border) bg-(--surface) hover:border-(--good)/60 hover:text-(--good)"
                         }`}
                       >
-                        <Check size={13} /> Approve
+                        <Check size={13} /> Approve &amp; next
                         {selectedStop.captures.length > 1 ? ` ${selectedStop.captures.length}` : ""}
                       </button>
                       <button
@@ -550,7 +647,7 @@ export function StorybookPreviewDetail() {
                             : "border-(--border) bg-(--surface) hover:border-(--bad)/60 hover:text-(--bad)"
                         }`}
                       >
-                        <X size={13} /> Reject
+                        <X size={13} /> Reject &amp; next
                         {selectedStop.captures.length > 1 ? ` ${selectedStop.captures.length}` : ""}
                       </button>
                       {stopReviewState(selectedStop)?.state !== "pending" ? (
@@ -760,48 +857,8 @@ export function StorybookPreviewDetail() {
                 <option value="uncompared">Uncompared</option>
               </select>
             </div>
-            <div className="mt-3 hidden flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-(--muted) sm:flex">
-              <span>
-                <Kbd>j</Kbd>/<Kbd>k</Kbd> or <Kbd>↑</Kbd>/<Kbd>↓</Kbd> next / prev
-              </span>
-              <span>
-                <Kbd>d</Kbd> toggle pixel diff
-              </span>
-              <span>
-                <Kbd>b</Kbd> flip baseline ↔ new
-              </span>
-              {canReview ? (
-                <span>
-                  <Kbd>a</Kbd> approve · <Kbd>x</Kbd> reject · <Kbd>u</Kbd> back to pending
-                </span>
-              ) : null}
-              <span>
-                <Kbd>[</Kbd>/<Kbd>]</Kbd> previous / next run
-              </span>
-            </div>
           </Card>
-          {stops.length > 0 ? (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {stops.map((stop) => (
-                <ReviewStopCard
-                  key={stop.key}
-                  stop={stop}
-                  selectedId={selected?.id ?? null}
-                  active={selectedStop?.key === stop.key}
-                  expanded={expandedGroups.has(stop.key)}
-                  onSelect={(captureId) => setParam("story", captureId)}
-                  onToggleExpanded={() =>
-                    setExpandedGroups((current) => {
-                      const next = new Set(current);
-                      if (next.has(stop.key)) next.delete(stop.key);
-                      else next.add(stop.key);
-                      return next;
-                    })
-                  }
-                />
-              ))}
-            </div>
-          ) : (
+          {stops.length === 0 ? (
             <Card className="p-6 text-center text-sm text-(--muted)">
               {filter === "changes" && query.trim() === "" ? (
                 <>
@@ -818,7 +875,7 @@ export function StorybookPreviewDetail() {
                 <>No component captures match “{query}”.</>
               )}
             </Card>
-          )}
+          ) : null}
         </>
       ) : data.run.status === "complete" ? (
         <Card className="p-6">
@@ -846,88 +903,89 @@ export function StorybookPreviewDetail() {
 }
 
 /**
- * One stop in the review loop: a single capture, or a group of stories that
- * share the exact same visual change and review together.
+ * Compact navigator for the review queue. The large comparison above remains
+ * the review surface; these thumbnails answer "where am I?" and allow direct jumps.
  */
-function ReviewStopCard({
-  stop,
+function ReviewFilmstrip({
+  stops,
   selectedId,
-  active,
-  expanded,
   onSelect,
-  onToggleExpanded,
 }: {
-  stop: ReviewStop;
+  stops: ReviewStop[];
   selectedId: string | null;
-  active: boolean;
-  expanded: boolean;
   onSelect: (captureId: string) => void;
-  onToggleExpanded: () => void;
 }) {
-  const representative =
-    stop.captures.find((capture) => capture.id === selectedId) ?? stop.captures[0]!;
-  const isGroup = stop.captures.length > 1;
-  const stopReview = stopReviewState(stop);
+  const pending = stops.filter((stop) => stopReviewState(stop)?.state === "pending").length;
+
   return (
-    <Card
-      className={`group overflow-hidden transition-colors ${active ? "border-(--accent)" : ""}`}
-    >
-      <button
-        type="button"
-        onClick={() => onSelect(representative.id)}
-        className="block w-full text-left"
-      >
-        <div className="block bg-[linear-gradient(45deg,var(--surface-2)_25%,transparent_25%),linear-gradient(-45deg,var(--surface-2)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,var(--surface-2)_75%),linear-gradient(-45deg,transparent_75%,var(--surface-2)_75%)] bg-size-[18px_18px] bg-position-[0_0,0_9px,9px_-9px,-9px_0] p-3">
-          <img
-            src={representative.imageUrl || representative.baselineImageUrl}
-            alt={`${representative.title} — ${representative.name}`}
-            loading="lazy"
-            className="mx-auto h-52 w-full rounded-md bg-white object-contain shadow-sm transition-transform group-hover:scale-[1.01]"
-          />
+    <Card className="overflow-hidden p-3">
+      <div className="mb-3 flex flex-col gap-1 px-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-sm font-medium">Images needing review</p>
+          <p className="mt-0.5 text-[11px] text-(--muted)">
+            Choose any thumbnail. Decisions automatically continue to the next pending image.
+          </p>
         </div>
-        <div className="flex items-center justify-between gap-3 border-t border-(--hairline) px-4 py-3">
-          <div className="min-w-0">
-            <p className="truncate text-xs text-(--muted)">{representative.title}</p>
-            <p className="mt-0.5 truncate text-sm font-medium">{representative.name}</p>
-          </div>
-          <span className="flex shrink-0 items-center gap-1.5">
-            <span
-              className={`rounded-full px-2 py-0.5 text-[11px] capitalize ${statusTone[representative.status]}`}
+        <p className="text-xs font-medium text-(--ink-2)">
+          {pending} pending · {stops.length - pending} decided
+        </p>
+      </div>
+      <div className="flex snap-x gap-2 overflow-x-auto pb-2">
+        {stops.map((stop, index) => {
+          const representative = stop.captures[0]!;
+          const active = stop.captures.some((capture) => capture.id === selectedId);
+          const review = stopReviewState(stop);
+          return (
+            <button
+              key={stop.key}
+              type="button"
+              onClick={() => onSelect(representative.id)}
+              ref={(node) => {
+                if (active) {
+                  node?.scrollIntoView?.({
+                    behavior: "smooth",
+                    block: "nearest",
+                    inline: "center",
+                  });
+                }
+              }}
+              aria-current={active ? "step" : undefined}
+              aria-label={`${index + 1} of ${stops.length}: ${representative.title} — ${representative.name}, ${review?.state ?? "not reviewable"}`}
+              className={`w-40 shrink-0 snap-start overflow-hidden rounded-lg border text-left transition-colors ${
+                active
+                  ? "border-(--accent) bg-(--accent-wash) ring-1 ring-(--accent)"
+                  : "border-(--border) bg-(--surface) hover:border-(--muted)"
+              }`}
             >
-              {representative.status}
-            </span>
-            {stopReview ? <ReviewChip review={stopReview} /> : null}
-          </span>
-        </div>
-      </button>
-      {isGroup ? (
-        <div className="border-t border-(--hairline)">
-          <button
-            type="button"
-            onClick={onToggleExpanded}
-            className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-medium text-(--accent) hover:bg-(--surface-2)"
-          >
-            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            <Layers size={13} /> {stop.captures.length} stories with this same change
-          </button>
-          {expanded ? (
-            <ul className="border-t border-(--hairline)">
-              {stop.captures.map((capture) => (
-                <li key={capture.id}>
-                  <button
-                    type="button"
-                    onClick={() => onSelect(capture.id)}
-                    className={`flex w-full items-baseline gap-2 px-4 py-2 text-left text-xs hover:bg-(--surface-2) ${capture.id === selectedId ? "bg-(--accent-wash)" : ""}`}
-                  >
-                    <span className="text-(--muted)">{capture.title}</span>
-                    <span className="font-medium">{capture.name}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
+              <div className="relative h-24 bg-(--surface-2) p-1.5">
+                <img
+                  src={representative.imageUrl || representative.baselineImageUrl}
+                  alt=""
+                  loading="lazy"
+                  className="h-full w-full rounded bg-white object-contain"
+                />
+                <span className="absolute top-2 left-2 rounded bg-black/65 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                  {index + 1}
+                </span>
+                {stop.captures.length > 1 ? (
+                  <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded bg-black/65 px-1.5 py-0.5 text-[10px] text-white">
+                    <Layers size={10} /> {stop.captures.length}
+                  </span>
+                ) : null}
+              </div>
+              <div className="space-y-1 border-t border-(--hairline) p-2">
+                <p className="truncate text-xs font-medium">{representative.name}</p>
+                <div className="flex items-center justify-between gap-1">
+                  <span className="truncate text-[10px] capitalize text-(--muted)">
+                    {representative.status}
+                  </span>
+                  {review ? <ReviewChip review={review} /> : null}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
     </Card>
   );
 }
@@ -953,7 +1011,7 @@ function ReviewImage({ src, alt, label }: { src: string; alt: string; label: str
         <img
           src={src}
           alt={alt}
-          className="mx-auto max-h-[620px] w-auto max-w-full object-contain"
+          className="mx-auto max-h-[78vh] w-auto max-w-full object-contain"
         />
       </a>
     </figure>
