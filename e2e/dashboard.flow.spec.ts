@@ -56,6 +56,17 @@ test("maintainer finds repository risk and reviews its coverage", async ({ page 
     "aria-current",
     "page",
   );
+  await repoTabs.getByRole("link", { name: "Components", exact: true }).click();
+  await expect(page.getByText("Repository-wide", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Branch or pull request" })).toHaveCount(0);
+  await expect(page.getByText("Current components on main", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Browse current library/ })).toHaveAttribute(
+    "href",
+    "#/r/covallaby/covallaby/storybook-previews/17?filter=all",
+  );
+  await expect(page.getByRole("link", { name: /PR #128.*View diff/ })).toBeVisible();
+  await chapter(page, testInfo, "03-main-components-and-diffs");
+
   await repoTabs.getByRole("link", { name: "Commits", exact: true }).click();
   await expect(page.getByText(/joined by commit SHA/)).toBeVisible();
   await expect(page.getByText("Missing code", { exact: true })).toHaveCount(2);
@@ -63,11 +74,11 @@ test("maintainer finds repository risk and reviews its coverage", async ({ page 
     "aria-current",
     "page",
   );
-  await chapter(page, testInfo, "03-commit-evidence");
+  await chapter(page, testInfo, "04-commit-evidence");
 
   await repoTabs.getByRole("link", { name: "Insights", exact: true }).click();
   await expect(page.getByText(/coverage/i).first()).toBeVisible();
-  await chapter(page, testInfo, "04-coverage-insights");
+  await chapter(page, testInfo, "05-coverage-insights");
   await expectHealthyPage(page);
 });
 
@@ -96,8 +107,7 @@ test("merge-gate verdict leads the commit and PR pages", async ({ page }, testIn
 test("maintainer reviews all repo evidence through the Activity tab", async ({
   page,
 }, testInfo) => {
-  // Legacy evidence deep links (uploads/playbacks/storybook-previews lists)
-  // stay alive: they land on the unified Activity tab.
+  // Legacy coverage and playback list links stay alive by landing on Activity.
   await page.goto("./#/r/covallaby/covallaby/playbacks");
   await expect(page).toHaveURL(/#\/r\/covallaby\/covallaby\/activity$/);
   const repoTabs = page.getByRole("navigation", { name: "Repository sections" });
@@ -123,7 +133,7 @@ test("maintainer reviews all repo evidence through the Activity tab", async ({
   // A feed row is one link: straight into the capture review gallery.
   await page.getByText("component changes need review").click();
   await expect(page).toHaveURL(/storybook-previews\/18$/);
-  await expect(repoTabs.getByRole("link", { name: "Activity", exact: true })).toHaveAttribute(
+  await expect(repoTabs.getByRole("link", { name: "Components", exact: true })).toHaveAttribute(
     "aria-current",
     "page",
   );

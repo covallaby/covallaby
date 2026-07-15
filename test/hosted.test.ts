@@ -469,15 +469,15 @@ describe("per-signal covallaby/components status (hosted GitHub App)", () => {
     return data.run.id as number;
   };
 
-  it("opens a pending status on completion and settles it on the review verdict", async () => {
+  it("passes an empty review queue and still reports later run-level verdicts", async () => {
     await store.setMeta("github-app:account:acme", "123");
     createCommitStatus.mockClear();
 
     const id = await publishPreview("acme/app", "abc1234def");
     expect(createCommitStatus).toHaveBeenCalledWith(123, "acme/app", "abc1234def", {
       context: "covallaby/components",
-      state: "pending",
-      description: "Component captures await visual review.",
+      state: "success",
+      description: "Visual changes approved in review.",
       targetUrl: `http://localhost:8080/r/acme/app/storybook-previews/${id}`,
     });
 

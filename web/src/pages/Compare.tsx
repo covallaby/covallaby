@@ -1,6 +1,7 @@
+import { ArrowRight, Images } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { type CompareResult, api, formatPercent, severity } from "../api.js";
+import { type CompareResult, type StorybookPreview, api, formatPercent, severity } from "../api.js";
 import { ChangesList } from "../components/changes-list.js";
 import { ScopePicker } from "../components/scope-picker.js";
 import { PageSkeleton } from "../components/skeleton.js";
@@ -115,6 +116,7 @@ export function PullRequest() {
   const [params] = useSearchParams();
   const base = params.get("base") ?? "main";
   const [result, setResult] = useState<CompareResult | null>(null);
+  const [componentPreview, setComponentPreview] = useState<StorybookPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     api
@@ -122,6 +124,14 @@ export function PullRequest() {
       .then(setResult)
       .catch((e) => setError(String(e)));
   }, [repo, pr, base]);
+  useEffect(() => {
+    api
+      .storybookPreviews(repo)
+      .then(({ previews }) =>
+        setComponentPreview(previews.find((preview) => preview.pr === Number(pr)) ?? null),
+      )
+      .catch(() => setComponentPreview(null));
+  }, [repo, pr]);
   if (error) return <p className="text-sm text-(--bad)">{error}</p>;
   if (!result) return <PageSkeleton />;
   return (
@@ -129,6 +139,25 @@ export function PullRequest() {
       <Link to={`/r/${repo}/pulls`} className="text-xs text-(--muted) hover:text-(--ink)">
         ← All pull requests
       </Link>
+      {componentPreview ? (
+        <Link
+          to={`/r/${repo}/storybook-previews/${componentPreview.id}`}
+          className="group flex items-center gap-3 rounded-xl border border-(--border) bg-(--surface) px-4 py-3 transition-colors hover:border-(--accent)/60 hover:bg-(--surface-2)"
+        >
+          <span className="rounded-lg bg-(--accent-wash) p-2 text-(--accent)">
+            <Images size={18} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold">Component changes for PR #{pr}</span>
+            <span className="mt-0.5 block text-xs text-(--muted)">
+              {componentPreview.imageCount ?? 0} states · compare visual changes with {base}
+            </span>
+          </span>
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-(--accent) group-hover:underline">
+            View diff <ArrowRight size={14} />
+          </span>
+        </Link>
+      ) : null}
       <CompareBody repo={repo} result={result} headLabel={`PR #${pr}`} />
     </div>
   );

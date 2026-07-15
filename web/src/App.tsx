@@ -25,6 +25,7 @@ import {
 import { Meter, OwnerAvatar, inkFor } from "./components/ui.js";
 import { Commits } from "./pages/Commits.js";
 import { CompareBranches, PullRequest } from "./pages/Compare.js";
+import { Components } from "./pages/Components.js";
 import { Home } from "./pages/Home.js";
 import { PlaybackDetail } from "./pages/Playbacks.js";
 import { Policy } from "./pages/Policy.js";
@@ -304,6 +305,7 @@ function tailLabel(rest: string): string | null {
   if (rest === "") return null;
   if (rest.startsWith("insights")) return "Insights";
   if (rest.startsWith("activity")) return "Activity";
+  if (rest.startsWith("components")) return "Components";
   const preview = /^storybook-previews\/(\d+)/.exec(rest);
   if (preview) return `Component capture run ${preview[1]}`;
   const run = /^test-runs\/(\d+)/.exec(rest);
@@ -465,9 +467,9 @@ function HomeRoute({ repos }: { repos: RepoOverview[] | null }) {
 }
 
 /**
- * Legacy evidence-list routes (/uploads, /playbacks, /storybook-previews) live
- * on as deep links into the unified Activity tab — the query string (branch,
- * type, theme) rides along.
+ * Legacy coverage and playback list routes live on as deep links into the
+ * unified Activity tab — the query string (branch, type, theme) rides along.
+ * Storybook's former list route now has a first-class Components destination.
  */
 export function RedirectToActivity() {
   const { owner, name } = useParams();
@@ -486,6 +488,7 @@ export function buildRoutes(repos: RepoOverview[] | null): RouteObject[] {
       children: [
         { index: true, element: <Summary /> },
         { path: "commits", element: <Commits /> },
+        { path: "components", element: <Components /> },
         { path: "activity", element: <Activity /> },
         { path: "insights", element: <Insights /> },
         { path: "uploads", element: <RedirectToActivity /> },
@@ -495,7 +498,7 @@ export function buildRoutes(repos: RepoOverview[] | null): RouteObject[] {
         {
           path: "storybook-previews",
           children: [
-            { index: true, element: <RedirectToActivity /> },
+            { index: true, element: <Components /> },
             { path: ":id", element: <StorybookPreviewDetail /> },
           ],
         },
