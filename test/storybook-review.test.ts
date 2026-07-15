@@ -4,6 +4,7 @@ import {
   buildReviewStops,
   diffGroupKey,
   isChange,
+  nextPendingStop,
   parseReviewFilter,
   parseReviewView,
   reviewActionState,
@@ -119,6 +120,28 @@ describe("stepStop", () => {
     expect(stopIndexOf(stops, "changed-b")).toBe(0);
     expect(stopIndexOf(stops, "added-a")).toBe(1);
     expect(stopIndexOf(stops, null)).toBe(-1);
+  });
+});
+
+describe("nextPendingStop", () => {
+  it("advances to the next pending stop, wraps, and ends cleanly", () => {
+    const reviewed = (id: string, state: "pending" | "approved" | "rejected") => ({
+      ...capture(id, "changed" as const),
+      review: { state },
+    });
+    const stops = buildReviewStops(
+      [reviewed("a", "approved"), reviewed("b", "pending"), reviewed("c", "rejected")],
+      "changes",
+    );
+    expect(nextPendingStop(stops, null)?.id).toBe("b");
+    expect(nextPendingStop(stops, "a")?.id).toBe("b");
+    expect(nextPendingStop(stops, "c")?.id).toBe("b");
+    expect(
+      nextPendingStop(
+        buildReviewStops([reviewed("a", "approved"), reviewed("b", "rejected")], "changes"),
+        "a",
+      ),
+    ).toBeNull();
   });
 });
 

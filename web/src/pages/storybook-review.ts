@@ -184,11 +184,30 @@ export function reviewKeyAction(
  */
 export function reviewActionState(
   action: "approve" | "reject" | "unreview",
-  current: ReviewState | undefined,
+  current: ReviewState | "allowed" | "flaky" | undefined,
 ): "approved" | "rejected" | "pending" {
   if (action === "unreview") return "pending";
   const target = action === "approve" ? "approved" : "rejected";
   return current === target ? "pending" : target;
+}
+
+/**
+ * Find the next pending review stop after the current one, wrapping once.
+ * Returns null when review is complete rather than trapping the reviewer in a loop.
+ */
+export function nextPendingStop(
+  stops: ReviewStop[],
+  captureId: string | null,
+): StorybookCapture | null {
+  if (stops.length === 0) return null;
+  const current = stopIndexOf(stops, captureId);
+  for (let offset = 1; offset <= stops.length; offset++) {
+    const stop = stops[(current + offset) % stops.length]!;
+    if (stop.captures.some((capture) => capture.review?.state === "pending")) {
+      return stop.captures[0]!;
+    }
+  }
+  return null;
 }
 
 /** The stop's aggregate verdict — the state shared by every member, else pending. */
