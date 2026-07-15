@@ -122,6 +122,7 @@ export function StorybookPreviewDetail() {
   // ?view= (diff mode), ?story= (selected capture).
   const filter = parseReviewFilter(searchParams.get("filter"));
   const view = parseReviewView(searchParams.get("view"));
+  const galleryMode = searchParams.get("mode") === "gallery";
   const storyParam = searchParams.get("story");
   const paramDefaults: Record<string, string> = { filter: "changes", view: "side-by-side" };
   const setParam = (key: "filter" | "view" | "story", value: string | null) => {
@@ -280,7 +281,7 @@ export function StorybookPreviewDetail() {
   // Keyboard-first review loop. Re-registered every render so the handler
   // always closes over current stops/selection; cleanup keeps it single.
   useEffect(() => {
-    if (!data) return;
+    if (!data || galleryMode) return;
     const onKeyDown = (event: KeyboardEvent) => {
       // [ / ] jump laterally to the previous / next capture run.
       if (event.key === "[" || event.key === "]") {
@@ -333,6 +334,9 @@ export function StorybookPreviewDetail() {
       </div>
     );
   if (!data) return <p className="text-sm text-(--muted)">Loading component captures…</p>;
+  if (galleryMode) {
+    return <ComponentCaptureGallery data={data} query={query} onQueryChange={setQuery} />;
+  }
   const actionable = data.summary.changed + data.summary.new + data.summary.removed;
   const groupCount = stops.filter((stop) => stop.captures.length > 1).length;
   const progress = reviewProgress(data.captures);
@@ -896,6 +900,111 @@ export function StorybookPreviewDetail() {
           <p className="mt-1 text-xs text-(--muted)">
             Covallaby will make it available as soon as every Storybook asset finishes uploading.
           </p>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A commit is a set of current component images, not a comparison. This view
+ * deliberately omits baselines, diff state, and review controls so browsing
+ * what shipped cannot be confused with reviewing how it changed.
+ */
+function ComponentCaptureGallery({
+  data,
+  query,
+  onQueryChange,
+}: {
+  data: PreviewDetailPayload;
+  query: string;
+  onQueryChange: (value: string) => void;
+}) {
+  const needle = query.trim().toLocaleLowerCase();
+  const captures = data.captures.filter(
+    (capture) =>
+      capture.imageUrl &&
+      (!needle || `${capture.title} ${capture.name}`.toLocaleLowerCase().includes(needle)),
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
+        <div>
+          <Link
+            to={`/r/${data.run.repo}/components`}
+            className="text-xs text-(--muted) hover:text-(--ink)"
+          >
+            ← Components
+          </Link>
+          <h1 className="mt-2 text-xl font-semibold">Components on {data.run.branch}</h1>
+          <p className="mt-1 text-xs text-(--muted)">
+            <span className="font-mono">{data.run.commit}</span> · {when(data.run.createdAt)} ·{" "}
+            {data.captures.filter((capture) => capture.imageUrl).length} component states
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to={`/r/${data.run.repo}/storybook-previews/${data.run.id}`}
+            className="inline-flex items-center gap-2 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-xs font-medium hover:border-(--muted)"
+          >
+            View visual diff
+          </Link>
+          {data.run.status === "complete" ? (
+            <a
+              href={data.previewUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-xs font-medium hover:border-(--muted)"
+            >
+              Open interactive Storybook <ExternalLink size={14} />
+            </a>
+          ) : null}
+        </div>
+      </div>
+
+      <Card className="p-3 sm:p-4">
+        <label className="relative block">
+          <Search
+            size={15}
+            className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-(--muted)"
+          />
+          <input
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder={`Search ${data.captures.filter((capture) => capture.imageUrl).length} component states`}
+            className="w-full rounded-lg border border-(--border) bg-(--surface-2) py-2 pr-3 pl-9 text-sm outline-none focus:border-(--muted)"
+          />
+        </label>
+      </Card>
+
+      {captures.length ? (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {captures.map((capture) => (
+            <Card key={capture.id} className="overflow-hidden">
+              <a
+                href={capture.imageUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="block bg-white"
+              >
+                <img
+                  src={capture.imageUrl}
+                  alt={`${capture.title} — ${capture.name}`}
+                  loading="lazy"
+                  className="aspect-video h-auto w-full object-contain"
+                />
+              </a>
+              <div className="border-t border-(--hairline) px-4 py-3">
+                <p className="truncate text-sm font-medium">{capture.name}</p>
+                <p className="mt-0.5 truncate text-xs text-(--muted)">{capture.title}</p>
+              </div>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <Card className="p-6 text-center text-sm text-(--muted)">
+          No component states match “{query}”.
         </Card>
       )}
     </div>

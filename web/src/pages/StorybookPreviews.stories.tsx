@@ -134,10 +134,17 @@ function WithApiFixture({ fixture, children }: { fixture: PreviewResponse; child
   return children;
 }
 
-function ReviewStory({ fixture }: { fixture: PreviewResponse }) {
+function ReviewStory({
+  fixture,
+  gallery = false,
+}: { fixture: PreviewResponse; gallery?: boolean }) {
   return (
     <WithApiFixture fixture={fixture}>
-      <MemoryRouter initialEntries={["/r/covallaby/covallaby/storybook-previews/18"]}>
+      <MemoryRouter
+        initialEntries={[
+          `/r/covallaby/covallaby/storybook-previews/18${gallery ? "?mode=gallery" : ""}`,
+        ]}
+      >
         <Routes>
           <Route
             path="/r/:owner/:name/storybook-previews/:id"
@@ -254,5 +261,25 @@ export const AllUnchanged: Story = {
     await expect(
       canvas.getByRole("button", { name: /Components\/Button — Primary/i }),
     ).toBeVisible();
+  },
+};
+
+export const CurrentCommitGallery: Story = {
+  render: () => (
+    <ReviewStory
+      gallery
+      fixture={{
+        ...changedFixture,
+        run: run({ branch: "main", pr: null, reviewState: "auto-accepted" }),
+      }}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("heading", { name: "Components on main" })).toBeVisible();
+    await expect(canvas.getByAltText("Commerce/Checkout — Default")).toBeVisible();
+    await expect(canvas.getByAltText("Components/Button — Primary")).toBeVisible();
+    await expect(canvas.queryByText("Baseline · main")).toBeNull();
+    await expect(canvas.queryByText("Pixel diff")).toBeNull();
   },
 };
