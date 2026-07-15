@@ -1,6 +1,10 @@
 import { PNG } from "pngjs";
 import { describe, expect, it } from "vitest";
-import { createVisualDiff, parseStoryCaptureMetadata } from "../src/storybook-diff.js";
+import {
+  createVisualDiff,
+  measureVisualDiff,
+  parseStoryCaptureMetadata,
+} from "../src/storybook-diff.js";
 
 function image(width: number, height: number, color: [number, number, number, number]) {
   const png = new PNG({ width, height });
@@ -37,5 +41,14 @@ describe("Storybook visual diffs", () => {
   it("reports no changes for identical images", () => {
     const bytes = image(2, 2, [25, 50, 75, 255]);
     expect(createVisualDiff(bytes, bytes)).toMatchObject({ changedPixels: 0, changeRatio: 0 });
+  });
+
+  it("measures changed pixels without rendering a diff PNG", () => {
+    const result = measureVisualDiff(
+      image(2, 2, [0, 0, 0, 255]),
+      image(2, 2, [255, 255, 255, 255]),
+    );
+    expect(result).toEqual({ changedPixels: 4, totalPixels: 4, changeRatio: 1 });
+    expect(result).not.toHaveProperty("png");
   });
 });

@@ -30,6 +30,7 @@ export interface BaselineInfo {
 
 /** Review verdict on a visual capture run; mainline builds are auto-accepted. */
 export type ReviewState = "pending" | "approved" | "rejected" | "auto-accepted";
+export type CaptureReviewState = ReviewState | "allowed" | "flaky";
 
 export interface RepoOverview {
   repo: string;
@@ -185,12 +186,20 @@ export interface RepoActivityFeed {
 
 /** A capture's review verdict; present only on reviewable (changed/new/removed) captures. */
 export interface CaptureReview {
-  state: ReviewState;
+  state: CaptureReviewState;
   /** Hosted session login of the reviewer; null for token / self-hosted reviews. */
   reviewedBy?: string | null;
   reviewedAt?: string;
   /** True when an approval carried over from an identical diff in another run. */
   carried?: boolean;
+}
+
+export interface CaptureRule {
+  state: "allowed" | "flaky";
+  toleranceRatio: number;
+  note: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string;
 }
 
 export interface StorybookCapture {
@@ -206,6 +215,10 @@ export interface StorybookCapture {
   sha256?: string;
   /** Content hash of the baseline capture, when the uploader provided one. */
   baselineSha256?: string;
+  changedPixels?: number;
+  totalPixels?: number;
+  changeRatio?: number;
+  rule?: CaptureRule;
   review?: CaptureReview;
 }
 
@@ -299,6 +312,16 @@ async function post<T>(url: string, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function put<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return (await res.json()) as T;
+}
+
 /** Hosted-mode auth state. */
 export interface Me {
   authenticated: boolean;
@@ -365,6 +388,15 @@ const liveApi = {
       stories,
       state,
     }),
+  setCaptureRule: (
+    id: string,
+    rule: {
+      story: string;
+      state: "allowed" | "flaky" | null;
+      tolerancePercent?: number;
+      note?: string;
+    },
+  ) => put<StorybookPreviewDetail>(`/api/v1/storybook-previews/${id}/capture-rule`, rule),
   reviewSignals: (repo?: string) =>
     get<{ repositories: ReviewSignals[] }>(
       `/api/v1/review-signals${repo ? `?repo=${encodeURIComponent(repo)}` : ""}`,
@@ -385,19 +417,38 @@ export const IS_DEMO = import.meta.env.VITE_DEMO === "1";
 
 /** Demo-only review ledger so the approve/reject loop works on the fixtures. */
 const demoReviews = new Map<string, CaptureReview>();
+const demoRules = new Map<string, CaptureRule>();
 
 function demoAnnotate(detail: StorybookPreviewDetail): StorybookPreviewDetail {
-  const captures = detail.captures.map((capture) =>
-    capture.status === "changed" || capture.status === "new" || capture.status === "removed"
-      ? { ...capture, review: demoReviews.get(capture.id) ?? { state: "pending" as const } }
-      : capture,
-  );
+  const captures = detail.captures.map((capture) => {
+    const rule = demoRules.get(capture.id);
+    const ruled =
+      rule && capture.changeRatio !== undefined && capture.changeRatio <= rule.toleranceRatio
+        ? ({
+            state: rule.state,
+            reviewedBy: rule.reviewedBy,
+            reviewedAt: rule.reviewedAt,
+          } satisfies CaptureReview)
+        : null;
+    return capture.status === "changed" || capture.status === "new" || capture.status === "removed"
+      ? {
+          ...capture,
+          ...(rule && { rule }),
+          review: demoReviews.get(capture.id) ?? ruled ?? { state: "pending" as const },
+        }
+      : capture;
+  });
   const reviewable = captures.filter((capture) => capture.review);
   const reviewState: ReviewState = reviewable.some(
     (capture) => capture.review?.state === "rejected",
   )
     ? "rejected"
-    : reviewable.length > 0 && reviewable.every((capture) => capture.review?.state === "approved")
+    : reviewable.length > 0 &&
+        reviewable.every((capture) =>
+          ["approved", "allowed", "flaky", "auto-accepted"].includes(
+            capture.review?.state ?? "pending",
+          ),
+        )
       ? "approved"
       : "pending";
   return { ...detail, run: { ...detail.run, reviewState }, captures };
@@ -504,6 +555,9 @@ export const api: typeof liveApi = IS_DEMO
                 title: "Dashboard/Review queue",
                 name: "With component captures",
                 status: "changed" as const,
+                changedPixels: 4320,
+                totalPixels: 360000,
+                changeRatio: 0.012,
                 imageUrl:
                   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='450'%3E%3Crect width='100%25' height='100%25' fill='%231c1a17'/%3E%3Crect x='80' y='80' width='640' height='290' rx='18' fill='%2328231d' stroke='%23483f34'/%3E%3Ccircle cx='130' cy='135' r='18' fill='%2322c55e'/%3E%3Crect x='170' y='118' width='360' height='18' rx='9' fill='%23f5f1e8'/%3E%3Crect x='170' y='150' width='260' height='12' rx='6' fill='%238f8778'/%3E%3C/svg%3E",
                 baselineImageUrl:
@@ -527,6 +581,19 @@ export const api: typeof liveApi = IS_DEMO
         for (const story of stories) {
           if (state === "pending") demoReviews.delete(story);
           else demoReviews.set(story, { state, reviewedAt: new Date().toISOString() });
+        }
+        return api.storybookPreview(id);
+      },
+      setCaptureRule: (id, rule) => {
+        if (rule.state === null) demoRules.delete(rule.story);
+        else {
+          demoRules.set(rule.story, {
+            state: rule.state,
+            toleranceRatio: (rule.tolerancePercent ?? 0) / 100,
+            note: rule.note?.trim() || null,
+            reviewedBy: "demo-maintainer",
+            reviewedAt: new Date().toISOString(),
+          });
         }
         return api.storybookPreview(id);
       },

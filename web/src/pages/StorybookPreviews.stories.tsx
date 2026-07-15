@@ -55,6 +55,10 @@ const changedFixture: PreviewResponse = {
       diffImageUrl: diff,
       sha256: "1".repeat(64),
       baselineSha256: "2".repeat(64),
+      changedPixels: 6480,
+      totalPixels: 540000,
+      changeRatio: 0.012,
+      review: { state: "pending" },
     },
     // These two share the exact same (baseline, new) hash pair as each other,
     // so the review groups them into one stop.
@@ -191,6 +195,18 @@ export const KeyboardReviewLoop: Story = {
     await expect(canvas.queryByAltText("Pixel diff for Default")).toBeNull();
     await userEvent.keyboard("b");
     await expect(canvas.getByRole("slider", { name: "Current image visibility" })).toBeVisible();
+  },
+};
+
+export const PersistentRuleConfiguration: Story = {
+  render: () => <ReviewStory fixture={changedFixture} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("heading", { name: "Default" })).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Mark flaky" }));
+    await expect(canvas.getByLabelText("Allowed changed pixels percentage")).toHaveValue(1.5);
+    await expect(canvas.getByLabelText("Visual rule reason")).toBeVisible();
+    await expect(canvas.getByRole("button", { name: "Save flaky rule" })).toBeVisible();
   },
 };
 

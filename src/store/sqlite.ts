@@ -2,7 +2,9 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  type CaptureComparisonRow,
   type CaptureReviewRow,
+  type CaptureReviewRuleRow,
   type CreateTestArtifactInput,
   type CreateTestRunInput,
   type PROverview,
@@ -10,6 +12,7 @@ import {
   type RepoOverview,
   type ReviewState,
   type SetCaptureReviewInput,
+  type SetCaptureReviewRuleInput,
   type Store,
   type Subscription,
   type TestArtifactRow,
@@ -73,6 +76,17 @@ CREATE TABLE IF NOT EXISTS capture_reviews (
   UNIQUE(run_id, story_id)
 );
 CREATE INDEX IF NOT EXISTS idx_capture_reviews_pair ON capture_reviews(repo, baseline_sha256, sha256);
+CREATE TABLE IF NOT EXISTS capture_review_rules (
+  repo TEXT NOT NULL, story_id TEXT NOT NULL, state TEXT NOT NULL,
+  tolerance_ratio REAL NOT NULL DEFAULT 0, note TEXT, reviewed_by TEXT,
+  reviewed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY(repo, story_id)
+);
+CREATE TABLE IF NOT EXISTS capture_comparisons (
+  run_id INTEGER NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
+  story_id TEXT NOT NULL, changed_pixels INTEGER NOT NULL, total_pixels INTEGER NOT NULL,
+  change_ratio REAL NOT NULL, PRIMARY KEY(run_id, story_id)
+);
 `;
 
 interface RawRow {
@@ -188,6 +202,28 @@ function toCaptureReview(r: RawCaptureReview): CaptureReviewRow {
   };
 }
 
+type RawCaptureReviewRule = {
+  repo: string;
+  story_id: string;
+  state: CaptureReviewRuleRow["state"];
+  tolerance_ratio: number;
+  note: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string;
+};
+
+function toCaptureReviewRule(r: RawCaptureReviewRule): CaptureReviewRuleRow {
+  return {
+    repo: r.repo,
+    storyId: r.story_id,
+    state: r.state,
+    toleranceRatio: r.tolerance_ratio,
+    note: r.note,
+    reviewedBy: r.reviewed_by,
+    reviewedAt: r.reviewed_at,
+  };
+}
+
 function toArtifact(r: RawArtifact): TestArtifactRow {
   return {
     id: r.id,
@@ -225,6 +261,8 @@ export class SqliteStore implements Store {
       "ALTER TABLE test_runs ADD COLUMN review_state TEXT NOT NULL DEFAULT 'pending'",
       "ALTER TABLE test_runs ADD COLUMN account TEXT NOT NULL DEFAULT ''",
       "ALTER TABLE test_runs ADD COLUMN image_count INTEGER",
+      "ALTER TABLE capture_review_rules ADD COLUMN tolerance_ratio REAL NOT NULL DEFAULT 0",
+      "ALTER TABLE capture_review_rules ADD COLUMN note TEXT",
     ]) {
       try {
         this.db.exec(ddl);
@@ -713,8 +751,76 @@ export class SqliteStore implements Store {
     return raw ? toCaptureReview(raw) : null;
   }
 
+  async setCaptureReviewRule(input: SetCaptureReviewRuleInput): Promise<CaptureReviewRuleRow> {
+    this.db
+      .prepare(
+        `INSERT INTO capture_review_rules
+           (repo, story_id, state, tolerance_ratio, note, reviewed_by)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(repo, story_id) DO UPDATE SET
+           state = excluded.state, tolerance_ratio = excluded.tolerance_ratio,
+           note = excluded.note, reviewed_by = excluded.reviewed_by,
+           reviewed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+      )
+      .run(
+        input.repo,
+        input.storyId,
+        input.state,
+        input.toleranceRatio,
+        input.note,
+        input.reviewedBy,
+      );
+    const raw = this.db
+      .prepare("SELECT * FROM capture_review_rules WHERE repo = ? AND story_id = ?")
+      .get(input.repo, input.storyId) as unknown as RawCaptureReviewRule;
+    return toCaptureReviewRule(raw);
+  }
+
+  async clearCaptureReviewRule(repo: string, storyId: string): Promise<void> {
+    this.db
+      .prepare("DELETE FROM capture_review_rules WHERE repo = ? AND story_id = ?")
+      .run(repo, storyId);
+  }
+
+  async listCaptureReviewRules(repo: string): Promise<CaptureReviewRuleRow[]> {
+    const rows = this.db
+      .prepare("SELECT * FROM capture_review_rules WHERE repo = ? ORDER BY story_id")
+      .all(repo) as unknown as RawCaptureReviewRule[];
+    return rows.map(toCaptureReviewRule);
+  }
+
+  async listCaptureComparisons(runId: number): Promise<CaptureComparisonRow[]> {
+    return this.db
+      .prepare(
+        `SELECT run_id AS runId, story_id AS storyId, changed_pixels AS changedPixels,
+                total_pixels AS totalPixels, change_ratio AS changeRatio
+         FROM capture_comparisons WHERE run_id = ? ORDER BY story_id`,
+      )
+      .all(runId) as unknown as CaptureComparisonRow[];
+  }
+
+  async setCaptureComparison(comparison: CaptureComparisonRow): Promise<void> {
+    this.db
+      .prepare(
+        `INSERT INTO capture_comparisons
+           (run_id, story_id, changed_pixels, total_pixels, change_ratio)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(run_id, story_id) DO UPDATE SET
+           changed_pixels = excluded.changed_pixels, total_pixels = excluded.total_pixels,
+           change_ratio = excluded.change_ratio`,
+      )
+      .run(
+        comparison.runId,
+        comparison.storyId,
+        comparison.changedPixels,
+        comparison.totalPixels,
+        comparison.changeRatio,
+      );
+  }
+
   async deleteTestRun(id: number): Promise<void> {
     this.db.prepare("DELETE FROM capture_reviews WHERE run_id = ?").run(id);
+    this.db.prepare("DELETE FROM capture_comparisons WHERE run_id = ?").run(id);
     this.db.prepare("DELETE FROM test_artifacts WHERE run_id = ?").run(id);
     this.db.prepare("DELETE FROM test_runs WHERE id = ?").run(id);
   }

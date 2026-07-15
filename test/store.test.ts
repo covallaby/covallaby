@@ -462,4 +462,63 @@ describe.each(stores)("store contract (%s)", (_name, store) => {
     await store.deleteTestRun!(first.id);
     expect(await store.listCaptureReviews!(first.id)).toHaveLength(0);
   });
+
+  it("persists measured visual tolerances and flaky debt by repo and story", async () => {
+    const run = await store.createTestRun!({
+      repo: "acme/visual-rules",
+      branch: "feat/noisy-clock",
+      commit: "rules1",
+      pr: 42,
+      framework: "storybook",
+      testsPassed: 0,
+      testsFailed: 0,
+      testsSkipped: 0,
+      durationMs: 0,
+    });
+    await store.setCaptureComparison!({
+      runId: run.id,
+      storyId: "clock--live",
+      changedPixels: 120,
+      totalPixels: 10_000,
+      changeRatio: 0.012,
+    });
+    expect(await store.listCaptureComparisons!(run.id)).toEqual([
+      {
+        runId: run.id,
+        storyId: "clock--live",
+        changedPixels: 120,
+        totalPixels: 10_000,
+        changeRatio: 0.012,
+      },
+    ]);
+
+    const allowed = await store.setCaptureReviewRule!({
+      repo: run.repo,
+      storyId: "clock--live",
+      state: "allowed",
+      toleranceRatio: 0.015,
+      note: "Clock hand moves between captures",
+      reviewedBy: "alice",
+    });
+    expect(allowed).toMatchObject({
+      state: "allowed",
+      toleranceRatio: 0.015,
+      note: "Clock hand moves between captures",
+      reviewedBy: "alice",
+    });
+
+    const flaky = await store.setCaptureReviewRule!({
+      repo: run.repo,
+      storyId: "clock--live",
+      state: "flaky",
+      toleranceRatio: 0.02,
+      note: "Fix nondeterministic time",
+      reviewedBy: "bob",
+    });
+    expect(flaky).toMatchObject({ state: "flaky", toleranceRatio: 0.02, reviewedBy: "bob" });
+    expect(await store.listCaptureReviewRules!(run.repo)).toHaveLength(1);
+
+    await store.clearCaptureReviewRule!(run.repo, "clock--live");
+    expect(await store.listCaptureReviewRules!(run.repo)).toEqual([]);
+  });
 });
