@@ -423,9 +423,12 @@ export function deriveRunReviewState(
   captures: PreviewCapture[],
 ): Extract<ReviewState, "pending" | "approved" | "rejected"> {
   const reviewable = captures.filter((capture) => reviewableCapture(capture.status));
+  // A PR with no changed/new/removed stories has nothing for a human to
+  // approve. Treat the empty queue as complete instead of leaving its commit
+  // status pending forever with no available review action.
+  if (reviewable.length === 0) return "approved";
   if (reviewable.some((capture) => capture.review?.state === "rejected")) return "rejected";
   if (
-    reviewable.length > 0 &&
     reviewable.every((capture) =>
       ["approved", "allowed", "flaky", "auto-accepted"].includes(
         capture.review?.state ?? "pending",

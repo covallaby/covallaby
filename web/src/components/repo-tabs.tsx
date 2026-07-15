@@ -7,21 +7,29 @@ export interface RepoTab {
   to: string;
   /** Extra leading segments that highlight this tab (leaf/detail routes). */
   match?: string[];
+  /** Whether this destination is filtered by the repo header's branch picker. */
+  scope?: "branch" | "repo";
 }
 
 export const REPO_TABS: RepoTab[] = [
   { label: "Overview", to: "" },
+  {
+    label: "Components",
+    to: "components",
+    match: ["storybook-previews"],
+    scope: "repo",
+  },
   { label: "Commits", to: "commits" },
   {
     label: "Activity",
     to: "activity",
     // Evidence details (uploads, journey runs, capture previews) highlight
     // Activity; the legacy list segments keep it lit while they redirect here.
-    match: ["u", "test-runs", "storybook-previews", "uploads", "playbacks"],
+    match: ["u", "test-runs", "uploads", "playbacks"],
   },
-  { label: "Pull requests", to: "pulls", match: ["pr", "compare"] },
+  { label: "Pull requests", to: "pulls", match: ["pr", "compare"], scope: "repo" },
   { label: "Insights", to: "insights" },
-  { label: "Policy", to: "policy" },
+  { label: "Policy", to: "policy", scope: "repo" },
 ];
 
 /** The first path segment after the repo base — "" on the repo root. */
@@ -44,10 +52,12 @@ export function RepoTabs({ repo }: { repo: string }) {
       >
         {REPO_TABS.map((tab) => {
           const active = segment === tab.to || (tab.match?.includes(segment) ?? false);
+          const params = new URLSearchParams(search);
+          if (tab.scope === "repo") params.delete("branch");
           return (
             <Link
               key={tab.label}
-              to={{ pathname: tab.to ? `${base}/${tab.to}` : base, search }}
+              to={{ pathname: tab.to ? `${base}/${tab.to}` : base, search: params.toString() }}
               aria-current={active ? "page" : undefined}
               className={`shrink-0 whitespace-nowrap border-b-2 px-2.5 pt-1 pb-2 text-[13px] transition-colors ${
                 active

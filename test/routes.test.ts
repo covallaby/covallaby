@@ -3,6 +3,7 @@ import { matchRoutes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { RedirectToActivity, buildRoutes, crumbTrail, orgFromPathname } from "../web/src/App.js";
 import { CompareBranches, PullRequest } from "../web/src/pages/Compare.js";
+import { Components } from "../web/src/pages/Components.js";
 import { Home } from "../web/src/pages/Home.js";
 import { PlaybackDetail } from "../web/src/pages/Playbacks.js";
 import { RepoLayout } from "../web/src/pages/Repo.js";
@@ -24,6 +25,7 @@ describe("repo leaf routes render inside RepoLayout", () => {
     ["/r/acme/app/pr/12", PullRequest],
     ["/r/acme/app/compare", CompareBranches],
     ["/r/acme/app/activity", Activity],
+    ["/r/acme/app/components", Components],
     ["/r/acme/app/u/34", Upload],
     ["/r/acme/app/test-runs/56", PlaybackDetail],
     ["/r/acme/app/storybook-previews/78", StorybookPreviewDetail],
@@ -39,11 +41,7 @@ describe("repo leaf routes render inside RepoLayout", () => {
 });
 
 describe("legacy evidence-list routes redirect into the Activity tab", () => {
-  const legacy = [
-    "/r/acme/app/uploads",
-    "/r/acme/app/playbacks",
-    "/r/acme/app/storybook-previews",
-  ] as const;
+  const legacy = ["/r/acme/app/uploads", "/r/acme/app/playbacks"] as const;
 
   for (const path of legacy) {
     it(`${path} deep link stays alive as a redirect`, () => {
@@ -55,6 +53,10 @@ describe("legacy evidence-list routes redirect into the Activity tab", () => {
 
   it("keeps the capture detail route out of the redirect", () => {
     expect(matchedTypes("/r/acme/app/storybook-previews/78").at(-1)).toBe(StorybookPreviewDetail);
+  });
+
+  it("gives the legacy component index a first-class destination", () => {
+    expect(matchedTypes("/r/acme/app/storybook-previews").at(-1)).toBe(Components);
   });
 });
 

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import {
   Link,
   Outlet,
+  useLocation,
   useNavigate,
   useOutletContext,
   useParams,
@@ -47,6 +48,24 @@ export function when(iso: string): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+export interface RepoPageScope {
+  branchScoped: boolean;
+  label: string | null;
+}
+
+/** Keep the header honest about whether its branch selection controls the page. */
+export function repoPageScope(pathname: string, repo: string): RepoPageScope {
+  const segment = pathname.slice(`/r/${repo}`.length + 1).split("/")[0] ?? "";
+  const branchScoped = segment === "" || ["commits", "activity", "insights"].includes(segment);
+  if (branchScoped) return { branchScoped: true, label: null };
+  if (segment === "pr") return { branchScoped: false, label: "Pull request" };
+  if (segment === "compare") return { branchScoped: false, label: "Comparison" };
+  if (["u", "test-runs", "storybook-previews"].includes(segment)) {
+    return { branchScoped: false, label: "Recorded evidence" };
+  }
+  return { branchScoped: false, label: "Repository-wide" };
 }
 
 export const RANGES = [
@@ -149,7 +168,16 @@ export function NeedsLove({ latestId }: { latestId: number }) {
   );
 }
 
-export function RepoHeader({ repo, data }: { repo: string; data: RepoHistory }) {
+export function RepoHeader({
+  repo,
+  data,
+  scopeLabel = null,
+}: {
+  repo: string;
+  data: RepoHistory;
+  /** Null means the page is genuinely controlled by the branch picker. */
+  scopeLabel?: string | null;
+}) {
   const [, setParams] = useSearchParams();
   const navigate = useNavigate();
   const latest = data.history[0];
@@ -170,21 +198,29 @@ export function RepoHeader({ repo, data }: { repo: string; data: RepoHistory }) 
         </p>
       </div>
       <div className="flex min-w-0 items-center gap-2">
-        <ScopePicker
-          label="Branch or pull request"
-          current={data.branch}
-          branches={data.branches}
-          onSelectBranch={setBranch}
-          loadPullRequests={() => api.prs(repo).then((d) => d.prs)}
-          onSelectPullRequest={(pr) => navigate(`/r/${repo}/pr/${pr}`)}
-          className="flex-1 sm:w-64 sm:flex-none"
-        />
-        <Link
-          to={`/r/${repo}/compare?head=${encodeURIComponent(data.branch)}&base=main`}
-          className="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-xs font-medium text-(--ink-2) transition-colors hover:border-(--muted) hover:text-(--ink)"
-        >
-          Compare
-        </Link>
+        {scopeLabel ? (
+          <span className="rounded-lg border border-(--border) bg-(--surface-2) px-3 py-2 text-xs font-medium text-(--muted)">
+            {scopeLabel}
+          </span>
+        ) : (
+          <>
+            <ScopePicker
+              label="Branch or pull request"
+              current={data.branch}
+              branches={data.branches}
+              onSelectBranch={setBranch}
+              loadPullRequests={() => api.prs(repo).then((d) => d.prs)}
+              onSelectPullRequest={(pr) => navigate(`/r/${repo}/pr/${pr}`)}
+              className="flex-1 sm:w-64 sm:flex-none"
+            />
+            <Link
+              to={`/r/${repo}/compare?head=${encodeURIComponent(data.branch)}&base=main`}
+              className="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-xs font-medium text-(--ink-2) transition-colors hover:border-(--muted) hover:text-(--ink)"
+            >
+              Compare
+            </Link>
+          </>
+        )}
       </div>
     </div>
   );
@@ -194,8 +230,10 @@ export function RepoHeader({ repo, data }: { repo: string; data: RepoHistory }) 
 export function RepoLayout() {
   const { owner, name } = useParams();
   const repo = `${owner}/${name}`;
+  const { pathname } = useLocation();
   const [params] = useSearchParams();
-  const branch = params.get("branch") ?? undefined;
+  const scope = repoPageScope(pathname, repo);
+  const branch = scope.branchScoped ? (params.get("branch") ?? undefined) : undefined;
   const [data, setData] = useState<RepoHistory | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -213,7 +251,7 @@ export function RepoLayout() {
 
   return (
     <div className="space-y-4">
-      <RepoHeader repo={repo} data={data} />
+      <RepoHeader repo={repo} data={data} scopeLabel={scope.label} />
       <RepoTabs repo={repo} />
       <Outlet context={{ repo, data } satisfies RepoContext} />
     </div>
