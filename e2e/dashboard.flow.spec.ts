@@ -62,10 +62,19 @@ test("maintainer finds repository risk and reviews its coverage", async ({ page 
   await expect(page.getByText("Current components on main", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: /Browse current library/ })).toHaveAttribute(
     "href",
-    "#/r/covallaby/covallaby/storybook-previews/17?filter=all",
+    "#/r/covallaby/covallaby/storybook-previews/17?mode=gallery",
   );
   await expect(page.getByRole("link", { name: /PR #128.*View diff/ })).toBeVisible();
   await chapter(page, testInfo, "03-main-components-and-diffs");
+
+  // Main opens as the images that shipped on that commit, never as a diff.
+  await page.getByRole("link", { name: /Browse current library/ }).click();
+  await expect(page).toHaveURL(/storybook-previews\/17\?mode=gallery$/);
+  await expect(page.getByRole("heading", { name: "Components on main" })).toBeVisible();
+  await expect(page.getByAltText("Dashboard/Review queue — With component captures")).toBeVisible();
+  await expect(page.getByText("Baseline · main")).toHaveCount(0);
+  await expect(page.getByText("Pixel diff")).toHaveCount(0);
+  await page.getByRole("link", { name: "← Components" }).click();
 
   await repoTabs.getByRole("link", { name: "Commits", exact: true }).click();
   await expect(page.getByText(/joined by commit SHA/)).toBeVisible();

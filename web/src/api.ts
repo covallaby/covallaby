@@ -479,9 +479,12 @@ export const api: typeof liveApi = IS_DEMO
             run: {
               id: Number(id),
               repo: "covallaby/covallaby",
-              branch: "feature/checkout-polish",
-              commit: "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
-              pr: 128,
+              branch: Number(id) === 17 ? "main" : "feature/checkout-polish",
+              commit:
+                Number(id) === 17
+                  ? "72d41f0dd8e6abfe280d9e340c277421f3607184"
+                  : "8f31cb8d59ea5bb8e8dcf7cd981bfc5fbdfa456a",
+              pr: Number(id) === 17 ? null : 128,
               framework: "storybook",
               status: "complete" as const,
               testsPassed: 0,
@@ -491,23 +494,27 @@ export const api: typeof liveApi = IS_DEMO
               createdAt: "2026-07-11T18:42:00.000Z",
               completedAt: "2026-07-11T18:43:02.000Z",
               imageCount: 2,
+              reviewState: Number(id) === 17 ? ("auto-accepted" as const) : ("pending" as const),
             },
             previewUrl: "https://example.invalid/storybook",
-            baselineRun: {
-              id: 17,
-              repo: "covallaby/covallaby",
-              branch: "main",
-              commit: "72d41f0dd8",
-              pr: null,
-              framework: "storybook",
-              status: "complete" as const,
-              testsPassed: 0,
-              testsFailed: 0,
-              testsSkipped: 0,
-              durationMs: 0,
-              createdAt: "2026-07-10T16:14:00.000Z",
-              completedAt: "2026-07-10T16:15:12.000Z",
-            },
+            baselineRun:
+              Number(id) === 17
+                ? null
+                : {
+                    id: 17,
+                    repo: "covallaby/covallaby",
+                    branch: "main",
+                    commit: "72d41f0dd8",
+                    pr: null,
+                    framework: "storybook",
+                    status: "complete" as const,
+                    testsPassed: 0,
+                    testsFailed: 0,
+                    testsSkipped: 0,
+                    durationMs: 0,
+                    createdAt: "2026-07-10T16:14:00.000Z",
+                    completedAt: "2026-07-10T16:15:12.000Z",
+                  },
             // Two-run demo history: 18 (PR head) follows 17 (main baseline).
             neighbors:
               Number(id) > 17

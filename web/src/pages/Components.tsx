@@ -55,7 +55,7 @@ export function Components() {
         />
         {sections.current ? (
           <Link
-            to={`/r/${repo}/storybook-previews/${sections.current.id}?filter=all`}
+            to={`/r/${repo}/storybook-previews/${sections.current.id}?mode=gallery`}
             className="group flex flex-col gap-4 border-t border-(--hairline) p-5 transition-colors hover:bg-(--surface-2) sm:flex-row sm:items-center sm:justify-between"
           >
             <div className="flex min-w-0 items-start gap-3">
